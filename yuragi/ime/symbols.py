@@ -14,7 +14,7 @@ _HALF_EXTRA = {"「": "[", "」": "]", "’": "'", "”": '"', "￥": "¥"}
 # §5 item 2, in the design's direction: typed symbol → near symbols. 」 mirrors 「.
 NEAR = {
     "、": "，",
-    "。": "．",
+    "。": "．…‥",  # 。 then convert: the usual way to the ellipsis
     "”": "“",
     "’": "‘",
     "￥": "＼",
