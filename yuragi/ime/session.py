@@ -16,7 +16,7 @@ import unicodedata
 
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
 from yuragi.chord.keys import (
-    SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, classify, literal_character,
+    ANSI_SHIFTED, SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, classify, literal_character,
 )
 from yuragi.lattice.alternation import SIDES, Plan, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
@@ -84,6 +84,21 @@ def alnum_spelling(keys: str, current: str | None, *, full: bool) -> str:
     if current in forms:
         return forms[(forms.index(current) + 1) % len(forms)]
     return forms[0]
+
+
+def alnum_character(vk: int, key: str, shift: bool) -> str:
+    """A character key's engraving in half width (英数の続き): the key id is
+    the lower engraving; Shift gives the upper one (A-Z, ANSI_SHIFTED)."""
+    if not shift:
+        return key
+    if ord("A") <= vk <= ord("Z"):
+        return chr(vk)
+    return ANSI_SHIFTED[vk]
+
+
+def half_width_ascii(text: str) -> bool:
+    """Half-width ASCII without the space: what Shift+letter and 英数の続き type."""
+    return bool(text) and all("!" <= c <= "~" for c in text)
 
 
 def to_full_width(text: str) -> str:
@@ -288,6 +303,14 @@ class ImeSession:
                 and self._predict_key()):
             self._literal_down.add(vk)
             return None
+        if down and kind in ("M", "O") and self._alnum_continues():
+            # 英数の続き: no chord FSM; keys type their engravings, Space converts
+            # (a repeat acts again, as any key outside the FSM).
+            pending = self._finish_pending()
+            if kind == "O":
+                return self._then(pending, lambda: self._ingest([ThumbTap()]))
+            return self._then(pending, lambda: self._ingest(
+                [Literal(alnum_character(vk, key, shift))]))
         literal = literal_character(vk, shift)
         if literal is not None:
             if not down:
@@ -316,6 +339,18 @@ class ImeSession:
                    else self.fsm.on_up(kind, key, now_ms))
             return insert + (self._ingest(raw) or "") or None
         return self._then(due, chord_key)
+
+    def _alnum_continues(self) -> bool:
+        """英数の続き: the input ends in a half-width ASCII literal.
+
+        Only Shift+letter and the continuation itself type one (every other
+        key types kana or a full-width literal), so the tail is the state.
+        A conversion in progress (or awaited) is not part of it: a key there
+        commits the conversion and starts a new input.
+        """
+        return (not self.converted and self._await is None and bool(self.tokens)
+                and isinstance(self.tokens[-1], Literal)
+                and half_width_ascii(self.tokens[-1].text))
 
     def _then(self, text: str | None, rest: Callable[[], str | None]) -> str | None:
         """Run the rest of a key event now, or after the awaited conversion resolves."""
@@ -859,7 +894,13 @@ class ImeSession:
         for part in parts:
             if isinstance(part, str):
                 last = self.segments[-1] if self.segments else None
-                if is_digit(part) and last is not None and last.selected.kind == "number":
+                if (half_width_ascii(part) and last is not None and last.literal
+                        and half_width_ascii(last.selected.reading)):
+                    # 英数の続き: the half-width run is one clause, as digits are.
+                    text = last.selected.reading + part
+                    last.end += 1
+                    last.selected = Candidate(text, text, 0, BOS_ID, BOS_ID, "literal")
+                elif is_digit(part) and last is not None and last.selected.kind == "number":
                     digits = last.selected.reading + part
                     last.end += 1
                     last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
