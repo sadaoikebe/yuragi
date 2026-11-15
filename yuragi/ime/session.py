@@ -18,7 +18,7 @@ from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
 from yuragi.chord.keys import (
     ANSI_SHIFTED, SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, classify, literal_character,
 )
-from yuragi.lattice.alternation import SIDES, Plan, restrict
+from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
@@ -45,6 +45,7 @@ VK_F9 = 0x78
 VK_F10 = 0x79
 SCRIPT_VKS = (VK_F6, VK_F7, VK_F8, VK_F9, VK_F10)  # the one-shot spellings
 VK_TAB = 0x09
+CTRL_VKS = {0x11, 0xA2, 0xA3}  # Ctrl, left and right
 PREDICTION = "predict"  # Segment.context of the predictions' segment
 
 
@@ -186,6 +187,10 @@ class ImeSession:
     predict_index: ReadingIndex = field(default_factory=ReadingIndex)  # shared
     predicting: bool = False  # the focused candidates are predictions
     _word_starts: set[int] = field(default_factory=set)  # 1-best word boundaries
+    # 部分確定: the thumb direction a committed head gave
+    # the presses whose chords remain. Keyed by the remaining tokens' press
+    # number (presses are never renumbered or reused), cleared on reset.
+    _carry: dict[int, frozenset[str]] = field(default_factory=dict)
 
     def load(self) -> None:
         if not self._table:
@@ -207,6 +212,7 @@ class ImeSession:
         self._modifiers.clear()
         self._literal_down.clear()
         self._press_alias.clear()
+        self._carry.clear()
         self._left_surface = ""
         self._lm_context = ""
         self.composition = ""
@@ -252,6 +258,22 @@ class ImeSession:
         shift = "shift" in mods if mods is not None else bool(self._modifiers & SHIFT_VKS)
         shortcut = (bool(set(mods) & {"ctrl", "alt", "win"}) if mods is not None
                     else bool(self._modifiers & SHORTCUT_VKS))
+        ctrl_only = (set(mods) == {"ctrl"} if mods is not None
+                     else bool(self._modifiers & CTRL_VKS)
+                     and not self._modifiers & (SHORTCUT_VKS - CTRL_VKS) and not shift)
+        if (down and vk == VK_DOWN and ctrl_only
+                and (self.tokens or self.fsm.timer_deadline is not None
+                     or self._await is not None)):
+            # 部分確定: Ctrl+↓ commits the first clause.
+            pending = self._finish_pending()
+
+            def commit_prefix() -> str | None:
+                if not self.tokens or self.predicting:
+                    if not self.tokens:
+                        self._lm_context = ""  # as the shortcut below
+                    return None
+                return self._commit_prefix()
+            return self._then(pending, commit_prefix)
         if shortcut:
             if down and not self.tokens:
                 self._lm_context = ""  # Ctrl/Alt/Win may move the caret or edit text.
@@ -839,7 +861,18 @@ class ImeSession:
         return insert or None
 
     def _lattice(self) -> list[dict]:
-        return [d for t in self.tokens if (d := to_lattice_token(t, self._table)) is not None]
+        out = []
+        for t in self.tokens:
+            d = to_lattice_token(t, self._table)
+            if d is None:
+                continue
+            carried = self._carry.get(d.get("press")) if self._carry else None
+            if carried is not None:
+                # The committed head chose this press's direction (部分確定).
+                d = {**d, "faces": {face: kana for face, kana in d["faces"].items()
+                                    if face_of(face, d["turn"]) in carried}}
+            out.append(d)
+        return out
 
     def _parts(self) -> list[str | list[dict]]:
         """Literal texts and kana runs; a literal ends the press (ChordFsm.reset,
@@ -946,15 +979,63 @@ class ImeSession:
             self.reset()
             self._lm_context = context  # an Enter commit keeps the document context
         else:
-            self.tokens.clear()
-            self.segments.clear()
-            self.focus = -1
-            self.composition = ""
-            self.converted = False
-            self.predicting = False
-            self._clear_cands()
+            self._clear_input()
         self._left_surface = left_surface
         self._note_commit(text)
+        return text
+
+    def _clear_input(self) -> None:
+        """The input is gone (committed); the connection's state stays."""
+        self.tokens.clear()
+        self.segments.clear()
+        self.focus = -1
+        self.composition = ""
+        self.converted = False
+        self.predicting = False
+        self._clear_cands()
+
+    def _commit_prefix(self) -> str:
+        """部分確定 (Ctrl+↓): commit the first interval only.
+
+        The first clause, or the first literal (a run of digits or of 英数の続き
+        is one). The rest keeps its intervals, selections and fixed state; when
+        converted, its candidates reopen.
+        """
+        if not self.segments:
+            return ""
+        head = self.segments[0]
+        end = head.end
+        text = head.selected.surface
+        if self._learning is not None and self._lex is not None:
+            self._learning.confirm([(head.selected, self._left_surface)], self._lex)
+        self._left_surface = text
+        if len(self.segments) == 1:
+            # Nothing remains: as an ordinary commit by the next character.
+            self._clear_input()
+            self._note_commit(text)
+            return text
+        # The directions the committed reading gives each press (the thumbs
+        # of one press alternate); the remaining chords of a press keep it.
+        chosen = Plan(self._lattice()).directions(head.start, head.end, head.selected.reading)
+        # Lattice offsets skip tokens with no kana; cut the raw list there (as
+        # _predict_key does).
+        kept = [i for i, t in enumerate(self.tokens)
+                if to_lattice_token(t, self._table) is not None]
+        del self.tokens[:kept[end]]
+        remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
+        for press, dirs in chosen.items():
+            if press in remaining and dirs and dirs != SIDES:
+                self._carry[press] = dirs
+        self.segments = self.segments[1:]
+        for segment in self.segments:
+            segment.start -= end
+            segment.end -= end
+        self._word_starts = {b - end for b in self._word_starts if b >= end}
+        self._note_commit(text)
+        self.composition = "".join(s.selected.surface for s in self.segments)
+        self.focus = _first_stop(self.segments)
+        if self.converted:
+            self._open_cands()
         return text
 
     def _note_commit(self, text: str) -> None:

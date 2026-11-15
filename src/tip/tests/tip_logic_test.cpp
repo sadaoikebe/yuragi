@@ -104,6 +104,17 @@ static void EatingKeys() {
     assert(WantKey(VK_LEFT_, none, converted) && WantKey(VK_DOWN_, none, converted));
     assert(!WantKey(VK_DOWN_, shift, converted) && WantKey(VK_RIGHT_, shift, converted));
     assert(!WantKey(VK_F8_, shift, converted) && WantKey(VK_F8_, none, converted));
+    // 部分確定: Ctrl+↓ is ours while composing (awaiting included), Ctrl alone.
+    Mods ctrl_alt = ctrl, ctrl_shift = ctrl, ctrl_win = ctrl;
+    ctrl_alt.alt = true;
+    ctrl_shift.shift = true;
+    ctrl_win.win = true;
+    Local typing;
+    typing.composing = true;
+    assert(WantKey(VK_DOWN_, ctrl, converted) && WantKey(VK_DOWN_, ctrl, typing));
+    assert(WantKey(VK_DOWN_, ctrl, awaiting) && !WantKey(VK_DOWN_, ctrl, idle));
+    assert(!WantKey(VK_DOWN_, ctrl_alt, converted) && !WantKey(VK_DOWN_, ctrl_shift, converted));
+    assert(!WantKey(VK_DOWN_, ctrl_win, converted) && !WantKey(VK_UP_, ctrl, converted));
 
     Message reply = Parse(R"({"seq":1,"composition":"x","n_tokens":1})");
     assert(EatAfterReply(true, 'J', none, idle, false, 0, reply));
@@ -116,6 +127,14 @@ static void EatingKeys() {
     Local composing;
     composing.composing = true;
     assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, tab));
+    // Ctrl+↓ as Enter: eaten after input, whether the rest stays or not.
+    Message rest = Parse(R"({"seq":1,"composition":"y","commit":"x","n_tokens":1,"converted":true})");
+    Message whole = Parse(R"({"seq":1,"commit":"x"})");
+    assert(EatAfterReply(true, VK_DOWN_, ctrl, converted, false, 2, rest));
+    assert(EatAfterReply(true, VK_DOWN_, ctrl, composing, false, 1, whole));
+    assert(!EatAfterReply(true, VK_DOWN_, ctrl, idle, false, 0, empty));
+    assert(!EatAfterReply(true, VK_DOWN_, ctrl_alt, converted, false, 2, rest));
+    assert(EatAfterReply(false, VK_DOWN_, ctrl, converted, false, 2, rest));  // its up
 }
 
 static void OrderOfReplies() {

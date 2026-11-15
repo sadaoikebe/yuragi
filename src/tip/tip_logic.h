@@ -186,6 +186,7 @@ enum class Notice { None, Preparing, Stopped, TooLong, Reopen };
 struct Mods {
     bool shift = false, ctrl = false, alt = false, win = false;
     bool Shortcut() const { return ctrl || alt || win; }
+    bool CtrlOnly() const { return ctrl && !shift && !alt && !win; }
 };
 
 // What the TIP knows locally, from the last applied reply and the requests
@@ -210,8 +211,10 @@ inline bool CharacterVk(uint32_t vk) {
 // character arrives the input is composing, so a following Enter or
 // Backspace must not slip past it to the application.
 inline bool WantKey(uint32_t vk, Mods mods, const Local& local) {
-    if (mods.Shortcut()) return false;
     bool composing = local.composing || local.awaiting;
+    // 部分確定 (Ctrl+↓) is the one Ctrl key of ours, and only with input.
+    if (vk == VK_DOWN_ && mods.CtrlOnly()) return composing;
+    if (mods.Shortcut()) return false;
     bool converted = local.converted;
     if (CharacterVk(vk) || vk == VK_SPACE_) return true;
     if (vk == VK_RETURN_ || vk == VK_BACK_ || vk == VK_ESCAPE_) return composing;
@@ -237,6 +240,7 @@ inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before
     if (!down) return true;  // only consumed downs send their up
     if (CharacterVk(vk) || vk == VK_SPACE_) return state_mask;
     if (vk == VK_BACK_ || vk == VK_RETURN_ || vk == VK_ESCAPE_) return before.composing && state_mask;
+    if (vk == VK_DOWN_ && mods.CtrlOnly()) return before.composing && state_mask;  // as Enter
     if (vk == VK_F7_) return true;
     if (vk == VK_F6_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_)
         return before.composing || before.converted;
