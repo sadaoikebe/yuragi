@@ -128,7 +128,9 @@ class PowerShellTest(unittest.TestCase):
         self.assertEqual(engine["args"][:3], ["-c", boot_string(), "yuragi.engine"])
         self.assertEqual(engine["args"][3:], ["--dict-dir", "D", "--cache-dir", "C",
                                               "--lm-model", "M", "--data-dir", "X"])
-        self.assertEqual(engine["admin_args"], ["-c", boot_string(), "yuragi.ime.admin_ui"])
+        # The 状態 tab checks the same dictionary the engine reads.
+        self.assertEqual(engine["admin_args"], ["-c", boot_string(), "yuragi.ime.admin_ui",
+                                                "--dict-dir", "D"])
 
 
 class BootstrapTest(unittest.TestCase):

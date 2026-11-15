@@ -132,7 +132,7 @@ function Write-EngineJson([string]$path, [string]$app, [string[]]$extra) {
         app = $app
         args = @("-c", $Boot, "yuragi.engine", "--dict-dir", $script:Dict,
                  "--cache-dir", $script:Cache, "--lm-model", $script:Model) + $extra
-        admin_args = @("-c", $Boot, "yuragi.ime.admin_ui")
+        admin_args = @("-c", $Boot, "yuragi.ime.admin_ui", "--dict-dir", $script:Dict)
     }
     [IO.File]::WriteAllText($path, ($engine | ConvertTo-Json -Depth 4), $Utf8NoBom)
 }

@@ -1,6 +1,9 @@
 """The management window: word registration, learning, settings, status (S4).
 
-  python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE]
+  python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE] [--dict-dir DIR]
+
+--dict-dir is the dictionary the engine was given (the installer's shared copy);
+the 状態 tab checks the files there against the manifest.
 
 A thin shell over the same code as the manage CLI (personal, learning_admin,
 config), on the same files the engine uses. AdminModel holds everything the
@@ -662,7 +665,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runtime-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--dict-dir", type=Path, default=None)
     args = parser.parse_args(argv)
+    if args.dict_dir is not None:
+        from yuragi.lattice import mozc_dict
+        mozc_dict.DICT_DIR = args.dict_dir
     try:
         import tkinter as tk
     except ImportError:

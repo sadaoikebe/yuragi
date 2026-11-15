@@ -153,6 +153,27 @@ class EntryPointTest(unittest.TestCase):
             builtins.__import__ = real
         self.assertIn("manage", err.getvalue())
 
+    def test_dict_dir_is_where_the_status_tab_checks(self):
+        # Installed, the dictionary is the shared copy, not the repository's
+        # third_party folder; every file was reported missing.
+        from yuragi.lattice import mozc_dict
+        import builtins
+        real = builtins.__import__
+
+        def no_tk(name, *args, **kwargs):
+            if name == "tkinter":
+                raise ImportError(name)
+            return real(name, *args, **kwargs)
+
+        self.addCleanup(setattr, mozc_dict, "DICT_DIR", mozc_dict.DICT_DIR)
+        builtins.__import__ = no_tk
+        try:
+            with redirect_stderr(io.StringIO()):
+                admin_ui.main(["--dict-dir", "shared-dict"])
+        finally:
+            builtins.__import__ = real
+        self.assertEqual(mozc_dict.DICT_DIR, Path("shared-dict"))
+
 
 if __name__ == "__main__":
     unittest.main()
