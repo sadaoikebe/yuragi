@@ -1,4 +1,4 @@
-﻿# yuragi: the only part that runs as administrator (REDESIGN §8.1).
+﻿# yuragi: the only part that runs as administrator (DESIGN「共通の仕組み」).
 # setup.ps1 / uninstall.ps1 run this script by its path through -EncodedCommand
 # (the arguments survive any path) and read the result file. Three things only:
 #   install:   put the DLL, the broker and this script in Program Files\yuragi-ime\<tag>\,
@@ -60,7 +60,7 @@ try {
         Place $ScriptSource (Join-Path $dir "elevated.ps1")
         $proc = Start-Process "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList @("/s", "`"$dll`"") -Wait -PassThru
         if ($proc.ExitCode -ne 0) { Write-Result $false "regsvr32 が失敗しました (終了コード $($proc.ExitCode))" }
-        # I-6: registered is what the registry says, read back.
+        # DESIGN「守ること」6: registered is what the registry says, read back.
         if ((Registered) -ne $dll) { Write-Result $false "登録後のレジストリに $dll がありません" }
         foreach ($old in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object { $_.Name -ne $Tag })) {
             Remove-Unused $old.FullName

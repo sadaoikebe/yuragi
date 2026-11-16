@@ -12,7 +12,7 @@ namespace broker {
 
 namespace fs = std::filesystem;
 
-constexpr uintmax_t LOG_MAX_BYTES = 1024 * 1024;  // REDESIGN §11: 1MB x 2 generations
+constexpr uintmax_t LOG_MAX_BYTES = 1024 * 1024;  // DESIGN「定数」: 1MB x 2 generations
 
 // What a platform event loop drives: the Broker, or the SelfTest.
 class Handler {
@@ -64,10 +64,10 @@ std::string Timestamp();  // local time, ISO 8601 with milliseconds
 
 // logs/notices.log: one JSON line per stop the user was told about, with its
 // time ({"time":..,"stopped":"hang"}). The management window's status tab reads
-// the last stop from here (§9.4).
+// the last stop from here (DESIGN「通知」).
 void RecordStop(const fs::path& logs, Stop reason);
 
-// engine.json (REDESIGN §4.2): written by the installer next to the version.
+// engine.json (DESIGN「置き場所」): written by the installer next to the version.
 //  {"format":1, "python":"<abs python.exe>", "pythonw":"<abs pythonw.exe>",
 //   "app":"<abs app dir: the engine's working directory>",
 //   "args":["-m","yuragi.engine", ...], "admin_args":["-m","yuragi.ime.admin_ui"]}
@@ -77,7 +77,7 @@ struct EngineConfig {
 };
 bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& error);
 
-// --selftest (REDESIGN §8.2 step 3): start the engine for real, convert once,
+// --selftest (DESIGN「インストールと更新」, step 3): start the engine for real, convert once,
 // end it. Exit codes below.
 enum SelfTestResult {
     SELFTEST_OK = 0,

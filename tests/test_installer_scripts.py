@@ -1,10 +1,12 @@
-"""REDESIGN §8: what can be checked of the installer scripts without Windows.
+"""DESIGN「インストール・更新・アンインストール」: what can be checked of the installer scripts without Windows.
 
 - The elevated part gets exactly the arguments setup/uninstall meant, however
   odd the paths (spaces, quotes, Japanese; its own path too): the
   -EncodedCommand round trip.
+- The workflow steps that run in Windows PowerShell 5.1 are ASCII (it reads
+  them as ANSI: one Japanese character can end a string and break the step).
 
-pwsh runs these (GitHub's Ubuntu runners have it; YURAGI_PWSH names another).
+pwsh runs the rest (GitHub's Ubuntu runners have it; YURAGI_PWSH names another).
 """
 from __future__ import annotations
 
@@ -77,6 +79,41 @@ class PowerShellTest(unittest.TestCase):
                     got = json.loads(result.read_text(encoding="utf-8-sig"))
                     self.assertEqual(got, {"Action": "install", **odd})
                     result.unlink()
+
+
+def powershell_steps(path: Path):
+    """(name, script lines) of each workflow step with shell: powershell."""
+    steps, step, block = [], None, None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        indent = len(line) - len(line.lstrip())
+        if block is not None:
+            if not line.strip() or indent > block:
+                step["run"].append(line)
+                continue
+            block = None
+        key = line.strip()
+        if key.startswith("- "):
+            step = {"name": key[2:], "shell": None, "run": []}
+            steps.append(step)
+            key = key[2:]
+        if step is None:
+            continue
+        if key.startswith("shell:"):
+            step["shell"] = key.split(":", 1)[1].strip()
+        elif key.startswith("run:"):
+            block = indent if key.endswith("|") else None
+            step["run"].append(key[4:])
+    return [(s["name"], s["run"]) for s in steps if s["shell"] == "powershell"]
+
+
+class WorkflowTest(unittest.TestCase):
+    def test_windows_powershell_steps_are_ascii(self):
+        checked = 0
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            for name, script in powershell_steps(path):
+                checked += 1
+                self.assertEqual([l for l in script if not l.isascii()], [], f"{path.name}: {name}")
+        self.assertGreater(checked, 0)
 
 
 if __name__ == "__main__":

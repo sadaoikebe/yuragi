@@ -19,8 +19,9 @@ CACHE_FORMAT = "mozc_lex_v4"
 def cache_name(manifest: Path = MANIFEST) -> str:
     """The cache file's name: the format and the hash of the manifest's file list.
 
-    A cache is only ever read for the dictionary it was built from (REDESIGN
-    §6.2): another dictionary has another name, so a stale cache cannot be used.
+    A cache is only ever read for the dictionary it was built from
+    (DESIGN「起動時の読み込み」): another dictionary has another name, so a
+    stale cache cannot be used.
     """
     files = json.loads(Path(manifest).read_text(encoding="utf-8"))["files"]
     digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode("ascii")).hexdigest()
@@ -32,7 +33,7 @@ USER_LEX = ROOT / "data" / "user_lexicon.jsonl"
 
 
 class DictionaryFormatError(ValueError):
-    """A dictionary line that is not reading/lid/rid/cost/surface (REDESIGN §6.2).
+    """A dictionary line that is not reading/lid/rid/cost/surface (DESIGN「起動時の読み込み」).
 
     The files are checked against the manifest's hashes, so this never happens
     with an intact dictionary; when it does, loading stops instead of skipping.
@@ -180,7 +181,7 @@ def read_cache(cache: Path) -> MozcLex | None:
     """The cached lexicon; None when there is none or it cannot be read.
 
     Whatever is wrong with the file (written halfway, empty, from another
-    format), the answer is the same: build it again from the text (§6.2).
+    format), the answer is the same: build it again from the text (DESIGN「起動時の読み込み」).
     """
     try:
         data = cache.read_bytes()

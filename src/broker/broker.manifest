@@ -7,7 +7,7 @@
     </requestedPrivileges></security>
   </trustInfo>
   <dependency><dependentAssembly>
-    <!-- TaskDialog (the stop dialog, REDESIGN §9.3) needs Common Controls 6. -->
+    <!-- TaskDialog (the stop dialog, DESIGN「通知」) needs Common Controls 6. -->
     <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
       processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
   </dependentAssembly></dependency>

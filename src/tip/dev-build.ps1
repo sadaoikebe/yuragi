@@ -1,4 +1,4 @@
-﻿# 開発用: TIP とブローカーのビルドと試験だけ (REDESIGN §8.4)。CI もこれを使う。
+﻿# 開発用: TIP とブローカーのビルドと試験だけ (DESIGN「開発時」)。リリースのワークフローもこれを使う。
 # 管理者権限は要らない。登録は dev-register.ps1 で別に行う。
 #
 #   powershell -ExecutionPolicy Bypass -File .\src\tip\dev-build.ps1 [-Tag dev]

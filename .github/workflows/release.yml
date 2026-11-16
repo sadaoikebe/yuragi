@@ -1,4 +1,4 @@
-# リリース作成 (docs/INSTALL.md、REDESIGN §8): タグ v* を push すると、Windows ランナーで
+# リリース作成 (DESIGN「インストール・更新・アンインストール」): タグ v* を push すると、Windows ランナーで
 # TIP とブローカーをタグ入りの Release でビルド・試験し、依存ピン留めを実地検証し、setup が
 # 取得するアセット (DLL・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
 # と、アンインストールの入口 uninstall.ps1 を公開する。検証が1つでも失敗すればリリースは出ない。
@@ -197,7 +197,7 @@ jobs:
           if (Test-Path (Join-Path $env:ProgramFiles "yuragi-ime")) { throw "Program Files\yuragi-ime remains (nothing had the DLL loaded)" }
           if ((Get-ItemProperty "HKCU:\Software\yuragi-ime" -ErrorAction SilentlyContinue).Tag) { throw "HKCU Tag remains" }
           if (Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue) { throw "a broker is still running" }
-          if (-not (Test-Path $learning)) { throw "uninstall removed the learning history (I-7)" }
+          if (-not (Test-Path $learning)) { throw "uninstall removed the learning history (user data must stay)" }
           Write-Host "uninstall OK (user data kept)"
 
           Invoke-Logged "uninstall again (nothing installed)" $uninstallArgs

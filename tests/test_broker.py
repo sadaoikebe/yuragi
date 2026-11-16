@@ -1,4 +1,4 @@
-"""REDESIGN §5.7: the built broker with a fake engine and a fake TIP, as processes.
+"""The built broker with a fake engine and a fake TIP, as processes.
 
 Windows only: YURAGI_BROKER names the built yuragi-broker.exe, and the TIP
 side is the named pipe. The broker's decisions are tested on every OS by
@@ -250,7 +250,7 @@ class ProcessTest(BrokerCase):
 
 class SelfTestTest(BrokerCase):
     def test_real_engine_converts(self):
-        """§10 stage 2: --selftest with the real engine (no LM), as the installer runs it."""
+        """--selftest with the real engine (no LM), as the installer runs it."""
         data = self.dir / "user"
         data.mkdir()
         (data / "config.json").write_text('{"lm_rescore": false}', encoding="utf-8")

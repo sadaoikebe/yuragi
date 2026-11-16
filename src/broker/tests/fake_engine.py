@@ -1,4 +1,4 @@
-"""A stand-in for yuragi.engine in the broker tests (REDESIGN §5.7, Windows).
+"""A stand-in for yuragi.engine in the broker tests (Windows).
 
     python fake_engine.py STATE_DIR
 

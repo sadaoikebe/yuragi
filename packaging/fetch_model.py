@@ -1,4 +1,4 @@
-"""Download the LM model at a pinned revision (docs/INSTALL.md).
+"""Download the LM model at a pinned revision (DESIGN「インストールと更新」).
 
 Run with the installation's own Python (the one that will run the
 server), so the only network dependency is HuggingFace:

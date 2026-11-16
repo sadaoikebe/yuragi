@@ -1,4 +1,4 @@
-// The broker's decisions (REDESIGN §5), independent of the operating system.
+// The broker's decisions (DESIGN「ブローカー」), independent of the operating system.
 //
 // One Broker lives in one thread. The platform layer (platform_win.cpp) owns
 // the pipes, the engine process and the clock; it calls the On* methods as
@@ -15,7 +15,7 @@
 
 namespace broker {
 
-// REDESIGN §11.
+// DESIGN「定数」.
 constexpr int ENGINE_MAX_EXITS = 3;  // this many exits within the window: stop
 constexpr int64_t ENGINE_EXIT_WINDOW_MS = 600000;
 constexpr int64_t ENGINE_HANG_MS = 5000;
@@ -23,7 +23,7 @@ constexpr int64_t NEVER = INT64_MAX;
 
 using ClientId = uint64_t;
 
-// Why the engine was given up, for the log and the management window (§9.3).
+// Why the engine was given up, for the log and the management window (DESIGN「通知」).
 enum class Stop { None, Exited, Hang };
 const char* StopName(Stop stop);
 
@@ -40,7 +40,7 @@ public:
     // Forcibly end it; OnEngineExit follows once its output has been read.
     virtual void KillEngine() = 0;
     virtual void WriteClient(ClientId client, const std::string& line) = 0;
-    virtual void NotifyStopped(Stop reason) = 0;  // the one notice (§9.3), once per stop
+    virtual void NotifyStopped(Stop reason) = 0;  // the one notice (DESIGN「通知」), once per stop
     virtual void ClearStopped() = 0;  // the stop the user was told about is over
     virtual void OpenAdmin() = 0;
     virtual void Log(const std::string& line) = 0;
@@ -60,7 +60,7 @@ public:
     void OnEngineExit(int code);
     void OnTimer();
     int64_t NextDeadline() const;
-    void Retry();  // the user asked: "もう一度試す", or a settings restart (§9.4)
+    void Retry();  // the user asked: "もう一度試す", or a settings restart (DESIGN「メニュー」)
 
     // For the platform and the tests.
     EngineState State() const { return state_; }
@@ -71,7 +71,7 @@ private:
         bool hello = false;
         bool session = false;  // opened in the current engine
         // The TIP lets keys through by itself while the engine is not ready
-        // (hello "passes"). Without it (a v0.1.2 DLL), see §5.6.
+        // (hello "passes"). Without it (a v0.1.2 DLL), see DESIGN「使えない間の打鍵」.
         bool passes = false;
         bool direct = false;  // its input mode, as last asked or answered
     };

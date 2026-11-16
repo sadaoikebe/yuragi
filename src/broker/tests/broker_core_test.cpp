@@ -1,4 +1,4 @@
-// The broker's decisions with a fake platform and a fake clock (REDESIGN §5.4-§5.7).
+// The broker's decisions with a fake platform and a fake clock (DESIGN「ブローカー」).
 #include "../broker_core.h"
 
 #include <cassert>
@@ -68,7 +68,7 @@ bool Contains(const std::vector<std::string>& lines, const std::string& text) {
     return false;
 }
 
-// §5.6: nothing is held while the engine starts; the TIP is told and lets keys through.
+// DESIGN「使えない間の打鍵」: nothing is held while the engine starts; the TIP is told and lets keys through.
 void KeysPassWhileStartingThenGoToTheEngine() {
     Fake f;
     Broker b(f);
@@ -104,7 +104,7 @@ void OldTipIsToldToLetKeysThrough() {
     assert(f.to_engine.empty());
 }
 
-// §5.4: an exit restarts at once; the lost key and composition are told.
+// DESIGN「見張り」: an exit restarts at once; the lost key and composition are told.
 void ExitWhileReadyResetsAndRestarts() {
     Fake f;
     Broker b(f);

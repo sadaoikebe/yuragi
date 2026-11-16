@@ -2,7 +2,7 @@
 
 Three settings, each one of a few values (the first is the default):
 
-  learning     "on" or "off": learn from conversions (REDESIGN §6.7)
+  learning     "on" or "off": learn from conversions (DESIGN「学習履歴のファイル」)
   prediction   "tab" or "off": Tab on unconverted input offers continuations
   lm_rescore   true or false: rescore the candidates with the language model
 

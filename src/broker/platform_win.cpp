@@ -1,4 +1,4 @@
-// yuragi-broker.exe: the broker on Windows (REDESIGN §5).
+// yuragi-broker.exe: the broker on Windows (DESIGN「ブローカー」).
 //
 // One per sign-in (Local\yuragi-ime-broker). No console; its only window is
 // a hidden one for the notification icon. Everything else happens on one
@@ -127,7 +127,7 @@ std::wstring ReadTag() {
     return value;
 }
 
-// §5.3: the user's default environment, not ours; Python told to be quiet and
+// DESIGN「エンジンの起動のしかた」: the user's default environment, not ours; Python told to be quiet and
 // local; nothing that could point it at another Python's libraries.
 std::vector<wchar_t> EngineEnvironment() {
     std::vector<std::wstring> vars;
@@ -239,9 +239,9 @@ private:
     std::thread thread_;
 };
 
-// -- the notification (§9.3) ---------------------------------------------------
+// -- the notification (DESIGN「通知」) ---------------------------------------------------
 
-// One notice: the engine stopped (§9.3). Warnings are not notified.
+// One notice: the engine stopped (DESIGN「通知」). Warnings are not notified.
 constexpr wchar_t STOPPED_TITLE[] = L"ゆらぎ: 日本語変換が止まりました";
 constexpr wchar_t STOPPED_BODY[] =
     L"入力済みの文字はそのまま残っています。ここを押すと、もう一度試せます。";
@@ -323,7 +323,7 @@ private:
                 case NIN_SELECT:
                 case NIN_KEYSELECT:
                 case WM_CONTEXTMENU:
-                    if (stopped_) ShowDialog();  // the user asked for it (§9.3)
+                    if (stopped_) ShowDialog();  // the user asked for it (DESIGN「通知」)
                     break;
             }
             return 0;
@@ -427,7 +427,7 @@ public:
         iocp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
         job_ = CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-        // §5.3: when the broker goes, for whatever reason, the engine goes with it.
+        // DESIGN「エンジンの起動のしかた」: when the broker goes, for whatever reason, the engine goes with it.
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof limits);
     }
@@ -447,7 +447,7 @@ public:
             return false;
         }
         std::wstring python = Wide(config_.python);
-        // §5.3: only the python.exe named in engine.json; no other Python is looked for.
+        // DESIGN「エンジンの起動のしかた」: only the python.exe named in engine.json; no other Python is looked for.
         if (GetFileAttributesW(python.c_str()) == INVALID_FILE_ATTRIBUTES) {
             error = "python.exe not found: " + config_.python;
             return false;
@@ -573,7 +573,7 @@ public:
         quit_ = true;
     }
 
-    // -- the pipe for the TIPs (§5.5) -------------------------------------------
+    // -- the pipe for the TIPs (DESIGN「通信」) -------------------------------------------
     bool Listen(const std::wstring& name, std::string& error) {
         pipe_name_ = name;
         // The user, and every app package (sandboxed apps such as the Start
@@ -820,11 +820,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return code;
     }
 
-    // §5.2: one broker per sign-in; a second one leaves without a word.
+    // DESIGN「起動と終了」: one broker per sign-in; a second one leaves without a word.
     HANDLE single = CreateMutexW(nullptr, TRUE, BROKER_MUTEX);
     if (!single || GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     if (engine_json.empty()) {
-        // §5.2: only the version this user has installed runs.
+        // DESIGN「起動と終了」: only the version this user has installed runs.
         std::wstring tag = ReadTag();
         if (tag != Wide(YURAGI_TAG)) return 0;
         engine_json = KnownFolder(FOLDERID_LocalAppData) / L"yuragi-ime" / L"versions" / tag /

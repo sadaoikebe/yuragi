@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(yuragi_broker LANGUAGES CXX)
 
-# The tag this build belongs to (REDESIGN §4.2): the broker only runs when
+# The tag this build belongs to (DESIGN「置き場所」): the broker only runs when
 # HKCU\Software\yuragi-ime\Tag names it. Release builds pass -DYURAGI_TAG=<tag>.
 set(YURAGI_TAG "dev" CACHE STRING "the version tag compiled into the broker")
 

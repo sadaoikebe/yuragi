@@ -1,4 +1,4 @@
-"""Key repeat (CONVERSION §5.1): a held FSM key gives its last token again;
+"""Key repeat (CONVERSION「キーのリピート」): a held FSM key gives its last token again;
 keys outside the FSM act again on every repeated down."""
 from __future__ import annotations
 

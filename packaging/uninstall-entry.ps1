@@ -1,4 +1,4 @@
-﻿# ゆらぎのアンインストールの入口 (docs/INSTALL.md)
+﻿# ゆらぎのアンインストールの入口。手順は DESIGN「インストール・更新・アンインストール」
 #
 # リリースには uninstall.ps1 の名前で、setup.ps1 と並べて置く。README の 1 行で取得して実行する。
 #   powershell -ExecutionPolicy Bypass -File uninstall.ps1 [-RemoveData] [-Yes]

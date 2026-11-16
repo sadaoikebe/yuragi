@@ -1,17 +1,9 @@
-﻿# ゆらぎのアンインストール (REDESIGN §8.3、docs/INSTALL.md)
+﻿# ゆらぎのアンインストール。手順は DESIGN「インストール・更新・アンインストール」
 #
 #   powershell -ExecutionPolicy Bypass -File uninstall.ps1 [-RemoveData] [-Yes]
 #
-# アプリを開いたままでよい。サインアウトや再起動は求めない。
-#   1 保守中の印 (この間 TIP はブローカーを起動しない)
-#   2 Run キーを消し、言語一覧から外す
-#   3 ブローカーに quit (エンジンも終わる)
-#   4 管理者権限: 登録解除と読み返し、Program Files\yuragi-ime の削除 (使用中のファイルは残す)
-#   5 HKCU の製品のキー (Tag) と TSF の利用者設定、%LOCALAPPDATA%\yuragi-ime を削除
-#   6 結果
-# Tag は登録解除のあとで消す。途中で止まったら Tag が残るので、もう一度実行すれば続きから進む。
-# 学習した内容・登録した単語・設定 (%USERPROFILE%\.yuragi-ime) は残す。
-# -RemoveData を付けたときだけ、場所と大きさを見せて確かめてから消す (I-7)。
+# 学習した内容・登録した単語・設定 (%USERPROFILE%\.yuragi-ime) は、-RemoveData を付けたときだけ、
+# 場所と大きさを見せて確かめてから消す (DESIGN「守ること」7)。
 
 param(
     [switch]$RemoveData,
@@ -121,7 +113,7 @@ try {
 if (-not (Test-Path -LiteralPath $resultFile)) { Fail "管理者権限の処理が結果を返さずに終了しました (終了コード $($p.ExitCode))。" }
 $result = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
 Remove-Item -LiteralPath $resultFile -Force
-# I-6: elevated.ps1 reports ok only after reading the registration back.
+# DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "登録解除またはプログラムの削除に失敗しました: $($result.message)" }
 Say "  OK"
 } else {

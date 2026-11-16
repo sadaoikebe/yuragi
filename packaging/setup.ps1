@@ -1,18 +1,9 @@
-﻿# ゆらぎのインストールと更新 (REDESIGN §8.2、docs/INSTALL.md)
+﻿# ゆらぎのインストールと更新。手順は DESIGN「インストール・更新・アンインストール」
 #
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Yes]
 #
-# インストールも更新も同じ手順。アプリを開いたままでよい。どこで失敗しても
-# 「前の版が動く」か「新しい版が動く」のどちらか (I-5)。
-#   1 保守中の印を立てる (Local\yuragi-ime-maintenance。この PowerShell が終われば消える)
-#   2 staging\<tag> に取得・照合・展開。足りない共有物 (ランタイム・辞書・モデル) だけ作る
-#   3 本物のブローカーで試運転 (--selftest)
-#   4 staging\<tag> を versions\<tag> へ
-#   5 管理者権限 (UAC 1 回): Program Files への配置、登録と読み返し、旧版の削除 (使用中なら次回)
-#   6 旧ブローカーに quit、HKCU の Tag と Run キー、言語一覧
-#   7 印を下ろし、新ブローカーを起動して ready を確認
-#   8 使われていないものの片付け (失敗しても次回また試す)
-# 利用者のデータ (%USERPROFILE%\.yuragi-ime) は消さない (I-7)。
+# インストールも更新も同じ手順。どこで失敗しても「前の版が動く」か「新しい版が動く」の
+# どちらか (DESIGN「守ること」6)。利用者のデータ (%USERPROFILE%\.yuragi-ime) は消さない (同 7)。
 
 param(
     [switch]$Yes
@@ -314,7 +305,7 @@ Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag, "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
     "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-ScriptSource", $ElevatedPath)
-# I-6: elevated.ps1 reports ok only after reading the registration back.
+# DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "Windows への登録に失敗しました: $($result.message)" }
 $DllFinal = Join-Path $ProgramRoot "$Tag\yuragi_tip.dll"
 $BrokerFinal = Join-Path $ProgramRoot "$Tag\yuragi-broker.exe"

@@ -1,5 +1,5 @@
-# 毎回の push と PR で: Python の試験 (普通に使ったときの動き)、ブローカーの試験 (REDESIGN §5.7, §10)、
-# TIP の判断の試験 (§7.8)。
+# 毎回の push と PR で: Python の試験 (普通に使ったときの動き)、ブローカーの試験、
+# TIP の判断の試験。
 # Linux ではブローカーの中核を偽の土台で試し、Windows では MSVC で本物の
 # yuragi-broker.exe を作って、偽エンジン・偽 TIP と名前付きパイプで動かす。
 name: ci
@@ -48,7 +48,7 @@ jobs:
 
       # 起動・応答・終了、パイプ、インストーラの脚本の実動作、設定と学習データの読み書き。
       # pwsh はランナーに入っている (tests/test_installer_scripts.py)。
-      - name: Python の試験 (インストーラの脚本の実動作を含む。ブローカーの §5.7 試験は Windows で)
+      - name: Python の試験 (インストーラの脚本の実動作を含む。ブローカーのプロセスの試験は Windows で)
         run: |
           python -m unittest -v $(ls tests/test_*.py | sed 's#/#.#;s#\.py$##')
 

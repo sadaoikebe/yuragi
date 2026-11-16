@@ -63,7 +63,7 @@ class CausalLmScorer:
             torch.set_num_threads(threads)
         self.torch = torch
         # rinna's GPT-2 ships a SentencePiece (T5Tokenizer) vocabulary.
-        # local_files_only: the IME never goes to the network (REDESIGN §6.2);
+        # local_files_only: the IME never goes to the network (DESIGN「エンジン」);
         # the model is fetched at install (packaging/fetch_model.py).
         self.tok = AutoTokenizer.from_pretrained(model, use_fast=False, local_files_only=True)
         # Eager attention: deterministic CPU numerics, matching the naive path.

@@ -36,15 +36,9 @@ SMALL = {
         20: dict(h=19.5, top=0.25, gx=0.25),
         24: dict(h=23.25, top=0.375, gx=-0.25),
     },
-    "bare": {
-        16: dict(h=15.5, top=0.25, gx=0.375),
-        20: dict(h=19.5, top=0.25, gx=0.25),
-        24: dict(h=23.25, top=0.375, gx=-0.25),
-    },
 }
 MASTER = {  # 64 単位
     "badge": dict(h=60, top=2, gx=0),
-    "bare": dict(h=60, top=2, gx=0),
 }
 BADGE_RADIUS = 0.22  # 角丸 (辺に対する比)
 # 小サイズだけ線を太らせる量 (px、線の幅の増分。外側へ半分ずつ)。タスクバーの 16〜24px で
@@ -53,9 +47,7 @@ GROW = {16: 0.5, 20: 0.5, 24: 0.625}
 
 VARIANTS = {
     # 名前: (寸法の系統, 台座の色, 図の色)
-    "yuragi": ("badge", INK, PAPER),        # 明暗両用 (既定)
-    "yuragi-light": ("bare", None, INK),    # 明るいタスクバー専用
-    "yuragi-dark": ("bare", None, PAPER),   # 暗いタスクバー専用
+    "yuragi": ("badge", INK, PAPER),        # 明暗両用
 }
 
 

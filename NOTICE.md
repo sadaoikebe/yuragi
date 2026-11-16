@@ -10,18 +10,17 @@ user's PC from the source named below. The one exception is the tkinter
 files for the settings window ("Python tkinter files" below), which the
 release attaches as `python-<version>-tkinter-amd64.zip`.
 
-Two things that are stored in this repository (and so are in the release's
-source zip) are also not MIT: a list of 157 entries taken from the Mozc
-dictionary (`docs/zero-row-entries.tsv`, under the Mozc dictionary terms
-below), and Mozc's symbol data (`data/symbol.tsv`, under Mozc's
-BSD-3-Clause license; "Mozc symbol data" below).
+One thing that is stored in this repository (and so is in the release's
+source zip) is also not MIT: Mozc's symbol data (`data/symbol.tsv`, under
+Mozc's BSD-3-Clause license; "Mozc symbol data" below).
 
 The kana layout and the rules for telling simultaneous key presses from
 sequential ones follow the NICOLA layout specification published by the
 Japanese input consortium: NICOLA 配列規格書（日本語入力コンソーシアム）
 http://nicola.sunicom.co.jp/spec/kikaku.htm
 
-RIME/Weasel and similar GPL IME hosts are not linked.
+The test fixture `tests/fixtures/stage1_synthetic.jsonl` was written for this
+project (MIT).
 
 ## Mozc open-source dictionary
 
@@ -34,11 +33,6 @@ All files (`dictionary*.txt`, `connection_single_column.txt`, `suffix.txt`,
 `data/dictionary-manifest.json` by `python -m tools.eval.fetch_mozc_dict`
 and checked against the SHA-256 in that manifest. None of these files is
 stored in git. Runtime conversion uses this dictionary.
-
-One excerpt is stored in git: `docs/zero-row-entries.tsv` lists 157 entries
-of this dictionary (reading, surface form, ids, cost) with their
-part-of-speech names from `id.def`, as the record of a check described in
-`docs/ZERO_ROW_PENALTY.md`. The terms below apply to that file too.
 
 Upstream: https://github.com/google/mozc  
 The Mozc project itself is BSD-3-Clause (Google Inc.). Dictionary sources

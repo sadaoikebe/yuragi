@@ -1,4 +1,4 @@
-// REDESIGN §7.8: the TIP's decisions without TSF.
+// The TIP's decisions without TSF.
 #include "../tip_logic.h"
 
 #include <cassert>
@@ -26,7 +26,7 @@ static void ReadingReplies() {
     assert(r.candidates.size() == 2 && r.cand_index == 1 && r.has_next_page);
     assert(r.segments.size() == 1 && r.segments[0].display_end == 1);
 
-    // §5.5: missing fields default, unknown ones are ignored.
+    // DESIGN「互換の規則」: missing fields default, unknown ones are ignored.
     Message sparse = Parse(R"({"seq":3,"new_field":{"x":[1]}})");
     assert(sparse.engine && sparse.composition.empty() && !sparse.has_timer);
     assert(sparse.focus == -1 && sparse.candidates.empty() && !sparse.error);
@@ -90,7 +90,7 @@ static void EatingKeys() {
     assert(WantKey('J', none, idle) && WantKey(VK_SPACE_, none, idle));
     assert(!WantKey('J', ctrl, idle));  // shortcuts belong to the application
     assert(!WantKey(VK_RETURN_, none, idle) && !WantKey(VK_BACK_, none, idle));
-    // §7.4.1: a character whose reply has not come yet makes Enter ours.
+    // DESIGN「打鍵の処理」: a character whose reply has not come yet makes Enter ours.
     Local awaiting;
     awaiting.awaiting = true;
     assert(WantKey(VK_RETURN_, none, awaiting) && WantKey(VK_BACK_, none, awaiting));

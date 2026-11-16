@@ -49,7 +49,7 @@ $f = "$env:TEMP\yuragi-uninstall.ps1"; Remove-Item $f -ErrorAction Ignore; iwr -
 ## もっと詳しく
 
 - [使い方](docs/USAGE.md) — キー操作、候補窓、設定ウィンドウ、困ったとき、更新とアンインストール
-- [開発と技術文書](docs/DEVELOPMENT.md) — 変換のしくみ、設計書、ビルドと試験
+- [開発と技術文書](docs/DEVELOPMENT.md) — 技術文書の一覧、開発環境、ビルドと試験
 
 ## ライセンス
 

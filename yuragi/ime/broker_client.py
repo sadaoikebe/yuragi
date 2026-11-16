@@ -1,4 +1,4 @@
-"""The management tools' line to the broker (REDESIGN §9.4): its state, and "retry".
+"""The management tools' line to the broker (DESIGN「メニュー」): its state, and "retry".
 
 The broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session> (Windows only;
 elsewhere there is no broker). These functions connect,

@@ -81,7 +81,7 @@ def scan_words(path: Path) -> tuple[list[Word], int]:
                         int(row.get("cost", DEFAULT_COST)))
             validate(word.reading, word.surface, word.pos)
         except (ValueError, TypeError, KeyError, AttributeError):
-            skipped += 1  # A hand edit gone wrong must not stop conversion (REDESIGN §6.2).
+            skipped += 1  # A hand edit gone wrong must not stop conversion (DESIGN「起動時の読み込み」).
             continue
         words.pop((word.reading, word.surface), None)
         words[(word.reading, word.surface)] = word

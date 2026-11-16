@@ -1,4 +1,4 @@
-"""Local confirmation history (REDESIGN §6.7). Never imported by the evaluation loaders.
+"""Local confirmation history (DESIGN「学習履歴のファイル」). Never imported by the evaluation loaders.
 
 The file is a JSONL log of confirmations and pair suppressions (Shift+F6,
 "forget"), read in order. What a conversion uses, for each reading: the
@@ -35,7 +35,7 @@ from .bunsetsu import Candidate
 
 DEFAULT_LEARNING_PATH = Path.home() / ".yuragi-ime" / "learning.jsonl"
 USER_WORD_COST = 6000
-COMPACT_MIN_LINES = 5000  # REDESIGN §11
+COMPACT_MIN_LINES = 5000  # DESIGN「定数」
 
 
 @dataclass(frozen=True)

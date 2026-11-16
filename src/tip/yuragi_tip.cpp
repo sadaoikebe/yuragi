@@ -1,10 +1,10 @@
-// yuragi TSF text service (REDESIGN §7).
+// yuragi TSF text service (DESIGN「TIP」).
 //
 // The TIP runs inside other people's applications, so it does as little as
 // possible: it sends keys to the broker over a named pipe and writes the
 // replies on screen. It never starts Python, never retries, keeps no files.
 // The only process it may start is the broker, under the three conditions of
-// §7.3. Its decisions that need no TSF live in tip_logic.h (tested on any OS).
+// DESIGN「ブローカーを起動する条件」. Its decisions that need no TSF live in tip_logic.h (tested on any OS).
 //
 // Practices from SampleIME / CorvusSKK / Mozc:
 //   - disabled / empty context / keyboard closed: not our key
@@ -253,7 +253,7 @@ struct TipConfig {
     }
 };
 
-// -- the broker: whether this process may start it (§7.3) --------------------------
+// -- the broker: whether this process may start it (DESIGN「ブローカーを起動する条件」) --------------------------
 
 static std::wstring PipeName() {
     std::wstring name = L"\\\\.\\pipe\\yuragi-ime-";
@@ -315,7 +315,7 @@ static bool MediumIntegrity() {
     return medium;
 }
 
-// Whether this process may start the broker (§7.3).
+// Whether this process may start the broker (DESIGN「ブローカーを起動する条件」).
 static bool MaySpawn() {
     tip_logic::SpawnFacts facts;
     facts.tag_matches = TagMatches();
@@ -326,7 +326,7 @@ static bool MaySpawn() {
 
 // The broker beside this DLL (Program Files: nobody else can replace it),
 // away from the application's job, with no handles and the user's default
-// environment. A failure is not retried here (§7.3).
+// environment. A failure is not retried here (DESIGN「ブローカーを起動する条件」).
 static bool SpawnBroker() {
     std::wstring exe = DllDir() + L"\\yuragi-broker.exe";
     std::wstring command = L"\"" + exe + L"\"";
@@ -356,7 +356,7 @@ static bool SpawnBroker() {
     return true;
 }
 
-// -- the connection (§7.2) ----------------------------------------------------------
+// -- the connection (DESIGN「接続」) ----------------------------------------------------------
 
 // One pipe and one reader thread per Tip. The thread waits only for the pipe,
 // the stop signal and the connect signal; nothing runs on a clock. Each line
@@ -480,7 +480,7 @@ private:
         pipe_ = INVALID_HANDLE_VALUE;
     }
 
-    // The pipe; when there is none, maybe start the broker (§7.3) and wait for
+    // The pipe; when there is none, maybe start the broker (DESIGN「ブローカーを起動する条件」) and wait for
     // its pipe at most BROKER_WAIT_MS, looking every BROKER_POLL_MS.
     HANDLE Open(Link& why) {
         bool spawned = false;
@@ -491,7 +491,7 @@ private:
             if (pipe != INVALID_HANDLE_VALUE) return pipe;
             DWORD error = GetLastError();
             if (error == ERROR_ACCESS_DENIED) {
-                why = Link::NotAllowed;  // e.g. a sandbox the pipe does not admit (§13)
+                why = Link::NotAllowed;  // e.g. a sandbox the pipe does not admit (DESIGN「通信」)
                 return INVALID_HANDLE_VALUE;
             }
             if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PIPE_BUSY) {
@@ -642,7 +642,7 @@ public:
     }
 };
 
-// -- the input field's kind (§7.7) -------------------------------------------------
+// -- the input field's kind (DESIGN「パスワード欄」) -------------------------------------------------
 
 // Password fields are not ours. Only a field that says so counts: a context
 // with no selection or no input scope is not evidence of a password.
@@ -805,7 +805,7 @@ private:
         comp->Release();
         state->ending = false;
     }
-    // §7.5: the text stays as shown; only the conversion ends.
+    // DESIGN「見えている文字の確定」: the text stays as shown; only the conversion ends.
     HRESULT FinalizeState(TfEditCookie ec, const std::shared_ptr<CompositionState>& state) {
         if (!state->composition) return S_OK;
         ITfRange* range = nullptr;
@@ -903,7 +903,7 @@ private:
     RetiredStates* retired_;
 };
 
-// -- the taskbar glyph (§9.1) --------------------------------------------------------
+// -- the taskbar glyph (DESIGN「状態」) --------------------------------------------------------
 
 // The taskbar input indicator (Windows 8+) shows only an item whose guidItem
 // is GUID_LBI_INPUTMODE, drawn from its icon. The DLL has no icon resource,
@@ -980,7 +980,7 @@ static HICON MakeModeIcon(const wchar_t* glyph, bool faint) {
     return icon;
 }
 
-// -- the one-line notice (§9.2) ------------------------------------------------------
+// -- the one-line notice (DESIGN「小さな表示」) ------------------------------------------------------
 
 static const wchar_t* NoticeText(Notice n) {
     switch (n) {
@@ -1087,7 +1087,7 @@ public:
             lbm->Release();
         }
         link_.Start(hwnd_, kLinkMessage);
-        TryConnect();  // §7.2: one of the three moments a connection is tried
+        TryConnect();  // DESIGN「接続」: one of the three moments a connection is tried
         CheckScope();
         Log(L"ActivateEx client=%u", (unsigned)tid);
         return S_OK;
@@ -1156,13 +1156,13 @@ public:
         return S_OK;
     }
 
-    // ITfTextLayoutSink (§7.6): the candidate list follows the text.
+    // ITfTextLayoutSink (DESIGN「タイマー」): the candidate list follows the text.
     HRESULT STDMETHODCALLTYPE OnLayoutChange(ITfContext*, TfLayoutCode, ITfContextView*) override {
         RequestCandidatePosition();
         return S_OK;
     }
 
-    // -- keys (§7.4) ----------------------------------------------------------------------
+    // -- keys (DESIGN「打鍵の処理」) ----------------------------------------------------------------------
     HRESULT STDMETHODCALLTYPE OnTestKeyDown(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         ReleaseToggleLatch();
@@ -1199,9 +1199,9 @@ public:
         Mode mode = CurrentMode();
         bool kana = !direct_ && !HeldMods().Shortcut() &&
                     (tip_logic::CharacterVk(vk) || vk == VK_SPACE);
-        if (kana && !link_.Connected()) TryConnect();  // §7.2
+        if (kana && !link_.Connected()) TryConnect();  // DESIGN「接続」
         if (kana && mode == Mode::Stopped && !stopped_told_) {
-            stopped_told_ = true;  // once per focus (§9.2)
+            stopped_told_ = true;  // once per focus (DESIGN「小さな表示」)
             ShowNotice(Notice::Stopped);
         }
         if (!CanEat(vk)) return S_OK;
@@ -1263,7 +1263,7 @@ public:
         return E_INVALIDARG;
     }
 
-    // -- the taskbar item (§9.1, §9.4) ----------------------------------------------------
+    // -- the taskbar item (DESIGN「状態」, DESIGN「メニュー」) ----------------------------------------------------
     HRESULT STDMETHODCALLTYPE GetInfo(TF_LANGBARITEMINFO* info) override {
         if (!info) return E_INVALIDARG;
         info->clsidService = CLSID_YuragiTip;
@@ -1295,7 +1295,7 @@ public:
         *tip = SysAllocString(text);
         return *tip ? S_OK : E_OUTOFMEMORY;
     }
-    // The menu's items (§9.4); grayed: shown but not selectable.
+    // The menu's items (DESIGN「メニュー」); grayed: shown but not selectable.
     const wchar_t* MenuText(int item, bool* grayed) const {
         *grayed = false;
         switch (item) {
@@ -1344,7 +1344,7 @@ public:
                 if (Eligible()) Toggle();
                 break;
             case tip_logic::MENU_ADMIN:
-                // §9.4: the broker opens it (the TIP starts no Python).
+                // DESIGN「メニュー」: the broker opens it (the TIP starts no Python).
                 SendOp("open_admin");
                 break;
             case tip_logic::MENU_RETRY:
@@ -1430,7 +1430,7 @@ private:
 
     void OnTimer(UINT_PTR id) {
         if (id == kTimerReply) {
-            // §7.6: the FSM's chord deadline, or the LM's next look.
+            // DESIGN「タイマー」: the FSM's chord deadline, or the LM's next look.
             if (!direct_) SendRequest("timeout", "\"t\":" + std::to_string(NowMs()));
         } else if (id == kTimerNotice) {
             HideNotice();
@@ -1473,7 +1473,7 @@ private:
                     link_state_ = item.link;
                     break;
                 case BrokerLink::Item::Lost:
-                    // §7.5: the broker is gone; what is shown stays.
+                    // DESIGN「見えている文字の確定」: the broker is gone; what is shown stays.
                     Log(L"broker connection lost");
                     link_state_ = Link::Connecting;
                     broker_state_.clear();
@@ -1502,7 +1502,7 @@ private:
         // engine did not get (it is starting, or down).
         bool was_ready = broker_state_ == "ready";
         if (m.hello || m.event == "state" || (m.has_seq && !m.engine)) broker_state_ = m.state;
-        // §5.6: a ready engine has opened a new session, in kana input.
+        // DESIGN「使えない間の打鍵」: a ready engine has opened a new session, in kana input.
         if (!was_ready && broker_state_ == "ready" && direct_) SendRequest("set_direct", "\"direct\":true");
         if (tip_logic::CommitsVisibleText(m)) FinishLocal();
         if (!m.has_seq) return false;
@@ -1512,7 +1512,7 @@ private:
         // writing this reply now would put it into the new field.
         if (m.seq <= stale_upto_) return false;
         if (m.error) {
-            NoteReply(m);  // the engine started a clean session; the text stays (§7.5)
+            NoteReply(m);  // the engine started a clean session; the text stays (DESIGN「見えている文字の確定」)
             return false;
         }
         if (m.seq == wanted) return true;
@@ -1538,7 +1538,7 @@ private:
     // One key: sent with its number; its reply is awaited at most KEY_BUDGET_MS.
     // In time, it is applied at once and decides the key. Late, the key is
     // eaten as OnTestKeyDown said, nothing on screen changes, the connection
-    // stays, and the reply is applied when it arrives (§7.4.2).
+    // stays, and the reply is applied when it arrives (DESIGN「打鍵の処理」).
     bool SendKey(bool down, UINT vk) {
         tip_logic::Local before = LocalState();
         bool before_timer = timer_pending_;
@@ -1655,7 +1655,7 @@ private:
         RequestEdit(EditSession::Position, state_, false);
     }
 
-    // §7.5: the conversion ends with its text on screen; local state starts over.
+    // DESIGN「見えている文字の確定」: the conversion ends with its text on screen; local state starts over.
     void FinishLocal() {
         auto old = state_;
         state_.reset();
@@ -1677,7 +1677,7 @@ private:
     }
 
     // A new field: what was being converted is kept as typed, the engine
-    // forgets it, and the field's kind is looked up once (§7.7).
+    // forgets it, and the field's kind is looked up once (DESIGN「パスワード欄」).
     void FocusMoved() {
         FinishLocal();
         stale_upto_ = in_flight_.Last();
@@ -1723,7 +1723,7 @@ private:
                     (vk != 0 && vk == ToggleAlias(settings_.toggle_vk, settings_.toggle_mods));
         return ours && ModMask(HeldMods()) == settings_.toggle_mods;
     }
-    // §7.6: a preserved key's release may never reach OnKeyUp; look at the key
+    // DESIGN「タイマー」: a preserved key's release may never reach OnKeyUp; look at the key
     // state on the next key instead of on a timer.
     void ReleaseToggleLatch() {
         if (toggle_down_ && !(GetKeyState(toggle_active_vk_) & 0x8000)) {
@@ -1921,7 +1921,7 @@ private:
     ITfLangBarItemSink* lb_sink_ = nullptr;
 };
 
-// Read-only sessions: the field's kind (§7.7) and the caret for the notice (§9.2).
+// Read-only sessions: the field's kind (DESIGN「パスワード欄」) and the caret for the notice (DESIGN「小さな表示」).
 class ReadSession final : public ITfEditSession {
 public:
     enum Kind { Scope, Caret };
@@ -1973,7 +1973,7 @@ private:
     ITfContext* ctx_;
 };
 
-// §7.7: once per focus. Until the answer is known the field is "being looked
+// DESIGN「パスワード欄」: once per focus. Until the answer is known the field is "being looked
 // at" and keys pass through.
 void Tip::CheckScope() {
     if (scope_ctx_) scope_ctx_->Release();
@@ -2051,7 +2051,7 @@ public:
     }
 };
 
-// -- registration (§8.1: run elevated by packaging/elevated.ps1, then read back) ----------
+// -- registration (DESIGN「共通の仕組み」: run elevated by packaging/elevated.ps1, then read back) ----------
 
 static HRESULT SetSz(HKEY root, const wchar_t* sub, const wchar_t* name, const wchar_t* val) {
     HKEY k = nullptr;
@@ -2150,7 +2150,7 @@ STDAPI DllRegisterServer() {
     return hr;
 }
 
-// Every step runs; the first failure is returned (I-6: no false "OK").
+// Every step runs; the first failure is returned (DESIGN「守ること」6: no false "OK").
 STDAPI DllUnregisterServer() {
     HRESULT co = CoInitialize(nullptr);
     HRESULT hr = RegisterProfile(FALSE);

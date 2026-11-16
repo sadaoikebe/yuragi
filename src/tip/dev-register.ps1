@@ -1,4 +1,4 @@
-﻿# 開発用: dist\ のビルドをこの PC に登録して使う (REDESIGN §8.4)。タグは dev。
+﻿# 開発用: dist\ のビルドをこの PC に登録して使う (DESIGN「開発時」)。タグは dev。
 #
 #   powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1 [-Python <python.exe>]
 #

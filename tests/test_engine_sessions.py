@@ -1,4 +1,4 @@
-"""The engine's sessions, in process (REDESIGN §6.1).
+"""The engine's sessions, in process (DESIGN「エンジン」).
 
 One engine serves every TIP connection: the dictionary, the face table, the
 learning history and the word list are loaded once and shared; each sid has

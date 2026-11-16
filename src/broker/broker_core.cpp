@@ -147,7 +147,7 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     }
     if (op == "set_direct") Flag(msg, "direct", client.direct);
     if (state_ != EngineState::Ready) {
-        // §5.6: nothing is held; the TIP lets keys through until the engine is ready.
+        // DESIGN「使えない間の打鍵」: nothing is held; the TIP lets keys through until the engine is ready.
         platform_.WriteClient(id, client.passes ? SeqState(seq, ClientState())
                                                 : SeqPass(seq, client.direct));
         return;
@@ -219,7 +219,7 @@ void Broker::Kill(Stop reason) {
 
 void Broker::OnEngineExit(int code) { EngineGone(code); }
 
-// §5.4: an engine that ends is started again at once, unless it is the
+// DESIGN「見張り」: an engine that ends is started again at once, unless it is the
 // ENGINE_MAX_EXITS-th exit within ENGINE_EXIT_WINDOW_MS: then it stays down
 // and the user is told once. "もう一度試す" (Retry) starts it again.
 void Broker::EngineGone(int code) {
@@ -248,7 +248,7 @@ void Broker::EngineGone(int code) {
     }
     Log(std::string("engine given up: ") + StopName(reason));
     SetState(EngineState::Failed);
-    platform_.NotifyStopped(reason);  // §9.3: once; nothing starts by itself after this
+    platform_.NotifyStopped(reason);  // DESIGN「通知」: once; nothing starts by itself after this
 }
 
 void Broker::Retry() {

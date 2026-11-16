@@ -27,8 +27,7 @@ python3 -m tools.replay_stage1 <ログ>          # 実打鍵ログの再生と�
 - **una**: 読みが分かっている（各文字を単独面・既知の面のトークンにする）。
 - **amb**: 親指面は左右不明（`AmbShift`）。実打鍵の FSM は通さない、理想の打鍵。
 
-連接表の全 0 行へのペナルティ（[CONVERSION.md](CONVERSION.md) §4）は、環境変数 `ZERO_ROW_PENALTY` で
-変えられる（`ZERO_ROW_PENALTY=0 python3 -m tools.eval.run_mozc_eval` で無効）。辞書を読み込むたびに読む。
+連接表の全 0 行へのペナルティと環境変数 `ZERO_ROW_PENALTY` は [CONVERSION.md](CONVERSION.md) の「変換」。
 
 辞書キャッシュは `data/cache/` に作る。名前は辞書マニフェストのハッシュとキャッシュ形式で決まり、
 変わったら初回だけ辞書テキストから作り直す。
@@ -46,7 +45,7 @@ Mozc OSS 辞書に付く `evaluation.tsv` を使う。
   - `Suggestion` などは対象外として件数を出す。入力できない読みも別に出す。
 - `--details` は入力できる各行の `PASS` / `FAIL` / `SKIP` を JSONL に出す。
 
-単語の全候補を調べるときは `nbest_tokens(..., k=十分大きな値)`（CONVERSION.md §8）。
+単語の全候補を調べるときは `nbest_tokens(..., k=十分大きな値)`（CONVERSION.md の「n-best」）。
 
 ## AJIMEE-Bench の評価
 
@@ -99,7 +98,7 @@ amb 条件で、n-best を使う 3 つの指標を分けて出す。
 ## 標準入出力のサーバ（試験と診断）
 
 `python3 -m yuragi.ime.server` は 1 セッションを標準入出力の 1 行 1 JSON で動かす
-（返事の項目は [CONVERSION.md](CONVERSION.md) §10）。辞書の読み込み直後に `gc.freeze()` する。
+（返事の項目は [DESIGN.md](DESIGN.md) の「通信」）。辞書の読み込み直後に `gc.freeze()` する。
 標準エラーへの本文のログは既定で出さない。診断が要るときだけ `--log-text`。
 処理できない例外は、本文を含みうるメッセージを出さず、例外の型だけを報告する。
 LM の時間は `--lm-timing` で標準エラーに出る（本文は出さない）。

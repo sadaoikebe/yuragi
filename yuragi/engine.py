@@ -1,4 +1,4 @@
-"""The conversion engine (REDESIGN §6): one JSON object per line on stdin/stdout.
+"""The conversion engine (DESIGN「エンジン」): one JSON object per line on stdin/stdout.
 
 Started only by the broker (src/broker), as ``python -m yuragi.engine``. It has
 no other way to talk: no sockets, no files besides the user's data and its own
@@ -12,14 +12,14 @@ Broker → engine:
 Engine → broker:
   {"ready":true,"proto":1,"warnings":[...]}
   {"sid":3,"seq":17, ...the reply of yuragi.ime.server...}   one per request, in order
-      "error":true   the request raised; the session was started afresh (§6.4)
+      "error":true   the request raised; the session was started afresh (DESIGN「要求 1 件ごとの防壁」)
   {"event":"warning","warning":"lm"}       a problem found after ready (once each)
 
 Warnings: lm (the LM is not used). open/close have no reply. The engine exits
 when stdin closes.
 
 A startup failure ends the process with exit code 1 and the reason on stderr,
-``fatal <reason>`` (§6.6): the broker keeps it in its log.
+``fatal <reason>`` (DESIGN「止まるときの理由」): the broker keeps it in its log.
 """
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ import time
 import traceback
 
 PROTO = 1
-MAX_TOKENS = 200  # REDESIGN §11: the input length a conversion handles
+MAX_TOKENS = 200  # DESIGN「定数」: the input length a conversion handles
 DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
-# Warm-up input (§6.3): かいはつしてきた on the NICOLA-A plain layer, then Space.
+# Warm-up input (DESIGN「暖機」): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
 
 
@@ -81,7 +81,7 @@ class Channel:
             self._out.write(data)
 
     def warning(self, code: str) -> None:
-        """A problem the user is told about once (§9.3); kept until ready."""
+        """A problem the user is told about once (DESIGN「通知」); kept until ready."""
         with self._lock:
             if code in self._warnings:
                 return
@@ -131,7 +131,7 @@ class Connection:
             reply = process_request(self.sess, msg)
         sess = self.sess
         if len(sess.tokens) > MAX_TOKENS and not sess.converted and sess._await is None:
-            # §6.5: the key is taken silently, the input stays as it was.
+            # DESIGN「入力の長さ」: the key is taken silently, the input stays as it was.
             del sess.tokens[MAX_TOKENS:]
             sess._refresh()
             commit = reply["commit"]
@@ -140,7 +140,7 @@ class Connection:
         return reply
 
     def recover(self) -> dict:
-        """§6.4: drop the session that raised; continue from a clean one."""
+        """DESIGN「要求 1 件ごとの防壁」: drop the session that raised; continue from a clean one."""
         from yuragi.ime.server import snapshot
         direct = self.sess.direct
         self.close()
@@ -220,7 +220,7 @@ class Engine:
             log("LM rescoring off (setting)")
 
     def read_settings(self, args, config, server) -> argparse.Namespace:
-        """config.json in the data directory (§6.2); everything else as the
+        """config.json in the data directory (DESIGN「起動時の読み込み」); everything else as the
         stdio host's defaults."""
         settings = server.argument_parser().parse_args([])
         settings.learning_file = args.data_dir / "learning.jsonl"
@@ -243,7 +243,7 @@ class Engine:
         self.channel.warning("lm")
 
     def warm_up(self) -> None:
-        """§6.3: one conversion before ready, so the user's first key is not the slow one."""
+        """DESIGN「暖機」: one conversion before ready, so the user's first key is not the slow one."""
         from yuragi.ime.server import process_request
         start = time.perf_counter()
         sess = self.new_session()
@@ -299,7 +299,7 @@ class Engine:
                 self.channel.send(self.request(msg))
 
     def request(self, msg: dict) -> dict:
-        """One request; whatever goes wrong inside stays inside this one (§6.4)."""
+        """One request; whatever goes wrong inside stays inside this one (DESIGN「要求 1 件ごとの防壁」)."""
         sid, seq = msg.get("sid"), msg.get("seq")
         connection = self.connections.get(sid)
         if connection is None:

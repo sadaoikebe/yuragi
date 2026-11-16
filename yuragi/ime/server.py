@@ -1,6 +1,6 @@
 """The engine's request protocol, and a stdio host for tests and evaluation.
 
-The product talks to the engine through yuragi.engine (REDESIGN §6.1); this
+The product talks to the engine through yuragi.engine (DESIGN「通信」); this
 module holds what both share: dispatch() applies one request to a session and
 returns the reply. ``python -m yuragi.ime.server`` serves one session over
 stdin/stdout for tests and evaluation only (not a product path).

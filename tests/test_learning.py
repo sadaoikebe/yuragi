@@ -1,4 +1,4 @@
-"""Learning (CONVERSION §7): the choice committed last comes first next time,
+"""Learning (CONVERSION「学習」): the choice committed last comes first next time,
 whatever comes before it; Shift+F6 forgets it, and another process's change to
 the file is read again."""
 

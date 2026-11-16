@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(yuragi_tip LANGUAGES CXX)
 
-# The tag this build belongs to (REDESIGN §4.2, §7.3): an old or uninstalled
+# The tag this build belongs to (DESIGN「ブローカーを起動する条件」): an old or uninstalled
 # DLL whose tag is not HKCU\Software\yuragi-ime\Tag never starts anything.
 set(YURAGI_TAG "dev" CACHE STRING "the version tag compiled into the TIP")
 
@@ -47,7 +47,7 @@ if(TIP_BUILD_JSON_TESTS)
   endif()
   add_test(NAME tip_json COMMAND tip_json_test)
 
-  # REDESIGN §7.8: the TIP's decisions without TSF.
+  # The TIP's decisions without TSF.
   add_executable(tip_logic_test tests/tip_logic_test.cpp tip_logic.h tip_json.h)
   target_compile_features(tip_logic_test PRIVATE cxx_std_17)
   if(MSVC)

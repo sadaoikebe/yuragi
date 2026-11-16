@@ -1,4 +1,4 @@
-// The TIP's decisions that do not need TSF (REDESIGN §7.8), tested on any OS by
+// The TIP's decisions that do not need TSF (DESIGN「TIP」), tested on any OS by
 // tests/tip_logic_test.cpp: reading the broker's messages, whether to eat a key,
 // the order of replies, and what the user sees for each state.
 #pragma once
@@ -12,12 +12,12 @@
 
 namespace tip_logic {
 
-// REDESIGN §11.
+// DESIGN「定数」.
 constexpr uint32_t KEY_BUDGET_MS = 200;
 constexpr uint32_t CONNECT_MIN_INTERVAL_MS = 2000;
 constexpr uint32_t BROKER_WAIT_MS = 10000;
 constexpr uint32_t BROKER_POLL_MS = 100;
-constexpr uint32_t NOTICE_SHOW_MS = 4000;  // §9.2: the notices that go by themselves
+constexpr uint32_t NOTICE_SHOW_MS = 4000;  // DESIGN「小さな表示」: the notices that go by themselves
 constexpr int PROTO = 1;
 
 // Win32 virtual keys used here (no windows.h in this header).
@@ -32,7 +32,7 @@ struct Segment {
 };
 
 // One line from the broker. Every field has a default; a field that is absent
-// or of another type takes it (§5.5: unknown fields are ignored, missing ones
+// or of another type takes it (DESIGN「互換の規則」: unknown fields are ignored, missing ones
 // default, nothing is counted or rejected).
 struct Message {
     // The broker's own fields.
@@ -113,12 +113,12 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     return true;
 }
 
-// §7.5: the text on screen stays and the conversion ends (nothing is erased).
+// DESIGN「見えている文字の確定」: the text on screen stays and the conversion ends (nothing is erased).
 inline bool CommitsVisibleText(const Message& m) {
     return m.event == "reset" || m.error || m.state == "down";
 }
 
-// -- what the user sees (§9.1) ---------------------------------------------------
+// -- what the user sees (DESIGN「状態」) ---------------------------------------------------
 
 enum class Mode { Normal, Preparing, Stopped, Excluded };
 
@@ -126,7 +126,7 @@ enum class Mode { Normal, Preparing, Stopped, Excluded };
 enum class Link { Connected, Connecting, Unreachable, NotAllowed };
 //   Connecting   waiting for the pipe (a broker was just started)
 //   Unreachable  no broker, and starting one did not give a pipe in time
-//   NotAllowed   this process must not start one (§7.3: another version, maintenance,
+//   NotAllowed   this process must not start one (DESIGN「ブローカーを起動する条件」: another version, maintenance,
 //                sandboxed or elevated): it only ever connects
 
 inline Mode ModeFor(Link link, const std::string& state) {
@@ -145,7 +145,7 @@ inline Mode ModeFor(Link link, const std::string& state) {
 // starting) they pass through as in direct input.
 inline bool SendsKeys(Mode mode) { return mode == Mode::Normal; }
 // The toggle key also works while preparing: the input mode changes here, and
-// the engine is told once it is ready (§5.6).
+// the engine is told once it is ready (DESIGN「使えない間の打鍵」).
 inline bool Toggles(Mode mode) { return mode == Mode::Normal || mode == Mode::Preparing; }
 
 // The taskbar glyph and whether it is drawn faint.
@@ -161,7 +161,7 @@ inline const char* Glyph(Mode mode, bool direct) {
 }
 inline bool Faint(Mode mode) { return mode == Mode::Preparing; }
 
-// The right-click menu (§9.4).
+// The right-click menu (DESIGN「メニュー」).
 enum MenuItem { MENU_TOGGLE = 1, MENU_ADMIN = 2, MENU_RETRY = 3, MENU_PREPARING = 5 };
 inline std::vector<int> MenuFor(Mode mode) {
     switch (mode) {
@@ -173,7 +173,7 @@ inline std::vector<int> MenuFor(Mode mode) {
     return {};
 }
 
-// The one-line notice under the caret (§9.2).
+// The one-line notice under the caret (DESIGN「小さな表示」).
 enum class Notice { None, Stopped };
 
 // -- keys -------------------------------------------------------------------------
@@ -188,7 +188,7 @@ struct Mods {
 // still in flight.
 struct Local {
     bool composing = false, converted = false, candidates = false;
-    bool awaiting = false;  // a request has no reply yet (§7.4.1)
+    bool awaiting = false;  // a request has no reply yet (DESIGN「打鍵の処理」)
 };
 
 // session.py and chord/keys.py: the keys the session acts on.
@@ -244,7 +244,7 @@ inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before
     return before.converted && WantKey(vk, mods, wanted);
 }
 
-// -- order (§7.4.3) ---------------------------------------------------------------
+// -- order (DESIGN「打鍵の処理」) ---------------------------------------------------------------
 
 // The requests in flight, oldest first. Replies come back in the order the
 // requests went out (one reader, one broker, one engine thread).
@@ -281,7 +281,7 @@ private:
     long long last_ = 0;
 };
 
-// §7.2: connecting is tried on activation, on a kana key, and on "retry",
+// DESIGN「接続」: connecting is tried on activation, on a kana key, and on "retry",
 // never more often than every CONNECT_MIN_INTERVAL_MS.
 class ConnectGate {
 public:
@@ -297,7 +297,7 @@ private:
     uint64_t last_ = 0;
 };
 
-// §7.3: whether this TIP may start the broker. Every condition must hold.
+// DESIGN「ブローカーを起動する条件」: whether this TIP may start the broker. Every condition must hold.
 // The broker's own single-instance lock and CONNECT_MIN_INTERVAL_MS bound how
 // often it is started; there is no count.
 struct SpawnFacts {
@@ -309,9 +309,9 @@ inline bool MaySpawn(const SpawnFacts& f) {
     return f.tag_matches && !f.maintenance && f.medium_integrity;
 }
 
-// Requests (the TIP -> broker messages, §5.5).
+// Requests (the TIP -> broker messages, DESIGN「通信」).
 inline std::string Hello(const std::string& tag) {
-    // passes: keys are let through here while the engine is not ready (§5.6).
+    // passes: keys are let through here while the engine is not ready (DESIGN「使えない間の打鍵」).
     return "{\"op\":\"hello\",\"proto\":1,\"tag\":" + tip_json::Quote(tag) + ",\"bits\":" +
            std::to_string(sizeof(void*) * 8) + ",\"passes\":true}";
 }

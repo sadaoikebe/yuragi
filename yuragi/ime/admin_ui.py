@@ -222,7 +222,7 @@ class AdminModel:
     # -- status ----------------------------------------------------------------
 
     def status_rows(self) -> list[tuple[str, str]]:
-        """What the 状態 tab shows (REDESIGN §9.4), in Japanese."""
+        """What the 状態 tab shows (DESIGN「メニュー」), in Japanese."""
         from yuragi.lattice import dict_manifest
         rows = []
         broker = broker_client.status()
@@ -268,7 +268,7 @@ class AdminModel:
         return rows
 
     def restart_engine(self) -> Outcome:
-        """REDESIGN §9.4: the broker's "retry" starts the engine again (new settings)."""
+        """DESIGN「メニュー」: the broker's "retry" starts the engine again (new settings)."""
         if broker_client.retry():
             return Outcome(True, "変換エンジンを新しい設定で起動し直します")
         return Outcome(False, "ゆらぎの常駐プログラムが動いていません")
