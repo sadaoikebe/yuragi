@@ -14,9 +14,7 @@ namespace tip_logic {
 
 // REDESIGN §11.
 constexpr uint32_t KEY_BUDGET_MS = 200;
-constexpr uint32_t PENDING_NOTICE_MS = 1000;
 constexpr uint32_t CONNECT_MIN_INTERVAL_MS = 2000;
-constexpr uint32_t BROKER_MAX_SPAWNS = 3;
 constexpr uint32_t BROKER_WAIT_MS = 10000;
 constexpr uint32_t BROKER_POLL_MS = 100;
 constexpr uint32_t NOTICE_SHOW_MS = 4000;  // §9.2: the notices that go by themselves
@@ -41,7 +39,7 @@ struct Message {
     bool hello = false;  // the reply to hello: {"proto":1,"state":..,"warnings":[..]}
     int proto = 0;
     std::string event;  // "state", "reset", or empty
-    std::string state;  // ready, starting, down, maintenance, not-installed, incompatible
+    std::string state;  // ready, starting, down
     bool has_seq = false;
     long long seq = 0;
     std::vector<std::string> warnings;
@@ -49,7 +47,7 @@ struct Message {
     bool engine = false;  // carries the engine's state (not just {"seq","state"})
     std::string composition, commit;  // UTF-8
     bool direct = false, pass_through = false, converted = false, pending = false;
-    bool predicting = false, full = false, error = false, has_next_page = false;
+    bool predicting = false, error = false, has_next_page = false;
     int n_tokens = 0, focus = -1, page = 0, cand_index = 0;
     bool has_timer = false;
     uint64_t timer = 0;
@@ -92,7 +90,6 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadBool(v, "converted", m.converted);
     ReadBool(v, "pending", m.pending);
     ReadBool(v, "predicting", m.predicting);
-    ReadBool(v, "full", m.full);
     ReadBool(v, "error", m.error);
     ReadBool(v, "has_next_page", m.has_next_page);
     ReadInt(v, "n_tokens", m.n_tokens);
@@ -111,8 +108,6 @@ inline bool ParseMessage(const std::string& line, Message& m) {
         if (!ReadInt(s, "display_start", seg.display_start) ||
             !ReadInt(s, "display_end", seg.display_end))
             continue;
-        if (seg.display_start < 0) seg.display_start = 0;
-        if (seg.display_end < seg.display_start) seg.display_end = seg.display_start;
         m.segments.push_back(seg);
     }
     return true;
@@ -120,9 +115,7 @@ inline bool ParseMessage(const std::string& line, Message& m) {
 
 // §7.5: the text on screen stays and the conversion ends (nothing is erased).
 inline bool CommitsVisibleText(const Message& m) {
-    if (m.event == "reset" || m.error) return true;
-    return m.state == "down" || m.state == "maintenance" || m.state == "incompatible" ||
-           m.state == "not-installed";
+    return m.event == "reset" || m.error || m.state == "down";
 }
 
 // -- what the user sees (§9.1) ---------------------------------------------------
@@ -132,7 +125,7 @@ enum class Mode { Normal, Preparing, Stopped, Excluded };
 // Why there is no connection to the broker.
 enum class Link { Connected, Connecting, Unreachable, NotAllowed };
 //   Connecting   waiting for the pipe (a broker was just started)
-//   Unreachable  no broker, and this TIP may not start another (spent its spawns)
+//   Unreachable  no broker, and starting one did not give a pipe in time
 //   NotAllowed   this process must not start one (§7.3: another version, maintenance,
 //                sandboxed or elevated): it only ever connects
 
@@ -144,21 +137,23 @@ inline Mode ModeFor(Link link, const std::string& state) {
         case Link::Connected: break;
     }
     if (state == "ready") return Mode::Normal;
-    if (state == "starting" || state.empty()) return Mode::Preparing;
     if (state == "down") return Mode::Stopped;
-    return Mode::Excluded;  // maintenance, not-installed, incompatible
+    return Mode::Preparing;  // starting, or before the hello reply
 }
 
-// Keys go to the engine (ready) or to the broker's hold (starting); otherwise
-// they pass through as in direct input.
-inline bool SendsKeys(Mode mode) { return mode == Mode::Normal || mode == Mode::Preparing; }
+// Keys go to the engine only when it is ready; otherwise (also while it is
+// starting) they pass through as in direct input.
+inline bool SendsKeys(Mode mode) { return mode == Mode::Normal; }
+// The toggle key also works while preparing: the input mode changes here, and
+// the engine is told once it is ready (§5.6).
+inline bool Toggles(Mode mode) { return mode == Mode::Normal || mode == Mode::Preparing; }
 
 // The taskbar glyph and whether it is drawn faint.
 inline const char* Glyph(Mode mode, bool direct) {
     switch (mode) {
         // ゆ and Y (yuragi), not あ/A: told apart from Microsoft IME at a glance.
         case Mode::Normal: return direct ? "Y" : "\xE3\x82\x86";  // ゆ
-        case Mode::Preparing: return "\xE3\x82\x86";
+        case Mode::Preparing: return direct ? "Y" : "\xE3\x82\x86";
         case Mode::Stopped: return "!";
         case Mode::Excluded: return "Y";
     }
@@ -167,19 +162,19 @@ inline const char* Glyph(Mode mode, bool direct) {
 inline bool Faint(Mode mode) { return mode == Mode::Preparing; }
 
 // The right-click menu (§9.4).
-enum MenuItem { MENU_TOGGLE = 1, MENU_ADMIN = 2, MENU_RETRY = 3, MENU_REASON = 4, MENU_PREPARING = 5 };
+enum MenuItem { MENU_TOGGLE = 1, MENU_ADMIN = 2, MENU_RETRY = 3, MENU_PREPARING = 5 };
 inline std::vector<int> MenuFor(Mode mode) {
     switch (mode) {
         case Mode::Normal: return {MENU_TOGGLE, MENU_ADMIN};
         case Mode::Preparing: return {MENU_PREPARING, MENU_ADMIN};
-        case Mode::Stopped: return {MENU_RETRY, MENU_REASON, MENU_ADMIN};
+        case Mode::Stopped: return {MENU_RETRY, MENU_ADMIN};
         case Mode::Excluded: return {MENU_ADMIN};
     }
     return {};
 }
 
 // The one-line notice under the caret (§9.2).
-enum class Notice { None, Preparing, Stopped, TooLong, Reopen };
+enum class Notice { None, Stopped };
 
 // -- keys -------------------------------------------------------------------------
 
@@ -218,11 +213,8 @@ inline bool WantKey(uint32_t vk, Mods mods, const Local& local) {
     bool converted = local.converted;
     if (CharacterVk(vk) || vk == VK_SPACE_) return true;
     if (vk == VK_RETURN_ || vk == VK_BACK_ || vk == VK_ESCAPE_) return composing;
-    // F6/F7 with no input are the application's; Shift+F7 (undo the last
-    // learning) is ours with or without input.
-    if (vk == VK_F7_) return composing || mods.shift;
-    if (vk == VK_F6_) return composing;
-    if (vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_) return composing && !mods.shift;
+    if (vk == VK_F6_) return composing;  // Shift+F6 forgets; with no input, the application's
+    if (vk == VK_F7_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_) return composing && !mods.shift;
     if (vk == VK_TAB_) return composing && !mods.shift;
     if (converted || (local.awaiting && local.candidates)) {
         if (vk == VK_LEFT_ || vk == VK_RIGHT_) return true;
@@ -243,7 +235,6 @@ inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before
     if (CharacterVk(vk) || vk == VK_SPACE_) return state_mask;
     if (vk == VK_BACK_ || vk == VK_RETURN_ || vk == VK_ESCAPE_) return before.composing && state_mask;
     if (vk == VK_DOWN_ && mods.CtrlOnly()) return before.composing && state_mask;  // as Enter
-    if (vk == VK_F7_ && mods.shift) return true;
     if (vk == VK_F6_ || vk == VK_F7_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_)
         return before.composing || before.converted;
     // Tab while composing is ours even with no prediction: the input stays.
@@ -278,8 +269,6 @@ public:
             if (s.seq == seq) return true;
         return false;
     }
-    // When the "preparing" notice is due (§7.4.4); 0 when nothing waits.
-    uint64_t NoticeAt() const { return sent_.empty() ? 0 : sent_.front().at + PENDING_NOTICE_MS; }
     void Clear() { sent_.clear(); }
     long long Last() const { return last_; }  // the newest number given out
 
@@ -309,23 +298,22 @@ private:
 };
 
 // §7.3: whether this TIP may start the broker. Every condition must hold.
+// The broker's own single-instance lock and CONNECT_MIN_INTERVAL_MS bound how
+// often it is started; there is no count.
 struct SpawnFacts {
     bool tag_matches = false;  // HKCU\Software\yuragi-ime\Tag == this DLL's tag
     bool maintenance = false;  // Local\yuragi-ime-maintenance exists
     bool medium_integrity = false;  // not sandboxed (AppContainer/low), not elevated
-    uint32_t spawns = 0;  // this sign-in, from the volatile key
 };
-enum class SpawnDecision { Spawn, NotAllowed, Spent };
-inline SpawnDecision DecideSpawn(const SpawnFacts& f) {
-    if (!f.tag_matches || f.maintenance || !f.medium_integrity) return SpawnDecision::NotAllowed;
-    if (f.spawns >= BROKER_MAX_SPAWNS) return SpawnDecision::Spent;
-    return SpawnDecision::Spawn;
+inline bool MaySpawn(const SpawnFacts& f) {
+    return f.tag_matches && !f.maintenance && f.medium_integrity;
 }
 
 // Requests (the TIP -> broker messages, §5.5).
 inline std::string Hello(const std::string& tag) {
+    // passes: keys are let through here while the engine is not ready (§5.6).
     return "{\"op\":\"hello\",\"proto\":1,\"tag\":" + tip_json::Quote(tag) + ",\"bits\":" +
-           std::to_string(sizeof(void*) * 8) + "}";
+           std::to_string(sizeof(void*) * 8) + ",\"passes\":true}";
 }
 inline std::string ModsJson(Mods m) {
     std::string out = "[";

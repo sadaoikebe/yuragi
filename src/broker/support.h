@@ -1,4 +1,4 @@
-// Pieces both platforms share: bounded logs, engine.json, and the self-test.
+// Pieces beside the Broker: bounded logs, engine.json, and the self-test.
 #pragma once
 
 #include <cstdint>
@@ -62,10 +62,10 @@ private:
 
 std::string Timestamp();  // local time, ISO 8601 with milliseconds
 
-// logs/notices.log: one JSON line per notice the user was given, with its time
-// ({"time":..,"stopped":"hang"} or {"time":..,"warning":"config"}). The
-// management window's status tab reads the last stop from here (§9.4).
-void RecordNotice(const fs::path& logs, const Notice& notice);
+// logs/notices.log: one JSON line per stop the user was told about, with its
+// time ({"time":..,"stopped":"hang"}). The management window's status tab reads
+// the last stop from here (§9.4).
+void RecordStop(const fs::path& logs, Stop reason);
 
 // engine.json (REDESIGN §4.2): written by the installer next to the version.
 //  {"format":1, "python":"<abs python.exe>", "pythonw":"<abs pythonw.exe>",
@@ -78,12 +78,11 @@ struct EngineConfig {
 bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& error);
 
 // --selftest (REDESIGN §8.2 step 3): start the engine for real, convert once,
-// check that no window appeared, end it. Exit codes below.
+// end it. Exit codes below.
 enum SelfTestResult {
     SELFTEST_OK = 0,
     SELFTEST_NOT_READY = 1,  // exited or fell silent before ready
     SELFTEST_NOT_CONVERTED = 2,
-    SELFTEST_WINDOWS = 3,  // a window appeared
     SELFTEST_NO_REPLY = 4,
     SELFTEST_CANNOT_START = 5,
 };
@@ -91,7 +90,6 @@ enum SelfTestResult {
 class SelfTestPlatform : public Platform {
 public:
     virtual void CloseEngineInput() = 0;
-    virtual int CountEngineWindows() = 0;  // -1: this platform cannot count them
     virtual void Finish(int code) = 0;
 };
 

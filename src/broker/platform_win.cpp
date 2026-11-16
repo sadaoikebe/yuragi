@@ -8,7 +8,7 @@
 //
 //   yuragi-broker.exe                     the normal start (Run key, or a TIP)
 //   yuragi-broker.exe --selftest ENGINE_JSON
-//   test/development overrides: --engine-json PATH --data-dir DIR --pipe NAME --test-hooks
+//   test/development overrides: --engine-json PATH --data-dir DIR --pipe NAME
 #include <windows.h>
 
 #include <commctrl.h>
@@ -41,21 +41,15 @@ namespace broker {
 namespace {
 
 constexpr wchar_t BROKER_MUTEX[] = L"Local\\yuragi-ime-broker";
-constexpr wchar_t MAINTENANCE_MUTEX[] = L"Local\\yuragi-ime-maintenance";
-constexpr wchar_t SPAWN_MUTEX[] = L"Local\\yuragi-ime-spawn";
 constexpr wchar_t PRODUCT_KEY[] = L"Software\\yuragi-ime";
-constexpr wchar_t SESSION_KEY[] = L"Software\\yuragi-ime\\Session";
-constexpr wchar_t INSTALL_HELP[] =
-    L"https://github.com/sadaoikebe/yuragi/blob/main/docs/INSTALL.md";
 constexpr DWORD PIPE_BUFFER = 64 * 1024;
 constexpr UINT WM_APP_NOTICE = WM_APP + 1;
 constexpr UINT WM_APP_CLEAR = WM_APP + 2;
 constexpr UINT WM_APP_TRAY = WM_APP + 3;
 constexpr UINT WM_APP_EXIT = WM_APP + 4;
-constexpr UINT WM_APP_REASON = WM_APP + 5;
 constexpr ULONG_PTR KEY_IO = 1, KEY_ENGINE = 2, KEY_UI = 3;
 constexpr int UI_RETRY = 1;
-constexpr int BUTTON_RETRY = 101, BUTTON_LOGS = 102, BUTTON_REINSTALL = 103;
+constexpr int BUTTON_RETRY = 101, BUTTON_LOGS = 102;
 
 std::wstring Wide(const std::string& s) {
     if (s.empty()) return {};
@@ -247,50 +241,13 @@ private:
 
 // -- the notification (§9.3) ---------------------------------------------------
 
-struct Texts {
-    const wchar_t* title;
-    const wchar_t* body;
-    const wchar_t* detail;
-};
-
-Texts TextsFor(const Notice& n) {
-    const wchar_t* stopped_title = L"ゆらぎ: 日本語変換が止まりました";
-    const wchar_t* stopped_body =
-        L"入力済みの文字はそのまま残っています。ここを押すと、原因と直し方を表示します。";
-    if (n.stopped) {
-        switch (n.reason) {
-            case Stop::ProgramFiles:
-            case Stop::Dictionary:
-                return {stopped_title, stopped_body,
-                        L"必要なファイルが見つからないか、壊れています。入れ直すと直ります。"
-                        L"学習した内容と登録した単語は残ります。"};
-            case Stop::Cache:
-                return {stopped_title, stopped_body,
-                        L"辞書の準備ができませんでした。ディスクの空きを確認してください"
-                        L"（約 300MB 必要です）。"};
-            case Stop::Hang:
-                return {stopped_title, stopped_body, L"変換エンジンが反応しなくなりました。"};
-            default:
-                return {stopped_title, stopped_body, L"変換エンジンが繰り返し止まりました。"};
-        }
-    }
-    if (n.warning == "config")
-        return {L"ゆらぎ: 設定ファイルを読めませんでした", L"標準の設定で動いています。",
-                L"設定ファイル（.yuragi-ime\\config.json）の一部を読めませんでした。"
-                L"読めなかった項目は標準の値で動いています。設定ウィンドウの「設定」タブで直せます。"};
-    if (n.warning == "lm")
-        return {L"ゆらぎ: 言語モデルを使えません", L"辞書だけで変換しています。",
-                L"候補の順番を決める言語モデルを読み込めませんでした。"
-                L"辞書だけで変換しています。入れ直すと直ることがあります。"};
-    if (n.warning == "learning-read")
-        return {L"ゆらぎ: 学習履歴を読めませんでした", L"学習なしで動いています。",
-                L"学習履歴（.yuragi-ime\\learning.jsonl）を読めませんでした。"
-                L"ほかのプログラムが開いている可能性があります。次に起動したとき、もう一度読みます。"};
-    if (n.warning == "learning-write")
-        return {L"ゆらぎ: 学習を保存できませんでした", L"覚えた内容は保存されず、今だけ有効です。",
-                L"学習履歴を書き込めませんでした。ディスクの空きを確認してください。"};
-    return {L"ゆらぎ: 注意", L"", L""};
-}
+// One notice: the engine stopped (§9.3). Warnings are not notified.
+constexpr wchar_t STOPPED_TITLE[] = L"ゆらぎ: 日本語変換が止まりました";
+constexpr wchar_t STOPPED_BODY[] =
+    L"入力済みの文字はそのまま残っています。ここを押すと、もう一度試せます。";
+constexpr wchar_t STOPPED_DETAIL[] =
+    L"変換エンジンが繰り返し止まったか、反応しなくなりました。「もう一度試す」で起動し直します。"
+    L"直らなければ、インストールの1行をもう一度実行してください。";
 
 class NotifyUi {
 public:
@@ -309,9 +266,8 @@ public:
             thread_.join();
         }
     }
-    void Post(const Notice& notice) { PostMessageW(hwnd_, WM_APP_NOTICE, 0, (LPARAM)new Notice(notice)); }
+    void PostStopped() { PostMessageW(hwnd_, WM_APP_NOTICE, 0, 0); }
     void ClearStopped() { PostMessageW(hwnd_, WM_APP_CLEAR, 0, 0); }
-    void ShowReason() { PostMessageW(hwnd_, WM_APP_REASON, 0, 0); }
 
 private:
     void Run(HANDLE created) {
@@ -348,19 +304,13 @@ private:
 
     LRESULT Handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
         if (message == WM_APP_NOTICE) {
-            std::unique_ptr<Notice> notice(reinterpret_cast<Notice*>(lparam));
-            if (notice->stopped || !stopped_) current_ = *notice;
-            if (notice->stopped) stopped_ = true;
-            ShowBalloon(*notice);
+            stopped_ = true;
+            ShowBalloon();
             return 0;
         }
         if (message == WM_APP_CLEAR) {
             stopped_ = false;
             RemoveIcon();
-            return 0;
-        }
-        if (message == WM_APP_REASON) {
-            if (stopped_) ShowDialog();  // asked for from the TIP's menu
             return 0;
         }
         if (message == WM_APP_EXIT || message == WM_ENDSESSION) {
@@ -373,37 +323,31 @@ private:
                 case NIN_SELECT:
                 case NIN_KEYSELECT:
                 case WM_CONTEXTMENU:
-                    ShowDialog();  // the user asked for it (§9.3)
-                    break;
-                case NIN_BALLOONTIMEOUT:
-                    if (!stopped_) RemoveIcon();  // a warning leaves no icon behind
+                    if (stopped_) ShowDialog();  // the user asked for it (§9.3)
                     break;
             }
             return 0;
         }
         if (message == taskbar_created_ && icon_) {
             icon_ = false;  // Explorer restarted: the icon is gone; show the stop again
-            if (stopped_) ShowBalloon(current_);
+            if (stopped_) ShowBalloon();
             return 0;
         }
         return DefWindowProcW(hwnd, message, wparam, lparam);
     }
 
-    void ShowBalloon(const Notice& notice) {
-        Texts t = TextsFor(notice);
+    void ShowBalloon() {
         NOTIFYICONDATAW nid = {};
         nid.cbSize = sizeof nid;
         nid.hWnd = hwnd_;
         nid.uID = 1;
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP | NIF_INFO;
         nid.uCallbackMessage = WM_APP_TRAY;
-        nid.hIcon = LoadIconW(nullptr, notice.stopped ? IDI_WARNING : IDI_INFORMATION);
+        nid.hIcon = LoadIconW(nullptr, IDI_WARNING);
         wcsncpy_s(nid.szTip, L"ゆらぎ", _TRUNCATE);
-        wcsncpy_s(nid.szInfoTitle, t.title, _TRUNCATE);
-        std::wstring body = t.body;
-        if (!notice.stopped) body += L"変換は使えます。ここを押すと詳しく表示します。";
-        wcsncpy_s(nid.szInfo, body.c_str(), _TRUNCATE);
-        nid.dwInfoFlags = (notice.stopped ? NIIF_WARNING : NIIF_INFO) | NIIF_NOSOUND;
+        wcsncpy_s(nid.szInfoTitle, STOPPED_TITLE, _TRUNCATE);
+        wcsncpy_s(nid.szInfo, STOPPED_BODY, _TRUNCATE);
+        nid.dwInfoFlags = NIIF_WARNING | NIIF_NOSOUND;
         if (!icon_) {
             Shell_NotifyIconW(NIM_ADD, &nid);
             nid.uVersion = NOTIFYICON_VERSION_4;
@@ -425,35 +369,23 @@ private:
     }
 
     void ShowDialog() {
-        Texts t = TextsFor(current_);
-        std::vector<TASKDIALOG_BUTTON> buttons;
-        if (current_.stopped) {
-            if (current_.reason == Stop::ProgramFiles || current_.reason == Stop::Dictionary) {
-                buttons.push_back({BUTTON_REINSTALL, L"入れ直す手順を開く"});
-            } else {
-                buttons.push_back({BUTTON_RETRY, L"もう一度試す"});
-                if (current_.reason != Stop::Cache)
-                    buttons.push_back({BUTTON_LOGS, L"記録のフォルダを開く"});
-            }
-        }
-        buttons.push_back({IDCLOSE, L"閉じる"});
+        TASKDIALOG_BUTTON buttons[] = {
+            {BUTTON_RETRY, L"もう一度試す"}, {BUTTON_LOGS, L"記録のフォルダを開く"}, {IDCLOSE, L"閉じる"}};
         TASKDIALOGCONFIG config = {};
         config.cbSize = sizeof config;
         config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_USE_COMMAND_LINKS;
         config.pszWindowTitle = L"ゆらぎ";
-        config.pszMainIcon = current_.stopped ? TD_WARNING_ICON : TD_INFORMATION_ICON;
-        config.pszMainInstruction = t.title + wcslen(L"ゆらぎ: ");
-        config.pszContent = t.detail;
-        config.pButtons = buttons.data();
-        config.cButtons = (UINT)buttons.size();
+        config.pszMainIcon = TD_WARNING_ICON;
+        config.pszMainInstruction = STOPPED_TITLE + wcslen(L"ゆらぎ: ");
+        config.pszContent = STOPPED_DETAIL;
+        config.pButtons = buttons;
+        config.cButtons = ARRAYSIZE(buttons);
         int pressed = 0;
         if (FAILED(TaskDialogIndirect(&config, &pressed, nullptr, nullptr))) return;
         if (pressed == BUTTON_RETRY) {
             PostQueuedCompletionStatus(iocp_, 0, KEY_UI, reinterpret_cast<LPOVERLAPPED>(UI_RETRY));
         } else if (pressed == BUTTON_LOGS) {
             ShellExecuteW(nullptr, L"open", logs_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        } else if (pressed == BUTTON_REINSTALL) {
-            ShellExecuteW(nullptr, L"open", INSTALL_HELP, nullptr, nullptr, SW_SHOWNORMAL);
         }
     }
 
@@ -464,7 +396,6 @@ private:
     UINT taskbar_created_ = 0;
     bool icon_ = false;
     bool stopped_ = false;
-    Notice current_;
 };
 
 // -- the platform ----------------------------------------------------------------
@@ -486,18 +417,6 @@ struct Pipe {
 };
 
 class WinPlatform : public SelfTestPlatform {
-    struct Search {
-        std::set<DWORD> pids;
-        int count = 0;
-    };
-    static BOOL CALLBACK CountWindow(HWND hwnd, LPARAM p) {
-        auto search = reinterpret_cast<Search*>(p);
-        DWORD pid = 0;
-        GetWindowThreadProcessId(hwnd, &pid);
-        if (search->pids.count(pid) && IsWindowVisible(hwnd)) ++search->count;
-        return TRUE;
-    }
-
 public:
     WinPlatform(fs::path data_dir, EngineConfig config, bool have_config)
         : data_dir_(data_dir), config_(config), have_config_(have_config),
@@ -615,21 +534,6 @@ public:
 
     void CloseEngineInput() override { input_.reset(); }
 
-    int CountEngineWindows() override {
-        struct Ids {
-            JOBOBJECT_BASIC_PROCESS_ID_LIST list;
-            ULONG_PTR more[63];
-        } ids{};
-        ids.list.NumberOfAssignedProcesses = 64;
-        if (!QueryInformationJobObject(job_, JobObjectBasicProcessIdList, &ids, sizeof ids, nullptr))
-            return -1;
-        Search search;
-        for (DWORD i = 0; i < ids.list.NumberOfProcessIdsInList; ++i)
-            search.pids.insert((DWORD)ids.list.ProcessIdList[i]);
-        EnumWindows(&WinPlatform::CountWindow, (LPARAM)&search);
-        return search.count;
-    }
-
     void WriteClient(ClientId id, const std::string& line) override {
         auto it = pipes_.find(id);
         if (it == pipes_.end() || it->second->closed) return;
@@ -637,15 +541,12 @@ public:
         PumpWrite(*it->second);
     }
 
-    void Notify(const Notice& notice) override {
-        RecordNotice(data_dir_ / "logs", notice);
-        if (ui_) ui_->Post(notice);
+    void NotifyStopped(Stop reason) override {
+        RecordStop(data_dir_ / "logs", reason);
+        if (ui_) ui_->PostStopped();
     }
     void ClearStopped() override {
         if (ui_) ui_->ClearStopped();
-    }
-    void ShowReason() override {
-        if (ui_) ui_->ShowReason();
     }
 
     void OpenAdmin() override {
@@ -663,29 +564,6 @@ public:
         } else {
             Log(LastError("starting the management window"));
         }
-    }
-
-    void ResetSpawnCount() override {
-        HANDLE mutex = CreateMutexW(nullptr, FALSE, SPAWN_MUTEX);
-        if (!mutex) return;
-        if (WaitForSingleObject(mutex, 1000) == WAIT_OBJECT_0) {
-            HKEY key;
-            if (RegCreateKeyExW(HKEY_CURRENT_USER, SESSION_KEY, 0, nullptr, REG_OPTION_VOLATILE,
-                                KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
-                DWORD zero = 0;
-                RegSetValueExW(key, L"BrokerSpawns", 0, REG_DWORD, (const BYTE*)&zero, sizeof zero);
-                RegCloseKey(key);
-            }
-            ReleaseMutex(mutex);
-        }
-        CloseHandle(mutex);
-    }
-
-    bool MaintenanceActive() override {
-        HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, MAINTENANCE_MUTEX);
-        if (!mutex) return false;
-        CloseHandle(mutex);
-        return true;
     }
 
     void Log(const std::string& line) override { broker_log_.Write(Timestamp() + " " + line); }
@@ -915,7 +793,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     fs::path data_dir = KnownFolder(FOLDERID_Profile) / L".yuragi-ime";
     fs::path engine_json, selftest;
     std::wstring pipe_name;
-    bool test_hooks = false;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         auto value = [&]() -> std::wstring { return i + 1 < argc ? argv[++i] : L""; };
@@ -923,7 +800,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         else if (a == L"--engine-json") engine_json = value();
         else if (a == L"--pipe") pipe_name = value();
         else if (a == L"--selftest") selftest = value();
-        else if (a == L"--test-hooks") test_hooks = true;
         else return 2;
     }
     LocalFree(argv);
@@ -967,10 +843,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
     platform.StartUi();
-    Broker::Options options;
-    options.installed = installed;
-    options.test_hooks = test_hooks;
-    Broker core(platform, options);
+    Broker core(platform);
     BrokerHandler handler(core);
     platform.SetHandler(&handler);
     platform.OnRetry([&core] { core.Retry(); });

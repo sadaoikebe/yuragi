@@ -39,7 +39,7 @@ class KanaKeyTest(unittest.TestCase):
         cls.lex = real_lex()
 
     def session(self):
-        return ImeSession(_lex=self.lex, learning_path=None)
+        return ImeSession(_lex=self.lex)
 
     def test_f7_converts_unconverted_input_to_katakana(self):
         s = self.session()

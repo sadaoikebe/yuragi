@@ -12,8 +12,7 @@ from yuragi.lattice.table import load_table
 
 class ServerTest(unittest.TestCase):
     def test_direct_dispatch_and_reset(self):
-        session = ImeSession(_table=load_table(), _lex=MozcLex({}, set(), [0] * 4, 2),
-                             learning_path=None)
+        session = ImeSession(_table=load_table(), _lex=MozcLex({}, set(), [0] * 4, 2))
         def send(op, **kwargs):
             return server.dispatch(session, {"op": op, **kwargs})
 
@@ -31,21 +30,18 @@ class ServerTest(unittest.TestCase):
                              ("", "", None))
         self.assertTrue(send("reset")["direct"])
         self.assertEqual(send("timeout", t=100)["composition"], "")
-        self.assertFalse(send("toggle_direct")["direct"])
+        self.assertFalse(send("set_direct", direct=False)["direct"])
         self.assertFalse(send("down", vk=65, t=200)["pass_through"])
         send("up", vk=65, t=230)
         self.assertEqual(send("down", vk=13, t=300)["commit"], "う")
-        with self.assertRaises(ValueError):
-            send("set_direct", direct="false")
 
     def test_direct_transition_discards_pending_chord(self):
-        session = ImeSession(_table=load_table(), _lex=MozcLex({}, set(), [0] * 4, 2),
-                             learning_path=None)
+        session = ImeSession(_table=load_table(), _lex=MozcLex({}, set(), [0] * 4, 2))
         send = lambda msg: server.dispatch(session, msg)
         self.assertIsNotNone(send({"op": "down", "vk": 65, "t": 0})["timer"])
-        reply = send({"op": "toggle_direct"})
+        reply = send({"op": "set_direct", "direct": True})
         self.assertEqual((reply["direct"], reply["timer"], reply["commit"]), (True, None, ""))
-        send({"op": "toggle_direct"})
+        send({"op": "set_direct", "direct": False})
         self.assertEqual(send({"op": "up", "vk": 65, "t": 10})["composition"], "")
         self.assertEqual(send({"op": "timeout", "t": 200})["composition"], "")
 

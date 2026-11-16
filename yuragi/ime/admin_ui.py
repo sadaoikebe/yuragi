@@ -5,8 +5,8 @@
 --dict-dir is the dictionary the engine was given (the installer's shared copy);
 the 状態 tab checks the files there against the manifest.
 
-A thin shell over the same code as the manage CLI (personal, learning_admin,
-config), on the same files the engine uses. AdminModel holds everything the
+A thin shell over personal, learning_admin and config, on the same files the
+engine uses. AdminModel holds everything the
 window does and imports no tkinter, so it is tested without a display;
 AdminWindow only lays out widgets and forwards to it.
 
@@ -27,7 +27,7 @@ import os
 from pathlib import Path
 import sys
 
-from . import broker_client, config, learning_admin, manage, personal
+from . import broker_client, config, learning_admin, personal
 from .learning import LearningStore
 
 POS_NAMES = list(personal.POS_IDS)
@@ -61,9 +61,8 @@ ON_OFF = {"true": "オン", "false": "オフ"}
 # Every setting config.json can hold, in the order the window lists them.
 SETTINGS: dict[str, SettingText] = {
     "learning": SettingText(
-        "学習", "確定した変換を覚えて、次から上位に出します。一時停止中は、覚えた内容は"
-        "使いますが、新しくは覚えません。",
-        {"on": "学習する", "paused": "一時停止", "off": "使わない"}, implied="on"),
+        "学習", "確定した変換を覚えて、次から上位に出します。",
+        {"on": "学習する", "off": "使わない"}, implied="on"),
     "prediction": SettingText(
         "入力の予測", "変換する前の入力中に Tab キーを押すと、学習した内容と辞書から"
         "続きの候補を出します。",
@@ -112,20 +111,13 @@ SETTINGS: dict[str, SettingText] = {
         "変換エンジンのログに書きます（入力内容は書きません）。", ON_OFF),
 }
 
-LEARNING_STATES = {"on": "学習中", "paused": "一時停止中", "off": "使わない設定"}
-ENGINE_STATES = {"ready": "動作中", "starting": "起動中", "down": "停止中",
-                 "not-installed": "インストールされていません"}
+LEARNING_STATES = {"on": "学習中", "off": "使わない設定"}
+ENGINE_STATES = {"ready": "動作中", "starting": "起動中", "down": "停止中"}
 WARNINGS = {
     "lm": "言語モデルを使えません（辞書だけで変換しています）",
-    "config": "設定ファイルの一部を読めませんでした（その項目は既定値で動いています）",
-    "learning-read": "学習履歴を読めませんでした（学習なしで動いています）",
-    "learning-write": "学習を保存できませんでした（覚えた内容は保存されず、今だけ有効です）",
 }
 STOP_REASONS = {
-    "program-files": "必要なプログラムのファイルが見つからないか、壊れていた",
-    "dictionary": "辞書のファイルが見つからないか、壊れていた",
-    "cache": "辞書の準備ができなかった（ディスクの空きが足りない可能性）",
-    "repeated": "変換エンジンが繰り返し止まった",
+    "exited": "変換エンジンが繰り返し止まった（理由は記録のフォルダの engine.log）",
     "hang": "変換エンジンが反応しなくなった",
 }
 
@@ -174,7 +166,7 @@ class AdminModel:
         """Re-read config.json (it decides where the word and learning files are)."""
         from .server import argument_parser
         self.parser = argument_parser()
-        self.settings = manage.server_settings(self.runtime_dir, self.config_path)
+        self.settings = config.load(argument_parser(), self.runtime_dir, self.config_path)
 
     # -- word registration (personal lexicon) --------------------------------
 
@@ -231,22 +223,6 @@ class AdminModel:
         words = sum(p.user_word for p in pairs)
         return (f"学習: {LEARNING_STATES[self.learning_state()]} ・ 学習した変換 {len(pairs)} 件"
                 f"（うち単語として覚えたもの {words} 件） ・ 登録した単語 {len(self.words())} 件")
-
-    def can_toggle_pause(self) -> bool:
-        return self.learning_state() != "off"
-
-    def pause_label(self) -> str:
-        return "学習を再開" if self.learning_state() == "paused" else "学習を一時停止"
-
-    def toggle_pause(self) -> Outcome:
-        """Pause or resume (the learning setting); off stays off."""
-        state = self.learning_state()
-        if state == "off":
-            return Outcome(False, "「学習」の設定が「使わない」なので、一時停止はできません")
-        learning_admin.set_mode(self.settings, "on" if state == "paused" else "paused")
-        self.reload()
-        done = "再開しました" if self.learning_state() == "on" else "一時停止しました"
-        return Outcome(True, f"学習を{done}。{RESTART_NOTE}")
 
     def forget(self, reading: str, surface: str) -> Outcome:
         if not self.learning_file.exists():
@@ -560,8 +536,6 @@ class AdminWindow:
         entry.pack(side="left", padx=(2, self.px(8)))
         entry.bind("<Return>", lambda e: self.refresh())
         ttk.Button(top, text="検索", command=self.refresh).pack(side="left")
-        self.pause_button = ttk.Button(top, command=lambda: self._show(self.model.toggle_pause()))
-        self.pause_button.pack(side="right")
         self.l_counts = tk.StringVar()
         ttk.Label(frame, textvariable=self.l_counts).pack(fill="x")
         actions = ttk.Frame(frame)
@@ -648,8 +622,6 @@ class AdminWindow:
         self._fill(self.words_tree, [(w.reading, w.surface, w.pos, w.cost) for w in m.words()])
         self._fill(self.learning_tree, [m.learned_row(p) for p in m.learned(self.l_query.get())])
         self.l_counts.set(m.learning_counts())
-        self.pause_button.configure(text=m.pause_label(),
-                                    state="normal" if m.can_toggle_pause() else "disabled")
         rows = m.setting_rows()
         self._fill(self.settings_tree, [(r.label, r.value, r.help) for r in rows])
         self._setting_rows = {str(i): r for i, r in enumerate(rows)}
@@ -673,8 +645,7 @@ def main(argv=None) -> int:
     try:
         import tkinter as tk
     except ImportError:
-        print("tkinter is not available in this Python; use python -m yuragi.ime.manage",
-              file=sys.stderr)
+        print("tkinter is not available in this Python", file=sys.stderr)
         return 1
     declare_dpi_aware()
     root = tk.Tk()

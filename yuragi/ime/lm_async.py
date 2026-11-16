@@ -325,7 +325,7 @@ class ConnectionPipeline:
         op = msg.get("op")
         if "t" in msg:
             self.last_t = int(msg["t"])
-        if self.sess._await is not None and op in ("reset", "set_direct", "toggle_direct"):
+        if self.sess._await is not None and op in ("reset", "set_direct"):
             self._abandon()
         if (self.sess._await is not None and op == "timeout"
                 and self.queue and self.queue[-1].get("op") == "timeout"):

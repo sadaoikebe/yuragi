@@ -78,7 +78,7 @@ class PartialCommitTest(unittest.TestCase):
 
     def session(self, *, learning=False, table=None):
         store = LearningStore(self.path, clock=lambda: 1_800_000_000.0) if learning else None
-        return ImeSession(_table=table or load_table(), _lex=self.lex, learning_path=None,
+        return ImeSession(_table=table or load_table(), _lex=self.lex,
                           _learning=store)
 
     def typed(self, reading, *, learning=False):

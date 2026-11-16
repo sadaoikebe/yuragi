@@ -29,11 +29,11 @@ SETTINGS = Namespace(log_text=False, lm_timing=False, lm_grace_ms=30, lm_deadlin
                      lm_prefetch="thumb", lm_prefetch_delay_ms=30)
 
 
-def loaded_session(learning_path=None):
+def loaded_session():
     # A has plain=う. A confirmation of the initially second row must change the best.
     lex = MozcLex({"う": [Entry("宇", "う", 1, 1, 100), Entry("卯", "う", 1, 1, 200)]},
                   {"う"}, [0] * 4, 2)
-    session = ImeSession(_table=load_table(), _lex=lex, learning_path=learning_path)
+    session = ImeSession(_table=load_table(), _lex=lex)
     session.load()
     return session
 
@@ -57,7 +57,7 @@ class EngineCase(unittest.TestCase):
         self.seq = 0
 
     def engine(self, loaded=None, worker=None, settings=SETTINGS):
-        engine = Engine(Channel(), Namespace(test_hooks=False))
+        engine = Engine(Channel(), Namespace())
         engine.loaded = loaded or loaded_session()
         engine.worker = worker
         engine.settings = settings
@@ -90,6 +90,7 @@ class SessionsTest(EngineCase):
         with redirect_stderr(io.StringIO()):
             self.assertTrue(self.request(engine, 1, {"op": "reset"})["error"])  # not open
         self.assertEqual(self.type_a(engine, 2)["composition"], "宇")
+
 
 class SlowScorer:
     """Prefers 卯 over the Viterbi 宇; each call sleeps (a slow model)."""

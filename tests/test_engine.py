@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -131,52 +130,6 @@ class EngineCase(unittest.TestCase):
         (self.data / "config.json").write_text(json.dumps(values), encoding="utf-8")
 
 
-class BrokenUserFilesTest(EngineCase):
-    """§6.2: the user's own files never keep the engine from starting."""
-
-    def test_broken_files_reach_ready_and_requests_are_contained(self):
-        (self.data / "config.json").write_text('{"lm_k": 4,, broken', encoding="utf-8")
-        (self.data / "personal_lexicon.jsonl").write_text(
-            '{"reading": "おやゆび", "surface": "親指"}\n{"reading": \n', encoding="utf-8")
-        (self.data / "learning.jsonl").write_text("not json\n", encoding="utf-8")
-        engine = self.start("--test-hooks")
-        ready, _ = engine.wait_ready()
-        self.assertEqual(ready["proto"], 1)
-        self.assertIn("config", ready["warnings"])
-        log = engine.log()
-        self.assertIn("personal lexicon: 1 line(s) skipped", log)
-        self.assertIn("1 lines, 0 live, 1 skipped", log)
-
-        engine.send({"op": "open", "sid": 1})
-        self.assertEqual(engine.tap(1, VK_KA, 0)["composition"], "か")
-        # §6.4: a request that raises answers error:true from a clean session ...
-        reply = engine.request(1, {"op": "test_raise"})
-        self.assertTrue(reply["error"])
-        self.assertEqual((reply["composition"], reply["n_tokens"]), ("", 0))
-        self.assertIn("request failed: RuntimeError at engine.py", engine.log())
-        # ... and the next request is served normally.
-        reply = engine.tap(1, VK_KA, 1000)
-        self.assertNotIn("error", reply)
-        self.assertEqual(reply["composition"], "か")
-
-        # §6.5: the 201st character changes nothing and says so.
-        engine.send({"op": "open", "sid": 2})
-        t = 0
-        for i in range(200):
-            reply = engine.tap(2, VK_KA, t)
-            t += 300
-            self.assertNotIn("full", reply)
-        self.assertEqual(reply["n_tokens"], 200)
-        before = reply["composition"]
-        reply = engine.tap(2, VK_KA, t)
-        self.assertTrue(reply["full"])
-        self.assertEqual((reply["n_tokens"], reply["composition"]), (200, before))
-        reply = engine.request(2, {"op": "down", "vk": 0x0D, "t": t + 400})  # Enter commits
-        self.assertEqual(reply["commit"], before)
-        self.assertNotIn("full", reply)
-        self.assertEqual(engine.close(), 0)
-
-
 class CacheTest(EngineCase):
     def test_zero_byte_cache_is_rebuilt_with_progress(self):
         cache = self.tmp / "cache"
@@ -193,50 +146,5 @@ class CacheTest(EngineCase):
         self.assertEqual(engine.close(), 0)
 
 
-class DictionaryTest(EngineCase):
-    """§6.2/§6.6: the program's own files stop the engine, with a reason."""
-
-    def dictionary_copy(self) -> Path:
-        copy = self.tmp / "dict"
-        copy.mkdir()
-        for path in mozc_dict.DICT_DIR.iterdir():
-            try:
-                os.link(path, copy / path.name)
-            except OSError:
-                shutil.copy2(path, copy / path.name)
-        return copy
-
-    def test_a_missing_dictionary_file_exits_21(self):
-        copy = self.dictionary_copy()
-        (copy / "dictionary03.txt").unlink()
-        engine = self.start("--dict-dir", copy)
-        self.assertIsNone(engine.next(60))  # no ready, no output at all
-        self.assertEqual(engine.proc.wait(60), 21)
-        log = engine.log()
-        self.assertIn("fatal 21 dictionary-missing", log)
-        self.assertIn("missing dictionary03.txt", log)
-
-    def test_a_changed_dictionary_file_exits_21(self):
-        copy = self.dictionary_copy()
-        target = copy / "suffix.txt"
-        data = target.read_bytes()
-        target.unlink()  # a hard link: do not write through to the real file
-        target.write_bytes(data.replace(b"\t", b" ", 1))
-        engine = self.start("--dict-dir", copy)
-        self.assertEqual(engine.proc.wait(60), 21)
-        self.assertIn("fatal 21 dictionary-changed", engine.log())
-
-    def test_unreadable_program_files_exit_20(self):
-        program = self.tmp / "program"
-        shutil.copytree(ROOT / "yuragi", program / "yuragi",
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        (program / "data").mkdir()
-        # The dictionary manifest is a program file; without it nothing can start.
-        engine = self.start("--dict-dir", mozc_dict.DICT_DIR, cwd=program)
-        self.assertEqual(engine.proc.wait(60), 20)
-        self.assertIn("fatal 20 program-files-unreadable", engine.log())
-
-
-# What counts as opening a connection: connecting, resolving a name, sending.
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,6 @@ from typing import Literal
 
 from .alternation import FREE, Plan, Sides, admits, after
 from .decode import DecodeResult, Piece
-from .expand import is_literal_face, literal_text
 from .mozc_dict import BOS_ID, MAX_WORD_MORA, POS_KEEP, UNK_COST, UNK_LID, Entry, MozcLex
 
 # Distinguish an empty run after a literal from a real dictionary RID=0.
@@ -73,10 +72,9 @@ def spans_from(tokens: list[dict], i: int, lex: MozcLex, learning=None,
             out.append(Word(i, end, e, sides=sides))
     have_one = {w.entry.reading for w in out if w.end == i + 1}
     for kana, sides in plan.single(i):
-        if tokens[i]["kind"] == "literal" or is_literal_face(kana):
+        if tokens[i]["kind"] == "literal":
             # Explicit literals already contain their display text.
-            text = kana if tokens[i]["kind"] == "literal" else literal_text(kana)
-            out.append(Word(i, i + 1, Entry(text, text, BOS_ID, BOS_ID, 0), literal=True,
+            out.append(Word(i, i + 1, Entry(kana, kana, BOS_ID, BOS_ID, 0), literal=True,
                             sides=sides))
         elif kana not in have_one:
             out.append(Word(i, i + 1, Entry(kana, kana, UNK_LID, UNK_LID, UNK_COST), True,

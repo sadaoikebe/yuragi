@@ -176,7 +176,7 @@ class DeadlineAndAbandonTest(unittest.TestCase):
         cls.lex = real_lex()
 
     def session(self):
-        return ImeSession(_table=load_table(), _lex=self.lex, learning_path=None)
+        return ImeSession(_table=load_table(), _lex=self.lex)
 
     def pipeline(self, **kwargs):
         sess = self.session()
@@ -225,7 +225,7 @@ class DeadlineAndAbandonTest(unittest.TestCase):
                          run_reference(self.session, events, None))
 
     def test_reset_toggle_and_disconnect_abandon(self):
-        for op in ({"op": "reset"}, {"op": "toggle_direct"}, "close"):
+        for op in ({"op": "reset"}, {"op": "set_direct", "direct": True}, "close"):
             with self.subTest(op=op):
                 pipe, worker, clock = self.pipeline()
                 for event in Typist().kana("きしゃ").space().kana("こう", gap=20).events:
@@ -290,7 +290,7 @@ def ready_worker(scorer, **kwargs):
 
 
 def u_request(context="上"):
-    sess = ImeSession(_table=load_table(), _lex=small_lex(), learning_path=None)
+    sess = ImeSession(_table=load_table(), _lex=small_lex())
     sess.on_key(True, 0x41, 0)
     sess.on_key(False, 0x41, 30)
     sess._lm_context = context

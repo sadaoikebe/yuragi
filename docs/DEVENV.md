@@ -2,8 +2,9 @@
 
 ## Linux（変換エンジン・ブローカー・TIP の判断の試験）
 
-Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても、Python の全試験、ブローカー（POSIX 版）の
-試験、TIP の判断（`tip_logic.h`）の試験が回る。CI の Linux ジョブと同じ。
+Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても、Python の試験（ブローカーを実プロセスで
+動かす `tests/test_broker.py` は Windows だけ）、ブローカーの中核（`broker_core`）の試験、TIP の判断
+（`tip_logic.h`）の試験が回る。CI の Linux ジョブと同じ。
 
 ```sh
 python -m tools.eval.fetch_mozc_dict                 # 初回のみ。Mozc OSS 辞書

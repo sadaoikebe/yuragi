@@ -22,4 +22,3 @@
   elevated.ps1   管理者権限で動く部分 (配置・登録・削除の 3 つだけ)
   fetch_model.py LM モデルを固定リビジョンで取得する
   requirements.txt  依存の固定
-  smoke.py       開発用: 実辞書で変換を 1 回確かめる

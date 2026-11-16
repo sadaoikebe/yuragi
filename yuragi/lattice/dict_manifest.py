@@ -6,10 +6,7 @@ it: every required file present with the recorded size and hash, and no unrecord
 dictionary*.txt (the loader globs them, so a stray file would change results).
 
   python -m yuragi.lattice.dict_manifest write --label local-snapshot-20261111
-  python -m yuragi.lattice.dict_manifest verify [--deep]
-
---deep also parses the text files and compares them with the pickle cache,
-which load_lex trusts without checking (the plan's "is the cache the text?").
+  python -m yuragi.lattice.dict_manifest verify
 """
 from __future__ import annotations
 
@@ -17,11 +14,10 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import pickle
 import sys
 
 from . import mozc_dict
-from .mozc_dict import MANIFEST, ROOT, USER_LEX, _parse_connection, _parse_dict_files
+from .mozc_dict import MANIFEST, ROOT, USER_LEX
 FORMAT = 1
 # The loader's inputs (dictionary*, suffix, connection, id.def for POS names),
 # plus the evaluation set and the upstream notices that travel with them.
@@ -58,8 +54,7 @@ def build(label: str, upstream_commit: str = "unknown") -> dict:
         # Hand-written corrections are applied separately (an evaluation
         # condition of their own), so they are recorded, not mixed in.
         "user_lexicon": {"path": str(USER_LEX.relative_to(ROOT)), **describe_text(USER_LEX)},
-        # No cache hash: pickled sets follow the per-process string hash seed,
-        # so a rebuilt cache never has the same bytes. --deep checks its content.
+        # No cache hash: the cache is named after the dictionary's hash.
     }
 
 
@@ -82,30 +77,6 @@ def verify(manifest: dict) -> list[str]:
     return problems
 
 
-def cache_matches_text() -> list[str]:
-    """Compare the pickle cache with a fresh parse of the text files."""
-    cache = mozc_dict.CACHE
-    if not cache.exists():
-        return [f"no cache at {cache}"]
-    cached = pickle.loads(cache.read_bytes())
-    by_reading, prefixes = _parse_dict_files()
-    connect, pos_size = _parse_connection()
-    problems = []
-    if cached.pos_size != pos_size or cached.connect != connect:
-        problems.append("cache connection matrix differs from connection_single_column.txt")
-    if cached.prefixes != prefixes:
-        problems.append("cache prefixes differ from the dictionary text")
-    if set(cached.by_reading) != set(by_reading):
-        problems.append("cache readings differ from the dictionary text")
-    else:
-        key = lambda e: (e.surface, e.lid, e.rid, e.cost)  # noqa: E731
-        changed = sum(sorted(map(key, cached.by_reading[r])) != sorted(map(key, b))
-                      for r, b in by_reading.items())
-        if changed:
-            problems.append(f"cache entries differ for {changed} readings")
-    return problems
-
-
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,7 +86,6 @@ def main(argv=None) -> int:
     w.add_argument("--manifest", type=Path, default=MANIFEST)
     v = sub.add_parser("verify", help="check the current files against the manifest")
     v.add_argument("--manifest", type=Path, default=MANIFEST)
-    v.add_argument("--deep", action="store_true", help="also compare the cache with the text")
     v.add_argument("--dict-dir", type=Path, default=None,
                    help="check the files in this directory (the installer's shared copy)")
     args = parser.parse_args(argv)
@@ -128,7 +98,7 @@ def main(argv=None) -> int:
         print(f"wrote {args.manifest}")
         return 0
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    problems = verify(manifest) + (cache_matches_text() if args.deep else [])
+    problems = verify(manifest)
     for p in problems:
         print(p)
     print(f"{manifest['label']}: " + ("OK" if not problems else f"{len(problems)} problem(s)"))

@@ -3,7 +3,7 @@
 // The TIP runs inside other people's applications, so it does as little as
 // possible: it sends keys to the broker over a named pipe and writes the
 // replies on screen. It never starts Python, never retries, keeps no files.
-// The only process it may start is the broker, under the four conditions of
+// The only process it may start is the broker, under the three conditions of
 // §7.3. Its decisions that need no TSF live in tip_logic.h (tested on any OS).
 //
 // Practices from SampleIME / CorvusSKK / Mozc:
@@ -76,9 +76,7 @@ static HINSTANCE g_hinst = nullptr;
 static bool g_log = false;  // tip.json "log": true
 
 static const wchar_t kProductKey[] = L"Software\\yuragi-ime";
-static const wchar_t kSessionKey[] = L"Software\\yuragi-ime\\Session";
 static const wchar_t kMaintenanceMutex[] = L"Local\\yuragi-ime-maintenance";
-static const wchar_t kSpawnMutex[] = L"Local\\yuragi-ime-spawn";
 
 // Only when tip.json asks for it: every application writes here.
 static void Log(const wchar_t* fmt, ...) {
@@ -317,41 +315,13 @@ static bool MediumIntegrity() {
     return medium;
 }
 
-// The spawn count of this sign-in, in a volatile key (gone at sign-out),
-// read and raised under Local\yuragi-ime-spawn. Returns the decision.
-static tip_logic::SpawnDecision ClaimSpawn() {
+// Whether this process may start the broker (§7.3).
+static bool MaySpawn() {
     tip_logic::SpawnFacts facts;
     facts.tag_matches = TagMatches();
     facts.maintenance = MaintenanceActive();
     facts.medium_integrity = MediumIntegrity();
-    auto decision = tip_logic::DecideSpawn(facts);
-    if (decision != tip_logic::SpawnDecision::Spawn) return decision;
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, kSpawnMutex);
-    if (!mutex) return tip_logic::SpawnDecision::Spent;
-    if (WaitForSingleObject(mutex, 1000) != WAIT_OBJECT_0) {
-        CloseHandle(mutex);
-        return tip_logic::SpawnDecision::Spent;
-    }
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, kSessionKey, 0, nullptr, REG_OPTION_VOLATILE,
-                        KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
-        DWORD count = 0, size = sizeof count;
-        if (RegGetValueW(key, nullptr, L"BrokerSpawns", RRF_RT_REG_DWORD, nullptr, &count, &size) !=
-            ERROR_SUCCESS)
-            count = 0;
-        facts.spawns = count;
-        decision = tip_logic::DecideSpawn(facts);
-        if (decision == tip_logic::SpawnDecision::Spawn) {
-            ++count;
-            RegSetValueExW(key, L"BrokerSpawns", 0, REG_DWORD, (const BYTE*)&count, sizeof count);
-        }
-        RegCloseKey(key);
-    } else {
-        decision = tip_logic::SpawnDecision::Spent;
-    }
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
-    return decision;
+    return tip_logic::MaySpawn(facts);
 }
 
 // The broker beside this DLL (Program Files: nobody else can replace it),
@@ -529,15 +499,9 @@ private:
                 return INVALID_HANDLE_VALUE;
             }
             if (error == ERROR_FILE_NOT_FOUND && !spawned) {
-                switch (ClaimSpawn()) {
-                    case tip_logic::SpawnDecision::NotAllowed:
-                        why = Link::NotAllowed;
-                        return INVALID_HANDLE_VALUE;
-                    case tip_logic::SpawnDecision::Spent:
-                        why = Link::Unreachable;
-                        return INVALID_HANDLE_VALUE;
-                    case tip_logic::SpawnDecision::Spawn:
-                        break;
+                if (!MaySpawn()) {
+                    why = Link::NotAllowed;
+                    return INVALID_HANDLE_VALUE;
                 }
                 if (!SpawnBroker()) {
                     why = Link::Unreachable;
@@ -1020,10 +984,7 @@ static HICON MakeModeIcon(const wchar_t* glyph, bool faint) {
 
 static const wchar_t* NoticeText(Notice n) {
     switch (n) {
-        case Notice::Preparing: return L"変換の準備をしています…";
         case Notice::Stopped: return L"日本語変換が止まっています。タスクバーの「!」を右クリックしてください";
-        case Notice::TooLong: return L"長すぎます。いったん確定してください";
-        case Notice::Reopen: return L"ゆらぎを更新しました。このアプリを開き直すと使えます";
         case Notice::None: break;
     }
     return L"";
@@ -1135,7 +1096,7 @@ public:
         FinishLocal();
         link_.Stop();
         UnadviseLayout();
-        for (UINT id : {kTimerReply, kTimerPending, kTimerNotice}) KillTimer(hwnd_, id);
+        for (UINT id : {kTimerReply, kTimerNotice}) KillTimer(hwnd_, id);
         for (HWND* w : {&cand_hwnd_, &notice_hwnd_, &hwnd_}) {
             if (*w) DestroyWindow(*w);
             *w = nullptr;
@@ -1341,7 +1302,6 @@ public:
             case tip_logic::MENU_TOGGLE: return direct_ ? L"かな入力に切り替え" : L"直接入力に切り替え";
             case tip_logic::MENU_ADMIN: return L"設定を開く";
             case tip_logic::MENU_RETRY: return L"もう一度試す";
-            case tip_logic::MENU_REASON: return L"原因を表示";
             case tip_logic::MENU_PREPARING:
                 *grayed = true;
                 return L"（変換の準備をしています）";
@@ -1349,7 +1309,7 @@ public:
         return L"";
     }
     HRESULT STDMETHODCALLTYPE OnClick(TfLBIClick click, POINT pt, const RECT*) override {
-        if (click == TF_LBI_CLK_LEFT && CurrentMode() == Mode::Normal && Eligible()) Toggle();
+        if (click == TF_LBI_CLK_LEFT && tip_logic::Toggles(CurrentMode()) && Eligible()) Toggle();
         // The taskbar input indicator hands a right click over as OnClick and never
         // calls InitMenu, so the menu is shown here (owned by this thread's focus window).
         if (click == TF_LBI_CLK_RIGHT) {
@@ -1390,9 +1350,6 @@ public:
             case tip_logic::MENU_RETRY:
                 if (link_.Connected()) SendOp("retry");
                 else TryConnect(true);
-                break;
-            case tip_logic::MENU_REASON:
-                SendOp("show_reason");
                 break;
         }
         return S_OK;
@@ -1441,7 +1398,7 @@ public:
 private:
     enum class Scope { Unknown, Allowed, Password };
     static const UINT kLinkMessage = WM_APP + 1;
-    static const UINT_PTR kTimerReply = 1, kTimerPending = 2, kTimerNotice = 3;
+    static const UINT_PTR kTimerReply = 1, kTimerNotice = 3;
     static const DWORD kLangBarCookie = 0x6f79;
 
     // -- the TIP's window: link messages and its one-shot timers ---------------------------
@@ -1475,8 +1432,6 @@ private:
         if (id == kTimerReply) {
             // §7.6: the FSM's chord deadline, or the LM's next look.
             if (!direct_) SendRequest("timeout", "\"t\":" + std::to_string(NowMs()));
-        } else if (id == kTimerPending) {
-            if (in_flight_.Waiting() && NowMs() >= in_flight_.NoticeAt()) ShowNotice(Notice::Preparing);
         } else if (id == kTimerNotice) {
             HideNotice();
         }
@@ -1538,19 +1493,17 @@ private:
             if (found) break;  // the caller applies the wanted reply itself
         }
         if (CurrentMode() != before) UpdateLangBar();
-        if (!in_flight_.Waiting() && notice_ == Notice::Preparing) HideNotice();
         return found;
     }
 
     // One message from the broker. Returns true when it is the reply `wanted`.
     bool Handle(const Message& m, bool sync, long long wanted) {
-        if (m.hello || m.event == "state") {
-            broker_state_ = m.state;
-            if (m.state == "incompatible" && !reopen_told_) {
-                reopen_told_ = true;  // once per focus (§9.2)
-                ShowNotice(Notice::Reopen);
-            }
-        }
+        // The hello reply, a state event, or {"seq","state"}: a request the
+        // engine did not get (it is starting, or down).
+        bool was_ready = broker_state_ == "ready";
+        if (m.hello || m.event == "state" || (m.has_seq && !m.engine)) broker_state_ = m.state;
+        // §5.6: a ready engine has opened a new session, in kana input.
+        if (!was_ready && broker_state_ == "ready" && direct_) SendRequest("set_direct", "\"direct\":true");
         if (tip_logic::CommitsVisibleText(m)) FinishLocal();
         if (!m.has_seq) return false;
         if (!in_flight_.Answer(m.seq)) return false;  // a request we gave up or never sent
@@ -1577,7 +1530,7 @@ private:
         if (!link_.Write(tip_logic::OpRequest(seq, op, extra), tip_logic::KEY_BUDGET_MS))
             in_flight_.Answer(seq);
     }
-    // A request to the broker itself (retry, open_admin, show_reason): no reply.
+    // A request to the broker itself (retry, open_admin): no reply.
     void SendOp(const char* op) {
         link_.Write(std::string("{\"op\":\"") + op + "\"}", tip_logic::KEY_BUDGET_MS);
     }
@@ -1601,14 +1554,12 @@ private:
         Message r;
         for (;;) {
             if (Drain(true, seq, &r)) break;
-            // Answered without the engine ("down") or with an error: the key
-            // was taken as OnTestKeyDown said; the visible text was committed.
-            if (!in_flight_.Waiting(seq)) return true;
+            // Answered without the engine (starting, down): the key goes to the
+            // application. With an error: it was taken as OnTestKeyDown said;
+            // the visible text was committed.
+            if (!in_flight_.Waiting(seq)) return tip_logic::SendsKeys(CurrentMode());
             ULONGLONG now = NowMs();
-            if (now >= deadline) {
-                ArmTimer(kTimerPending, in_flight_.NoticeAt());
-                return true;
-            }
+            if (now >= deadline) return true;
             WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
         }
         bool eat = tip_logic::EatAfterReply(down, vk, mods, before, before_timer, before_tokens, r);
@@ -1621,10 +1572,12 @@ private:
     }
 
     bool Toggle() {
-        if (!tip_logic::SendsKeys(CurrentMode())) return false;
+        Mode mode = CurrentMode();
+        if (!tip_logic::Toggles(mode)) return false;
         direct_ = !direct_;  // shown at once; the engine follows in order
         FinishLocal();
         UpdateLangBar();
+        if (!tip_logic::SendsKeys(mode)) return true;  // preparing: told once ready (Handle)
         long long seq = in_flight_.Next(NowMs());
         std::string request = tip_logic::OpRequest(seq, "set_direct",
                                                    direct_ ? "\"direct\":true" : "\"direct\":false");
@@ -1658,8 +1611,6 @@ private:
         else HideCands();
         if (timer_pending_) ArmTimer(kTimerReply, r.timer);
         else KillTimer(hwnd_, kTimerReply);
-        if (r.full) ShowNotice(Notice::TooLong);
-        else if (notice_ == Notice::TooLong && (!r.commit.empty() || !composing_)) HideNotice();
     }
 
     void ApplyReply(const Message& r, bool sync) {
@@ -1723,7 +1674,6 @@ private:
         toggle_down_ = toggle_eaten_ = false;
         if (hwnd_) KillTimer(hwnd_, kTimerReply);
         HideCands();
-        if (notice_ == Notice::TooLong) HideNotice();
     }
 
     // A new field: what was being converted is kept as typed, the engine
@@ -1732,7 +1682,7 @@ private:
         FinishLocal();
         stale_upto_ = in_flight_.Last();
         SendRequest("reset");
-        stopped_told_ = reopen_told_ = false;
+        stopped_told_ = false;
         HideNotice();
         CheckScope();
     }
@@ -1759,7 +1709,7 @@ private:
     bool CanEat(UINT vk) {
         if (!Eligible() || scope_ != Scope::Allowed) return false;
         if (ToggleKey(vk) || (toggle_down_ && vk == toggle_active_vk_))
-            return tip_logic::SendsKeys(CurrentMode());
+            return tip_logic::Toggles(CurrentMode());
         if (direct_ || !link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return false;
         return tip_logic::WantKey(vk, HeldMods(), LocalState());
     }
@@ -1955,7 +1905,7 @@ private:
     ITfContext* layout_ctx_ = nullptr;
     DWORD layout_cookie_ = TF_INVALID_COOKIE;
     Notice notice_ = Notice::None;
-    bool stopped_told_ = false, reopen_told_ = false;
+    bool stopped_told_ = false;
     bool direct_ = false;
     bool composing_ = false, converted_ = false, pending_ = false, timer_pending_ = false;
     int n_tokens_ = 0;
@@ -2057,7 +2007,7 @@ void Tip::ShowNotice(Notice n) {
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     InvalidateRect(notice_hwnd_, nullptr, TRUE);
     KillTimer(hwnd_, kTimerNotice);
-    if (n == Notice::Stopped || n == Notice::Reopen) ArmTimer(kTimerNotice, NowMs() + tip_logic::NOTICE_SHOW_MS);
+    if (n == Notice::Stopped) ArmTimer(kTimerNotice, NowMs() + tip_logic::NOTICE_SHOW_MS);
     // Placed under the caret by a read-only session.
     ITfContext* ctx = FocusContext();
     if (!ctx) return;

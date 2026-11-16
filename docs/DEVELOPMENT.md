@@ -39,15 +39,11 @@ cmake -S src/tip -B build/tip && cmake --build build/tip && ctest --test-dir bui
 python -m yuragi.ime.host_win32      # 試験窓。TSF を通さない
 ```
 
-管理の道具は 2 つあり、同じ関数で同じファイルを触ります。
-
-- 設定ウィンドウ `python -m yuragi.ime.admin_ui`（tkinter、標準ライブラリだけ）。ロジックは
-  tkinter に依存しない `AdminModel`（試験は `tests/test_admin_ui.py`）にあり、画面は薄い殻。
-  画面の文言はすべて日本語（`admin_ui.SETTINGS` などの表）。DPI 対応を申告する。
-- 端末 `python -m yuragi.ime.manage`（文言は英語）。`word`（add/remove/list）、
-  `learning`（list/forget/promote/compact/clear/pause/resume）、`dict`（verify/write）、
-  `config`（show/set/unset）、`status`、`server restart`。
-  どちらも `--runtime-dir` と `--config` で置き場所を変えられる。
+管理の道具は設定ウィンドウ `python -m yuragi.ime.admin_ui`（tkinter、標準ライブラリだけ）。ロジックは
+tkinter に依存しない `AdminModel`（試験は `tests/test_admin_ui.py`）にあり、画面は薄い殻。
+画面の文言はすべて日本語（`admin_ui.SETTINGS` などの表）。DPI 対応を申告する。
+`--runtime-dir` と `--config` で置き場所を変えられる。辞書の照合とマニフェストの書き出しは
+`python -m yuragi.lattice.dict_manifest verify|write`。
 
 Windows でのビルドと登録は `src\tip\dev-build.ps1` と `src\tip\dev-register.ps1`（[DEVENV.md](DEVENV.md)）。
 TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/broker/README.md`](../src/broker/README.md)。

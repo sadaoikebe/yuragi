@@ -15,7 +15,14 @@ from yuragi.ime.admin_ui import SETTINGS, AdminModel
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import read_words
-from tests.test_manage import small_lex
+from yuragi.lattice.mozc_dict import Entry, MozcLex
+
+POS = 2000
+
+
+def small_lex():
+    return MozcLex({"かた": [Entry("肩", "かた", 1851, 1851, 3000)]},
+                   {"か", "かた"}, [0] * (POS * POS), POS)
 
 
 class Base(unittest.TestCase):
@@ -151,7 +158,7 @@ class EntryPointTest(unittest.TestCase):
                 self.assertEqual(admin_ui.main([]), 1)
         finally:
             builtins.__import__ = real
-        self.assertIn("manage", err.getvalue())
+        self.assertIn("tkinter", err.getvalue())
 
     def test_dict_dir_is_where_the_status_tab_checks(self):
         # Installed, the dictionary is the shared copy, not the repository's

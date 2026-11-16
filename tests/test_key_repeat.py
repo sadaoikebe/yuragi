@@ -17,7 +17,7 @@ class KeyRepeatTest(unittest.TestCase):
     def setUp(self):
         # No dictionary rows: kana stays kana.
         lex = MozcLex({}, set(), [0] * 4, 2)
-        self.s = ImeSession(_table=load_table(), _lex=lex, learning_path=None)
+        self.s = ImeSession(_table=load_table(), _lex=lex)
         self.t = 1000
         self.committed = ""
 

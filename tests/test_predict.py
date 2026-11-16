@@ -35,7 +35,7 @@ class Fixture(unittest.TestCase):
         cls.index = P.ReadingIndex()
 
     def session(self, *, learning=None, prediction=P.DEFAULT_MODE):
-        return ImeSession(_lex=self.lex, learning_path=None, _learning=learning,
+        return ImeSession(_lex=self.lex, _learning=learning,
                           prediction=prediction, predict_index=self.index)
 
 

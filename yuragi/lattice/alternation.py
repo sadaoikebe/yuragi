@@ -5,7 +5,7 @@ among that press's chords; the state machine also counts chords whose key has
 no face). Within one press the faces alternate, so the conversion chooses one
 thing per press: its direction, the face of turn 1 ("left" or "right").
 
-- A key with one face only (; Q Z) settles the direction of its press.
+- A key with one face only (; Q Z /) settles the direction of its press.
 - A press that neither direction can spell (not typed by the rule) is not
   constrained: each of its chords picks its face alone.
 - Tokens without "press" (evaluation readings, tests) are free.
@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
-from .expand import is_literal_face, token_branches
+from .expand import token_branches
 
 SIDES = frozenset(("left", "right"))
 _OTHER = {"left": "right", "right": "left"}
@@ -100,7 +100,7 @@ class Plan:
         """Readings from start, one kana per token, depth first; extend prunes.
 
         Yields (end, reading, sides) for each nonempty reading reached. Literal
-        tokens and literal faces end a reading. Within a press, only the face
+        tokens end a reading. Within a press, only the face
         that alternates with the previous chord is followed.
         """
         stack: list[tuple[int, str, str | None, tuple[int, str] | None]] = [
@@ -113,7 +113,7 @@ class Plan:
                 continue
             press = self.press[pos]
             for kana, d in self.branches[pos]:
-                if tokens[pos]["kind"] == "literal" or is_literal_face(kana):
+                if tokens[pos]["kind"] == "literal":
                     continue
                 if press is not None and cur is not None and cur[0] == press and cur[1] != d:
                     continue

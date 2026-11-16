@@ -32,10 +32,6 @@ if(WIN32)
   # The generator expression keeps multi-config generators from adding Release/.
   set_target_properties(yuragi-broker PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/../../dist>")
-else()
-  # The same broker on POSIX, for the tests (platform_posix.cpp).
-  add_executable(yuragi-broker platform_posix.cpp)
-  target_link_libraries(yuragi-broker PRIVATE broker_core)
 endif()
 
 enable_testing()

@@ -11,6 +11,7 @@ import ctypes
 import ctypes.wintypes as w
 from pathlib import Path
 
+from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.session import ImeSession
 from yuragi.ime.recording import PROMPTS_PATH, Recorder, load_prompts
 
@@ -125,6 +126,7 @@ if not kernel32.QueryPerformanceFrequency(ctypes.byref(_freq)) or _freq.value <=
 _qpc_freq = int(_freq.value)
 
 session = ImeSession()
+document = ""  # the window's text: what the session committed
 _last_view = None
 recorder: Recorder | None = None
 _record_event_count = 0  # display snapshot; raw events still arrive on every key
@@ -147,7 +149,7 @@ def view_key() -> tuple:
     if recorder is not None:
         return (recorder.index, recorder.focused, recorder.closed, _record_event_count)
     return (
-        session.committed,
+        document,
         session.composition,
         session.converted,
         session.fsm.state,
@@ -200,13 +202,13 @@ def paint(hwnd) -> None:
         user32.DrawTextW(hdc, text, -1, ctypes.byref(rc), DT_WORDBREAK | DT_NOPREFIX)
         user32.EndPaint(hwnd, ctypes.byref(ps))
         return
-    body = session.committed
+    body = document
     comp = session.composition
     status = "変換済" if session.converted else "入力中"
     text = (
         "ゆらぎ 試験窓  （Notepad 用ではない。TSF TIP は src/tip）\n"
         "Space+文字 = 親指シフト（左右不明）。Space 単独 = 変換。Enter = 確定。Esc = 取消。\n"
-        "F6 = 注目候補の学習を忘却。F7 = 直前の学習を戻す（確定文字は保持）。\n"
+        "Shift+F6 = 注目候補の学習を忘れる。\n"
         f"[{status}] tokens={len(session.tokens)} fsm={session.fsm.state}\n\n"
     )
     if not comp:
@@ -225,13 +227,16 @@ def paint(hwnd) -> None:
 
 
 def handle_key(hwnd, down: bool, vk: int) -> None:
+    global document
     if recorder is not None:
         recorder.on_key(vk, down, now_ms())
         redraw_if_changed(hwnd)
         return
+    if down and vk == 0x08 and not session.tokens:
+        document = document[:-1]  # Backspace with no input edits the window's text
     extra = session.on_key(down, vk, now_ms())
     if extra:
-        session.committed += extra
+        document += extra
     redraw_if_changed(hwnd)
 
 
@@ -255,7 +260,7 @@ def wndproc(hwnd, msg, wparam, lparam):
 
 
 def dispatch(hwnd, msg, wparam, lparam):
-    global _record_event_count
+    global _record_event_count, document
     if msg == WM_DESTROY:
         if recorder is not None:
             recorder.close(now_ms())
@@ -273,7 +278,7 @@ def dispatch(hwnd, msg, wparam, lparam):
         elif session.fsm.timer_deadline is not None:
             extra = session.on_timeout(now_ms())
             if extra:
-                session.committed += extra
+                document += extra
             redraw_if_changed(hwnd)
         return 0
     if msg in (WM_SETFOCUS, WM_KILLFOCUS) and recorder is not None:
@@ -315,6 +320,7 @@ def main() -> None:
         print(f"recording to {args.record.resolve()} (F12 = next prompt)")
     else:
         print("loading dictionary (first run is slow)...")
+        session._learning = LearningStore(DEFAULT_LEARNING_PATH)
         session.load()
         print("ready")
     try:

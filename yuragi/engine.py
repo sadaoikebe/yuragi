@@ -8,22 +8,19 @@ Broker → engine:
   {"op":"open","sid":3}                    a TIP connection's session
   {"op":"close","sid":3}
   {"sid":3,"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}
-      op as for yuragi.ime.server: down/up/timeout/reset/set_direct/toggle_direct/context
+      op as for yuragi.ime.server: down/up/timeout/reset/set_direct
 Engine → broker:
   {"progress":"cache"}                     while the dictionary cache is rebuilt (every 5 s)
   {"ready":true,"proto":1,"warnings":[...]}
   {"sid":3,"seq":17, ...the reply of yuragi.ime.server...}   one per request, in order
       "error":true   the request raised; the session was started afresh (§6.4)
-      "full":true    the input is at MAX_TOKENS; the key changed nothing (§6.5)
   {"event":"warning","warning":"lm"}       a problem found after ready (once each)
 
-Warnings: config (config.json partly unreadable, defaults used), lm (the LM is not
-used), learning-read (the history could not be read), learning-write (could not be
-saved). open/close have no reply. The engine exits when stdin closes.
+Warnings: lm (the LM is not used). open/close have no reply. The engine exits
+when stdin closes.
 
-Startup failures end the process with a reason on stderr, ``fatal <code> <reason>``:
-20 a program file cannot be read, 21 a dictionary file is missing or wrong,
-22 the dictionary cache cannot be rebuilt (§6.6).
+A startup failure ends the process with exit code 1 and the reason on stderr,
+``fatal <reason>`` (§6.6): the broker keeps it in its log.
 """
 from __future__ import annotations
 
@@ -41,9 +38,6 @@ import traceback
 PROTO = 1
 MAX_TOKENS = 200  # REDESIGN §11: the input length a conversion handles
 PROGRESS_SECONDS = 5
-EXIT_PROGRAM = 20
-EXIT_DICTIONARY = 21
-EXIT_CACHE = 22
 DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
 # Warm-up input (§6.3): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
@@ -55,10 +49,10 @@ def log(message: str) -> None:
     print(f"{stamp} engine: {message}", file=sys.stderr, flush=True)
 
 
-def fatal(code: int, reason: str):
+def fatal(reason: str):
     log(f"stopping: {reason}")
-    print(f"fatal {code} {reason}", file=sys.stderr, flush=True)
-    raise SystemExit(code)
+    print(f"fatal {reason}", file=sys.stderr, flush=True)
+    raise SystemExit(1)
 
 
 def where(exc: BaseException) -> str:
@@ -146,8 +140,6 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lm-model", default=None,
                         help="the installed LM model directory (engine.json); a lm_model "
                              "in config.json still wins")
-    parser.add_argument("--test-hooks", action="store_true",
-                        help="accept {\"op\":\"test_raise\"}, which raises inside a request")
     return parser
 
 
@@ -161,8 +153,6 @@ class Connection:
 
     def handle(self, msg: dict) -> dict:
         from yuragi.ime.server import process_request, snapshot
-        if msg.get("op") == "test_raise" and self.engine.test_hooks:
-            raise RuntimeError("test hook")
         if self.pipeline is not None:
             reply = self.pipeline.handle(msg)
         else:
@@ -170,12 +160,12 @@ class Connection:
                                     lm_timing=self.engine.lm_timing)
         sess = self.sess
         if len(sess.tokens) > MAX_TOKENS and not sess.converted and sess._await is None:
-            # §6.5: the key is taken, the input stays as it was.
+            # §6.5: the key is taken silently, the input stays as it was.
             del sess.tokens[MAX_TOKENS:]
             sess._refresh()
             commit = reply["commit"]
             reply = snapshot(sess, msg.get("op"))
-            reply.update(commit=commit, pending=False, full=True)
+            reply.update(commit=commit, pending=False)
         return reply
 
     def recover(self) -> dict:
@@ -198,7 +188,6 @@ class Connection:
 class Engine:
     def __init__(self, channel: Channel, args: argparse.Namespace):
         self.channel = channel
-        self.test_hooks = args.test_hooks
         self.connections: dict[object, Connection] = {}
         self.loaded = None
         self.worker = None
@@ -216,18 +205,16 @@ class Engine:
             # Imported after the directories are set: some modules read them at import.
             from yuragi.ime import config, server
             from yuragi.ime.lm_async import LmWorker
-            from yuragi.lattice import dict_manifest
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
-            fatal(EXIT_PROGRAM, "program-files-unreadable")
+            fatal("program-files-unreadable")
 
+        # The installer checked the files' hashes; here, that they are there.
         manifest = json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))
-        problems = dict_manifest.verify(manifest)
-        if problems:
-            for problem in problems:
-                log(f"dictionary: {problem}")
-            fatal(EXIT_DICTIONARY, "dictionary-missing"
-                  if any(p.startswith("missing") for p in problems) else "dictionary-changed")
+        missing = [name for name in manifest["files"] if not (mozc_dict.DICT_DIR / name).exists()]
+        if missing:
+            log(f"dictionary: missing {', '.join(missing)}")
+            fatal("dictionary-missing")
 
         settings = self.read_settings(args, config, server)
         self.settings = settings
@@ -238,16 +225,15 @@ class Engine:
             lex = mozc_dict.load_lex(on_rebuild=progress.start)
         except (FileNotFoundError, mozc_dict.DictionaryFormatError) as exc:
             log(where(exc))
-            fatal(EXIT_DICTIONARY, "dictionary-unreadable")
+            fatal("dictionary-unreadable")
         except mozc_dict.CacheWriteError as exc:
             log(f"{where(exc)} (errno {exc.errno})")
-            fatal(EXIT_CACHE, "cache-not-written")
+            fatal("cache-not-written")
         finally:
             progress.stop()
 
         loaded = server.load_session(settings, with_lm=False, lex=lex,
-                                     create_learning_file=True,
-                                     on_problem=self.channel.warning)
+                                     create_learning_file=True)
         store = loaded._learning
         if store is not None:
             log(f"learning {config.learning_mode(settings)}: {store.lines} lines, "
@@ -275,15 +261,9 @@ class Engine:
                             personal_file=args.data_dir / "personal_lexicon.jsonl")
         if args.lm_model is not None:
             parser.set_defaults(lm_model=args.lm_model)
-        path = args.data_dir / config.CONFIG_NAME
-        problems: list[str] = []
-        parser.set_defaults(**config.read_config(path, parser, problems))
-        settings = parser.parse_args([])
-        settings.config = path
+        settings = config.load(parser, config_path=args.data_dir / config.CONFIG_NAME)
         if settings.lm_rescore is None:
             settings.lm_rescore = True  # the product path: on unless config.json says otherwise
-        if problems:
-            self.channel.warning("config")
         return settings
 
     def load_lm(self, server, settings):
@@ -319,9 +299,9 @@ class Engine:
         from yuragi.ime.session import ImeSession
         loaded = self.loaded
         return ImeSession(
-            _table=loaded._table, _lex=loaded._lex, learning_path=loaded.learning_path,
-            _learning=loaded._learning, personal=loaded.personal,
-            prediction=loaded.prediction, predict_index=loaded.predict_index)
+            _table=loaded._table, _lex=loaded._lex, _learning=loaded._learning,
+            personal=loaded.personal, prediction=loaded.prediction,
+            predict_index=loaded.predict_index)
 
     def new_pipeline(self, sess):
         if self.worker is None:

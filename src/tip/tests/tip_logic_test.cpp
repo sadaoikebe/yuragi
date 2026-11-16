@@ -19,9 +19,9 @@ static void ReadingReplies() {
         "timer":1234,"candidates":["花","x"],"cand_index":1,"segments":[
         {"start":0,"end":1,"display_start":0,"display_end":1}],"focus":0,
         "candidate_page":2,"candidate_kinds":["dictionary"],"has_next_page":true,
-        "predicting":false,"pending":true,"full":true})");
+        "predicting":false,"pending":true})");
     assert(r.has_seq && r.seq == 17 && r.engine && !r.hello);
-    assert(r.composition == "\xE3\x81\x8B" && r.converted && r.pending && r.full);
+    assert(r.composition == "\xE3\x81\x8B" && r.converted && r.pending);
     assert(r.has_timer && r.timer == 1234 && r.n_tokens == 1 && r.page == 2);
     assert(r.candidates.size() == 2 && r.cand_index == 1 && r.has_next_page);
     assert(r.segments.size() == 1 && r.segments[0].display_end == 1);
@@ -30,9 +30,6 @@ static void ReadingReplies() {
     Message sparse = Parse(R"({"seq":3,"composition":7,"new_field":{"x":[1]},"timer":null})");
     assert(sparse.engine && sparse.composition.empty() && !sparse.has_timer);
     assert(sparse.focus == -1 && sparse.candidates.empty() && !sparse.error);
-    Message bad_segments = Parse(R"({"seq":1,"segments":[{"display_start":2,"display_end":1},
-        {"display_start":"x"},3]})");
-    assert(bad_segments.segments.size() == 1 && bad_segments.segments[0].display_end == 2);
 
     Message notjson;
     assert(!ParseMessage("not json", notjson) && !ParseMessage("[1]", notjson));
@@ -46,17 +43,13 @@ static void ReadingBrokerMessages() {
     assert(down.has_seq && !down.engine && down.state == "down");
     Message event = Parse(R"({"event":"state","state":"ready"})");
     assert(event.event == "state" && event.state == "ready" && !event.has_seq);
-    Message incompatible = Parse(R"({"proto":1,"state":"incompatible"})");
-    assert(incompatible.hello && incompatible.state == "incompatible");
 }
 
 static void CommittingVisibleText() {
     assert(CommitsVisibleText(Parse(R"({"event":"reset"})")));
     assert(CommitsVisibleText(Parse(R"({"seq":1,"error":true,"composition":""})")));
-    for (const char* s : {"down", "maintenance", "incompatible", "not-installed"}) {
-        assert(CommitsVisibleText(Parse(std::string("{\"seq\":2,\"state\":\"") + s + "\"}")));
-        assert(CommitsVisibleText(Parse(std::string("{\"event\":\"state\",\"state\":\"") + s + "\"}")));
-    }
+    assert(CommitsVisibleText(Parse(R"({"seq":2,"state":"down"})")));
+    assert(CommitsVisibleText(Parse(R"({"event":"state","state":"down"})")));
     assert(!CommitsVisibleText(Parse(R"({"event":"state","state":"starting"})")));
     assert(!CommitsVisibleText(Parse(R"({"event":"state","state":"ready"})")));
     assert(!CommitsVisibleText(Parse(R"({"seq":3,"composition":"x"})")));
@@ -67,14 +60,17 @@ static void StatesAndWhatTheUserSees() {
     assert(ModeFor(Link::Connected, "starting") == Mode::Preparing);
     assert(ModeFor(Link::Connected, "") == Mode::Preparing);  // before the hello reply
     assert(ModeFor(Link::Connected, "down") == Mode::Stopped);
-    for (const char* s : {"maintenance", "not-installed", "incompatible"})
-        assert(ModeFor(Link::Connected, s) == Mode::Excluded);
     assert(ModeFor(Link::Connecting, "") == Mode::Preparing);
     assert(ModeFor(Link::Unreachable, "ready") == Mode::Stopped);
     assert(ModeFor(Link::NotAllowed, "") == Mode::Excluded);
 
-    assert(SendsKeys(Mode::Normal) && SendsKeys(Mode::Preparing));
+    // While the engine starts, keys pass through (nothing is held for later).
+    assert(SendsKeys(Mode::Normal) && !SendsKeys(Mode::Preparing));
     assert(!SendsKeys(Mode::Stopped) && !SendsKeys(Mode::Excluded));
+    // The toggle works while preparing, so a direct input left by a lost connection can be undone.
+    assert(Toggles(Mode::Normal) && Toggles(Mode::Preparing));
+    assert(!Toggles(Mode::Stopped) && !Toggles(Mode::Excluded));
+    assert(std::string(Glyph(Mode::Preparing, true)) == "Y");
     assert(std::string(Glyph(Mode::Normal, false)) == "\xE3\x82\x86");  // ゆ
     assert(std::string(Glyph(Mode::Normal, true)) == "Y");
     assert(std::string(Glyph(Mode::Stopped, false)) == "!");
@@ -83,7 +79,7 @@ static void StatesAndWhatTheUserSees() {
 
     assert((MenuFor(Mode::Normal) == std::vector<int>{MENU_TOGGLE, MENU_ADMIN}));
     assert((MenuFor(Mode::Preparing) == std::vector<int>{MENU_PREPARING, MENU_ADMIN}));
-    assert((MenuFor(Mode::Stopped) == std::vector<int>{MENU_RETRY, MENU_REASON, MENU_ADMIN}));
+    assert((MenuFor(Mode::Stopped) == std::vector<int>{MENU_RETRY, MENU_ADMIN}));
 }
 
 static void EatingKeys() {
@@ -131,9 +127,10 @@ static void EatingKeys() {
     Message typed = Parse(R"({"seq":1,"composition":"x","n_tokens":1})");
     assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, typed));
     assert(!EatAfterReply(true, VK_TAB_, none, idle, false, 0, empty));
-    // F7 with no input is the application's (F6 already was); Shift+F7 is ours.
+    // F6/F7 with no input are the application's, Shift or not.
     assert(!WantKey(VK_F7_, none, idle) && !WantKey(VK_F6_, none, idle));
-    assert(WantKey(VK_F7_, none, typing) && WantKey(VK_F7_, shift, idle));
+    assert(WantKey(VK_F7_, none, typing) && !WantKey(VK_F7_, shift, idle));
+    assert(!WantKey(VK_F7_, shift, typing) && WantKey(VK_F6_, shift, typing));  // the engine has no Shift+F7
     assert(!EatAfterReply(true, VK_F7_, none, idle, false, 0, empty));
     assert(EatAfterReply(true, VK_F7_, none, composing, false, 1, typed));
     // Ctrl+↓ as Enter: eaten after input, whether the rest stays or not.
@@ -148,12 +145,10 @@ static void EatingKeys() {
 
 static void OrderOfReplies() {
     InFlight f;
-    assert(!f.Waiting() && f.NoticeAt() == 0);
+    assert(!f.Waiting());
     long long a = f.Next(1000), b = f.Next(1050), c = f.Next(1100);
     assert(a == 1 && b == 2 && c == 3 && f.Waiting(2));
-    assert(f.NoticeAt() == 1000 + PENDING_NOTICE_MS);
     assert(f.Answer(1));
-    assert(f.NoticeAt() == 1050 + PENDING_NOTICE_MS);
     assert(!f.Answer(1));  // already answered
     assert(f.Answer(3));  // 2 was never answered (the broker answers in order: dropped)
     assert(!f.Waiting() && f.Last() == 3);
@@ -167,19 +162,16 @@ static void ConnectingAndSpawning() {
 
     SpawnFacts f;
     f.tag_matches = f.medium_integrity = true;
-    assert(DecideSpawn(f) == SpawnDecision::Spawn);
-    f.spawns = BROKER_MAX_SPAWNS;
-    assert(DecideSpawn(f) == SpawnDecision::Spent);
-    f.spawns = 0;
+    assert(MaySpawn(f));
     SpawnFacts old_dll = f;
     old_dll.tag_matches = false;  // uninstalled or updated: never starts anything
-    assert(DecideSpawn(old_dll) == SpawnDecision::NotAllowed);
+    assert(!MaySpawn(old_dll));
     SpawnFacts installing = f;
     installing.maintenance = true;
-    assert(DecideSpawn(installing) == SpawnDecision::NotAllowed);
+    assert(!MaySpawn(installing));
     SpawnFacts sandboxed = f;
     sandboxed.medium_integrity = false;
-    assert(DecideSpawn(sandboxed) == SpawnDecision::NotAllowed);
+    assert(!MaySpawn(sandboxed));
 }
 
 static void Requests() {
@@ -194,7 +186,7 @@ static void Requests() {
     assert(ParseMessage(hello, parsed));
     tip_json::Value v;
     assert(tip_json::Parser(hello).Parse(v) && v.Get("op").text == "hello" &&
-           v.Get("tag").text == "v0.2.0");
+           v.Get("tag").text == "v0.2.0" && v.Get("passes").boolean);
 }
 
 int main() {

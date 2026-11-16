@@ -65,12 +65,9 @@ void BoundedLog::Limit() {
     out.write(data.data() + from, (std::streamsize)(data.size() - from));
 }
 
-void RecordNotice(const fs::path& logs, const Notice& notice) {
-    std::string what = notice.stopped
-        ? std::string("\"stopped\":\"") + StopName(notice.reason) + "\""
-        : "\"warning\":" + tip_json::Quote(notice.warning);
+void RecordStop(const fs::path& logs, Stop reason) {
     BoundedLog(logs / "notices.log", logs / "notices.prev.log", false)
-        .Write("{\"time\":\"" + Timestamp() + "\"," + what + "}");
+        .Write("{\"time\":\"" + Timestamp() + "\",\"stopped\":\"" + StopName(reason) + "\"}");
 }
 
 bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& error) {
@@ -152,15 +149,8 @@ void SelfTest::OnEngineLine(const std::string& line) {
     deadline_ = platform_.Now() + SELFTEST_REPLY_MS;
     if (v.Get("converted").boolean) converted_ = true;
     if (answered_ < sent_) return;
-    int windows = platform_.CountEngineWindows();
-    if (!converted_) {
-        Done(SELFTEST_NOT_CONVERTED, "the conversion did not convert");
-    } else if (windows > 0) {
-        Done(SELFTEST_WINDOWS, std::to_string(windows) + " window(s) appeared");
-    } else {
-        Done(SELFTEST_OK, windows < 0 ? "converted (windows not counted on this platform)"
-                                      : "converted, no window appeared");
-    }
+    if (converted_) Done(SELFTEST_OK, "converted");
+    else Done(SELFTEST_NOT_CONVERTED, "the conversion did not convert");
 }
 
 void SelfTest::OnEngineStderrLine(const std::string& line) {

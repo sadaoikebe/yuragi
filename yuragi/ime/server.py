@@ -14,8 +14,6 @@ One JSON object per line:
   {"op":"down","vk":37,"t":280,"mods":["shift"]}  # shrink focused bunsetsu
   {"op":"reset"}  # focus loss or application-terminated composition; no commit
   {"op":"set_direct","direct":true}
-  {"op":"toggle_direct"}
-  {"op":"context","text":"確定済み"}
   {"op":"down","vk":9,"t":300}  # Tab: predictions for the input, if any
 Reply: {"composition":"...","commit":"...","converted":false,"fsm":"S1","pending":false}
 predicting: the candidates are predictions (Tab acted; the TIP eats that Tab).
@@ -35,7 +33,6 @@ from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
 from yuragi.ime import config
 from yuragi.ime.config import LEARNING_MODES
-from yuragi.ime.lm_rescore import CONTEXT_CHARS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
 
 
@@ -62,10 +59,6 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
         sess.reset()
     elif op == "set_direct":
         sess.set_direct(msg["direct"])
-    elif op == "toggle_direct":
-        sess.set_direct(not sess.direct)
-    elif op == "context":
-        sess._lm_context = msg["text"][-CONTEXT_CHARS:]
     return commit
 
 
@@ -102,10 +95,10 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-file", type=Path, default=DEFAULT_LEARNING_PATH,
                         help="local UTF-8 JSONL history (created when learning is on)")
     parser.add_argument("--learning", choices=LEARNING_MODES, default=None,
-                        help="on (the default): learn from conversions; paused: use the "
-                             "history but record nothing; off: neither")
+                        help="on (the default): learn from conversions; off: neither "
+                             "record nor use the history")
     parser.add_argument("--personal-file", type=Path, default=DEFAULT_PERSONAL_PATH,
-                        help="the user's word list (JSONL; edit with python -m yuragi.ime.manage word)")
+                        help="the user's word list (JSONL; edit in the management window)")
     parser.add_argument("--prediction", choices=PREDICTION_MODES, default=DEFAULT_PREDICTION,
                         help="Tab on unconverted input offers continuations from history "
                              "and the dictionary (tab, the default) or does nothing (off)")
@@ -148,25 +141,22 @@ def build_rescorer(args):
     return rescorer
 
 
-def load_session(args, with_lm: bool = True, *, lex=None, create_learning_file: bool = False,
-                 on_problem=None) -> ImeSession:
+def load_session(args, with_lm: bool = True, *, lex=None,
+                 create_learning_file: bool = False) -> ImeSession:
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
     with_lm=False leaves sess.lm unset (the engine loads it on a worker).
     lex: an already loaded lexicon (the engine loads it itself, for its progress).
     create_learning_file: learning on makes a missing history file (the engine).
-    on_problem: told once about a history that cannot be read or written.
     """
     mode = config.learning_mode(args)
     store = None
-    if mode != "off":
-        if mode == "on" and create_learning_file:
+    if mode == "on":
+        if create_learning_file:
             args.learning_file.parent.mkdir(parents=True, exist_ok=True)
             args.learning_file.touch()  # REDESIGN §6.7: learning on makes the file
-        store = LearningStore(args.learning_file, recording=mode == "on",
-                              on_problem=on_problem)
-    sess = ImeSession(learning_path=None if mode == "off" else args.learning_file,
-                      _learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
+        store = LearningStore(args.learning_file)
+    sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
                       prediction=getattr(args, "prediction", DEFAULT_PREDICTION))
     sess.load()
     if sess.prediction != "off":
@@ -202,7 +192,7 @@ def process_request(sess: ImeSession, msg: dict, *, log_text=False, lm_timing=Fa
 
 
 def main() -> None:
-    args = config.parse_args(argument_parser())
+    args = argument_parser().parse_args()  # a developer's host: the command line only
     if args.lm_rescore is None:
         args.lm_rescore = False  # the stdio host converts without the LM unless asked
     # Pipes default to cp1252 on Windows; Japanese composition must be UTF-8.

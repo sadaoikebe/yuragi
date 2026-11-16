@@ -8,7 +8,7 @@
 #   2 staging\<tag> に取得・照合・展開。足りない共有物 (ランタイム・辞書・モデル) だけ作る
 #   3 本物のブローカーで試運転 (--selftest)
 #   4 staging\<tag> を versions\<tag> へ
-#   5 管理者権限 (UAC 1 回): Program Files への配置、登録、読み返し、旧版の削除
+#   5 管理者権限 (UAC 1 回): Program Files への配置、登録と読み返し、旧版の削除 (使用中なら次回)
 #   6 旧ブローカーに quit、HKCU の Tag と Run キー、言語一覧
 #   7 印を下ろし、新ブローカーを起動して ready を確認
 #   8 使われていないものの片付け (失敗しても次回また試す)
@@ -150,8 +150,8 @@ $sourceZip = Join-Path $Download "yuragi-source.zip"
 $dllPath = Join-Path $Download "yuragi_tip.dll"
 $brokerPath = Join-Path $Download "yuragi-broker.exe"
 [void](Get-Verified "$baseUrl/yuragi-source.zip" $sourceZip)
-$DllSha = Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath
-$BrokerSha = Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath
+[void](Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath)
+[void](Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath)
 $StageApp = Join-Path $Stage "app"
 Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
 
@@ -271,9 +271,12 @@ function Stop-Broker {
 $Version = Join-Path $Versions $Tag
 New-Item -ItemType Directory -Force $Versions | Out-Null
 if (Test-Path -LiteralPath $Version) {
-    # 同じ版の入れ直し: その版のエンジンが作業フォルダを使っているので先に止める。
-    Say "  同じ版 ($Tag) を再インストールします"
-    Stop-Broker
+    if ((Get-ItemProperty -LiteralPath $ProductKey -ErrorAction SilentlyContinue).Tag -eq $Tag) {
+        # 同じ版の入れ直し: その版のエンジンが作業フォルダを使っているので先に止める。
+        Say "  同じ版 ($Tag) を再インストールします"
+        Stop-Broker
+    }
+    # Tag が違えば、前回が段 5 で止まった残り。動いている旧版には触らない。
     $aside = "$Version.old-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
     Rename-Item -LiteralPath $Version -NewName (Split-Path $aside -Leaf)
 }
@@ -283,20 +286,18 @@ $App = Join-Path $Version "app"
 Write-EngineJson (Join-Path $Version "engine.json") $App @()
 
 # ---------------------------------------------------------------- 5 管理者権限
-# 管理者用スクリプトの中身と引数を 1 つのコマンドにして -EncodedCommand 用に符号化する。
-# 引数は単一引用符で囲む (中の ' は '' に)。
-function New-ElevatedCommand([string]$script, [string[]]$arguments) {
+# 管理者用スクリプトの呼び出しと引数を 1 つのコマンドにして -EncodedCommand 用に符号化する
+# (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む (中の ' は '' に)。
+function New-ElevatedCommand([string]$scriptPath, [string[]]$arguments) {
     $quoted = @($arguments | ForEach-Object {
         if ($_ -like "-*") { $_ } else { "'" + $_.Replace("'", "''") + "'" } })
-    $command = "& {`n$script`n} " + ($quoted -join " ")
+    $command = "& '" + $scriptPath.Replace("'", "''") + "' " + ($quoted -join " ")
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
 $ElevatedPath = Join-Path $App "packaging\elevated.ps1"   # from the verified source zip
-$ElevatedSha = (Get-FileHash -LiteralPath $ElevatedPath -Algorithm SHA256).Hash.ToLower()
 function Invoke-Elevated([string[]]$arguments) {
-    $script = [IO.File]::ReadAllText($ElevatedPath)
     $resultFile = Join-Path $env:TEMP ("yuragi-elevated-" + [Guid]::NewGuid().ToString("N") + ".json")
-    $encoded = New-ElevatedCommand $script ($arguments + @("-ResultFile", $resultFile))
+    $encoded = New-ElevatedCommand $ElevatedPath ($arguments + @("-ResultFile", $resultFile))
     try {
         $p = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru `
             -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded)
@@ -312,16 +313,13 @@ function Invoke-Elevated([string[]]$arguments) {
 Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag, "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
-    "-DllSha256", $DllSha, "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"),
-    "-BrokerSha256", $BrokerSha, "-ScriptSource", $ElevatedPath, "-ScriptSha256", $ElevatedSha)
+    "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-ScriptSource", $ElevatedPath)
+# I-6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "Windows への登録に失敗しました: $($result.message)" }
 $DllFinal = Join-Path $ProgramRoot "$Tag\yuragi_tip.dll"
 $BrokerFinal = Join-Path $ProgramRoot "$Tag\yuragi-broker.exe"
-# I-6: 「登録した」と言うのは、読み返して確かめてから。
-$registered = (Get-ItemProperty -LiteralPath "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\$Clsid\InprocServer32" -ErrorAction SilentlyContinue).'(default)'
-if ($registered -ne $DllFinal) { Fail "登録内容が一致しません (期待: $DllFinal、実際: $registered)。" }
 Say "  登録: $DllFinal  OK"
-$pendingDelete = @($result.pending_delete)
+$leftOld = @($result.left)
 
 # ---------------------------------------------------------------- 6 切り替え
 Say ""
@@ -356,12 +354,12 @@ if ($conn) {
         if ($null -eq $line) { break }
         $msg = $line | ConvertFrom-Json
         if ($msg.state) { $state = $msg.state }
-        if ($state -eq "ready" -or $state -eq "down" -or $state -eq "not-installed") { break }
+        if ($state -eq "ready" -or $state -eq "down") { break }
     }
     $conn.Pipe.Dispose()
 }
 if ($state -ne "ready") {
-    $why = @{ starting = '60 秒以内に起動しませんでした'; down = '起動に失敗しました'; 'not-installed' = '必要なファイルがありません' }[$state]
+    $why = @{ starting = '60 秒以内に起動しませんでした'; down = '起動に失敗しました' }[$state]
     if (-not $why) { $why = '応答がありません' }
     Write-Host "エラー: 変換エンジンが起動しませんでした ($why)。" -ForegroundColor Red
     Write-Host "ログ: $(Join-Path $UserData 'logs')。次回サインイン時にも起動を試みます。"
@@ -393,8 +391,8 @@ foreach ($item in $cleanup) {
 
 Say ""
 Say "ゆらぎ $Tag のインストールが完了しました。"
-if ($pendingDelete.Count) {
-    Say "  使用中の旧版ファイル $($pendingDelete.Count) 個を $ProgramRoot\.trash に移しました。使われなくなったあと、Windows の再起動時か次回のセットアップ時に削除されます。"
+if ($leftOld.Count) {
+    Say "  使用中の旧版ファイル $($leftOld.Count) 個は残しました。次回のセットアップ時に削除します。"
 }
 if ($left.Count) { Say "  不要なファイル $($left.Count) 個を削除できませんでした。次回の更新時に再試行します。" }
 Say ""

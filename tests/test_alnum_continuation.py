@@ -20,7 +20,7 @@ class Keys:
     def __init__(self):
         # No dictionary rows: kana stays kana (the run is what is checked).
         lex = MozcLex({}, set(), [0] * 4, 2)
-        self.s = ImeSession(_table=load_table(), _lex=lex, learning_path=None)
+        self.s = ImeSession(_table=load_table(), _lex=lex)
         self.t = 1000
         self.committed = ""
 

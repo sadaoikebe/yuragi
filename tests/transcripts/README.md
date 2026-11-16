@@ -10,7 +10,6 @@
 既定 100/1/1。`connection` に連接行列も書ける）。省略すると実 Mozc 辞書を使う。
 
 `acceptance_real_dictionary.json` は、実辞書で「今日は、機関の校正をした。」を打って確定するまでの記録。
-`packaging/smoke.py` もこれを読み、インストールした木で同じ確かめをする。
 
 `t` はミリ秒、単調非減少。`op` は down/up/timeout/reset。`mods` は省略可能な
 `["shift", "ctrl", "alt", "win"]` の部分集合で、イベント時点の修飾スナップショット。

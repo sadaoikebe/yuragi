@@ -40,7 +40,7 @@ def make_session(case: dict, real_lex: MozcLex | None = None) -> ImeSession:
             costs[rid * size + lid] = cost
         lex = MozcLex(by_reading, prefixes, costs, size)
     # Date rows depend on the clock; a transcript sees one fixed day.
-    return ImeSession(_table=load_table(), _lex=lex, learning_path=None,
+    return ImeSession(_table=load_table(), _lex=lex,
                       clock=lambda: TRANSCRIPT_NOW)
 
 

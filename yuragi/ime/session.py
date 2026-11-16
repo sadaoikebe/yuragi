@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 import unicodedata
 
@@ -25,7 +24,7 @@ from yuragi.lattice.table import load_table
 from yuragi.lattice.token_viterbi import decode_tokens
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Candidate, CandidateStream, Segment,
                        candidates, segments_from)
-from .learning import DEFAULT_LEARNING_PATH, LearningStore
+from .learning import LearningStore
 from .lm_rescore import CONTEXT_CHARS, LmRescorer, conversion_picks
 from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
@@ -153,7 +152,6 @@ class ImeSession:
     fsm: ChordFsm = field(default_factory=ChordFsm)
     direct: bool = False
     tokens: list[Token | Literal] = field(default_factory=list)
-    committed: str = ""  # test host's document; commit return values are appended by the host
     composition: str = ""
     converted: bool = False
     candidates: list[str] = field(default_factory=list)
@@ -163,9 +161,7 @@ class ImeSession:
     candidate_page: int = 0
     candidate_kinds: list[str] = field(default_factory=list)
     has_next_page: bool = False
-    learning_path: Path | None = DEFAULT_LEARNING_PATH
     _learning: LearningStore | None = None
-    _learning_undo: list[list[str]] = field(default_factory=list)
     # LM rescoring, off unless a rescorer is given (server --lm-rescore).
     lm: LmRescorer | None = None
     # Resident pipeline only: a ThumbTap leaves the LM pick to a worker.
@@ -197,8 +193,6 @@ class ImeSession:
             self._table = load_table()
         if self._lex is None:
             self._lex = load_lex()
-        if self._learning is None and self.learning_path is not None:
-            self._learning = LearningStore(self.learning_path)
 
     def reset(self) -> None:
         """Discard composition and all input state after focus loss/termination.
@@ -226,8 +220,6 @@ class ImeSession:
 
     def set_direct(self, direct: bool) -> None:
         """Change input mode, discarding unfinished input on a transition."""
-        if not isinstance(direct, bool):
-            raise ValueError("direct must be a boolean")
         if direct != self.direct:
             self.reset()
             self.direct = direct
@@ -272,19 +264,16 @@ class ImeSession:
             if down and not self.tokens:
                 self._lm_context = ""  # Ctrl/Alt/Win may move the caret or edit text.
             return None
-        if down and (vk in (VK_F6, VK_F7) or (vk in SCRIPT_VKS and not shift)):
+        if down and (vk in SCRIPT_VKS and not shift or vk == VK_F6 and shift):
             pending = self._finish_pending()
             if shift:
-                # The learning corrections live on Shift+F6/F7; the plain
-                # keys carry the conventional script conversions below.
-                def learning_key() -> None:
-                    if vk == VK_F6:
-                        if self.converted and self.candidates:
-                            self.forget_candidate()
-                    else:
-                        self.undo_learning()
+                # Shift+F6 forgets the candidate's learning; the plain keys
+                # carry the conventional script conversions below.
+                def forget_key() -> None:
+                    if self.converted and self.candidates:
+                        self.forget_candidate()
                     return None
-                return self._then(pending, learning_key)
+                return self._then(pending, forget_key)
 
             def script_key() -> None:
                 self._select_script(vk)
@@ -572,7 +561,7 @@ class ImeSession:
             return False
         segment = self.segments[self.focus]
         c = segment.selected
-        if c.kind in ("literal", "number", "date") or not c.reading or is_literal_face(c.reading):
+        if c.kind in ("literal", "number", "date") or not c.reading:
             return False
         if not self._learning.suppress(c.reading, c.surface):
             return False
@@ -587,19 +576,6 @@ class ImeSession:
         self._open_cands()
         return True
 
-    def undo_learning(self) -> bool:
-        """Undo this session's last persisted confirmation group; keep the text."""
-        if self._learning is None or not self._learning_undo:
-            return False
-        if not self._learning.undo(self._learning_undo[-1]):
-            return False
-        self._learning_undo.pop()
-        if self.converted:
-            self._open_cands()  # Preserve selections and manually resized intervals.
-        elif self.tokens:
-            self._refresh()
-        return True
-
     def _edit(self, vk: int) -> str | None:
         if vk == VK_BACK:
             if self.converted:
@@ -609,8 +585,6 @@ class ImeSession:
                 self._refresh()
             else:
                 self._lm_context = self._lm_context[:-1]
-                if self.committed:
-                    self.committed = self.committed[:-1]
             return None
         if vk == VK_ESCAPE:
             if self.converted:
@@ -624,10 +598,10 @@ class ImeSession:
 
     def _on_cand_key(self, vk: int) -> str | None:
         if vk in (VK_LEFT, VK_RIGHT):
-            eligible = _stops(self.segments)
-            if self.focus in eligible:
-                at = eligible.index(self.focus) + (1 if vk == VK_RIGHT else -1)
-                self.focus = eligible[max(0, min(at, len(eligible) - 1))]
+            # Every segment is a stop: a symbol or a run of digits has its own rows.
+            if self.focus >= 0:
+                at = self.focus + (1 if vk == VK_RIGHT else -1)
+                self.focus = max(0, min(at, len(self.segments) - 1))
                 self._open_cands()
             return ""
         if vk in (VK_DOWN, VK_UP):
@@ -955,9 +929,7 @@ class ImeSession:
             selections.append((segment.selected, left_surface))
             left_surface = segment.selected.surface
         if self._learning is not None and self._lex is not None:
-            record_ids = self._learning.confirm(selections, self._lex)
-            if record_ids:
-                self._learning_undo.append(record_ids)
+            self._learning.confirm(selections, self._lex)
         if reset_input:
             context = self._lm_context
             self.reset()
@@ -1027,12 +999,6 @@ class ImeSession:
         self._lm_context += text
         if len(self._lm_context) > 4 * CONTEXT_CHARS:
             self._lm_context = self._lm_context[-CONTEXT_CHARS:]
-
-
-def _stops(segments: list[Segment]) -> list[int]:
-    """Focus stops: every segment. A symbol or a run of digits has its own
-    rows (symbols.py, numbers.py)."""
-    return list(range(len(segments)))
 
 
 def _first_stop(segments: list[Segment]) -> int:

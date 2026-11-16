@@ -1,7 +1,7 @@
 """The management tools' line to the broker (REDESIGN §9.4): its state, and "retry".
 
-The broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session> (on POSIX, where
-only the tests run it, ~/.yuragi-ime/broker.sock). These functions connect,
+The broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session> (Windows only;
+elsewhere there is no broker). These functions connect,
 say hello as a TIP would, and either read the state or ask for a retry (which
 also restarts a running engine, so that new settings are read). Nothing here
 starts anything.
@@ -11,15 +11,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import socket
 import threading
 
 HELLO = {"op": "hello", "proto": 1, "tag": "manage", "bits": 64}
 
 
 def pipe_address() -> str:
-    if os.name != "nt":
-        return str(Path.home() / ".yuragi-ime" / "broker.sock")
     import ctypes
     from ctypes import wintypes
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -63,20 +60,10 @@ def pipe_address() -> str:
 class _Connection:
     def __init__(self, address: str, timeout: float):
         self.timeout = timeout
-        if os.name == "nt":
-            self.file = open(address, "r+b", buffering=0)  # FileNotFoundError: no broker
-            self.sock = None
-        else:
-            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.sock.settimeout(timeout)
-            self.sock.connect(address)
+        self.file = open(address, "r+b", buffering=0)  # FileNotFoundError: no broker
 
     def send(self, msg: dict) -> None:
-        data = (json.dumps(msg) + "\n").encode("utf-8")
-        if self.sock is not None:
-            self.sock.sendall(data)
-        else:
-            self.file.write(data)
+        self.file.write((json.dumps(msg) + "\n").encode("utf-8"))
 
     def read_line(self) -> dict | None:
         """One line within the timeout; None when none came."""
@@ -85,7 +72,7 @@ class _Connection:
         def read():
             buffer = b""
             while not buffer.endswith(b"\n"):
-                chunk = self.sock.recv(4096) if self.sock is not None else self.file.read(4096)
+                chunk = self.file.read(4096)
                 if not chunk:
                     return
                 buffer += chunk
@@ -97,10 +84,12 @@ class _Connection:
         return result[0] if result else None
 
     def close(self) -> None:
-        (self.sock if self.sock is not None else self.file).close()
+        self.file.close()
 
 
 def _connect(address: str | None, timeout: float) -> _Connection | None:
+    if os.name != "nt":
+        return None  # the broker runs on Windows only
     try:
         return _Connection(address or pipe_address(), timeout)
     except OSError:

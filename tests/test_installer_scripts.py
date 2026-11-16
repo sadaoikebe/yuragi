@@ -3,7 +3,8 @@
 - Every PowerShell script parses and carries a UTF-8 BOM (Windows PowerShell
   5.1 reads a file without one as ANSI).
 - The elevated part gets exactly the arguments setup/uninstall meant, however
-  odd the paths (spaces, quotes, Japanese): the -EncodedCommand round trip.
+  odd the paths (spaces, quotes, Japanese; its own path too): the
+  -EncodedCommand round trip.
 - The release's uninstall.ps1 (packaging/uninstall-entry.ps1) says so and
   changes nothing when no version is installed.
 - engine.json says what the broker needs, and its "-c" bootstrap really runs a
@@ -78,9 +79,12 @@ class PowerShellTest(unittest.TestCase):
             result = Path(tmp) / "result dir" / "r.json"
             result.parent.mkdir()
             odd["ResultFile"] = str(result)
-            fake = ("param([string]$Action, [string]$ResultFile, [string]$Tag, [string]$DllSource, "
-                    "[string]$BrokerSource)\n"
-                    "[IO.File]::WriteAllText($ResultFile, ($PSBoundParameters | ConvertTo-Json))")
+            fake = Path(tmp) / "O'Brien の script" / "elevated.ps1"
+            fake.parent.mkdir()
+            fake.write_text("param([string]$Action, [string]$ResultFile, [string]$Tag, "
+                            "[string]$DllSource, [string]$BrokerSource)\n"
+                            "[IO.File]::WriteAllText($ResultFile, ($PSBoundParameters | ConvertTo-Json))",
+                            encoding="utf-8-sig")
             for script in ("setup.ps1", "uninstall.ps1"):
                 with self.subTest(script=script):
                     func = function_text(ROOT / "packaging" / script, "New-ElevatedCommand")
@@ -88,11 +92,12 @@ class PowerShellTest(unittest.TestCase):
                     for key, value in odd.items():
                         args += [f"-{key}", value]
                     listed = ", ".join("'" + a.replace("'", "''") + "'" for a in args)
-                    fake_quoted = fake.replace("'", "''")
-                    encoded = pwsh(f"{func}\nNew-ElevatedCommand '{fake_quoted}' @({listed})").strip()
+                    path_quoted = str(fake).replace("'", "''")
+                    encoded = pwsh(f"{func}\nNew-ElevatedCommand '{path_quoted}' @({listed})").strip()
                     command = base64.b64decode(encoded).decode("utf-16-le")
-                    self.assertTrue(command.startswith("& {"))
-                    run = subprocess.run([PWSH, "-NoProfile", "-EncodedCommand", encoded],
+                    self.assertTrue(command.startswith("& '"))
+                    run = subprocess.run([PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                                          "-EncodedCommand", encoded],
                                          capture_output=True, text=True, timeout=120)
                     self.assertEqual(run.returncode, 0, run.stderr)
                     got = json.loads(result.read_text(encoding="utf-8-sig"))

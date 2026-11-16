@@ -1,18 +1,14 @@
-"""One settings file for the conversion server.
+"""One settings file for the conversion engine.
 
 ~/.yuragi-ime/config.json holds any of the server's options under their
 command-line names (lm_deadline_ms for --lm-deadline-ms). A value in the file
-replaces the built-in default; an option given on the command line still wins.
-No file means the built-in defaults.
+replaces the built-in default. No file, or a file that cannot be used as a
+whole (broken JSON, an unknown key, a wrong value), means the built-in
+defaults; the engine logs why and goes on.
 
-The TIP keeps its own ~/.yuragi-ime/tip.json (read by the C++ side); the
-settings inventory below lists both so there is one place to look.
-
-  python -m yuragi.ime.manage config show   # effective values and their source
-  python -m yuragi.ime.admin_ui             # view and edit them in a window
-
-The server reads the file when it starts: a changed setting takes effect at
-the next server start.
+The engine reads the file when it starts: a changed setting takes effect at
+the next engine start. The management window (admin_ui) shows and edits it.
+The TIP keeps its own ~/.yuragi-ime/tip.json (read by the C++ side).
 """
 from __future__ import annotations
 
@@ -25,18 +21,10 @@ import sys
 DEFAULT_RUNTIME_DIR = Path.home() / ".yuragi-ime"  # the user's data: config.json, logs, ...
 CONFIG_NAME = "config.json"
 
-LEARNING_MODES = ("on", "paused", "off")  # config.json "learning" (REDESIGN §6.7)
+LEARNING_MODES = ("on", "off")  # config.json "learning" (REDESIGN §6.7)
 
 # Options that only make sense per invocation, never from a file.
 NOT_IN_FILE = {"runtime_dir", "config", "help"}
-
-# Settings that live elsewhere, listed so the inventory is complete.
-OTHER_SETTINGS = {
-    "tip.json toggle_vk": "TIP: the direct-input toggle key (default VK_OEM_3, C++ TipConfig)",
-    "tip.json toggle_mods": "TIP: its modifiers, e.g. [\"alt\"] (the default)",
-    "tip.json log_text": "TIP: log composition text (default off)",
-    "ZERO_ROW_PENALTY (environment)": "evaluation knob of the dictionary loader, not a user setting",
-}
 
 
 def file_settings(parser: argparse.ArgumentParser) -> dict[str, argparse.Action]:
@@ -48,75 +36,30 @@ def file_settings(parser: argparse.ArgumentParser) -> dict[str, argparse.Action]
     return actions
 
 
-def read_config(path: Path, parser: argparse.ArgumentParser, problems: list | None = None) -> dict:
+def read_config(path: Path, parser: argparse.ArgumentParser) -> dict:
     """The file's values, converted like the command line would; {} if absent.
 
-    A file the user edited by hand never stops the IME (REDESIGN §6.2): broken
-    JSON, a value of the wrong type, a value out of its choices or an unknown
-    key each leave that setting at its default. What was wrong is printed to
-    stderr and, when a list is given, appended to ``problems``.
+    Anything wrong in it leaves every setting at its default (REDESIGN §6.2):
+    a file the user edited by hand never stops the IME.
     """
-    def problem(text: str) -> None:
-        print(f"{path}: {text}", file=sys.stderr)
-        if problems is not None:
-            problems.append(text)
-
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))  # a BOM is fine
-    except FileNotFoundError:
-        return {}
+        raw = _read_raw(path)
+        return {key: parse_value(parser, key, value) for key, value in raw.items()}
     except (OSError, ValueError) as exc:  # UnicodeDecodeError is a ValueError
-        problem(f"not readable as JSON ({type(exc).__name__}); built-in defaults used")
+        print(f"{path}: not used, built-in defaults instead ({exc})", file=sys.stderr)
         return {}
-    if not isinstance(raw, dict):
-        problem("does not hold a JSON object; built-in defaults used")
-        return {}
-    known = file_settings(parser)
-    values = {}
-    for key, value in raw.items():
-        action = known.get(key)
-        if action is None:
-            problem(f"unknown setting {key!r} ignored")
-            continue
-        if is_switch(action):
-            if not isinstance(value, bool):
-                problem(f"{key}={value!r} is not true or false; ignored")
-                continue
-        elif value is not None and action.type is not None:
-            try:
-                value = action.type(value)
-            except (TypeError, ValueError):
-                problem(f"{key}={value!r} is not a valid value; ignored")
-                continue
-        if action.choices is not None and value not in action.choices:
-            problem(f"{key}={value!r} is not one of {list(action.choices)}; ignored")
-            continue
-        values[key] = value
-    return values
 
 
-def parse_args(parser: argparse.ArgumentParser, argv=None) -> argparse.Namespace:
-    """Command line over config file over built-in defaults."""
-    pre, _ = parser.parse_known_args(argv)
-    path = pre.config if pre.config is not None else (
-        (pre.runtime_dir or DEFAULT_RUNTIME_DIR) / CONFIG_NAME)
+def load(parser: argparse.ArgumentParser, runtime_dir: Path | None = None,
+         config_path: Path | None = None) -> argparse.Namespace:
+    """The settings: config.json over the parser's defaults."""
+    path = config_path if config_path is not None else (
+        (runtime_dir or DEFAULT_RUNTIME_DIR) / CONFIG_NAME)
     parser.set_defaults(**read_config(path, parser))
-    args = parser.parse_args(argv)
-    args.config = path
-    return args
-
-
-def effective(parser: argparse.ArgumentParser, path: Path) -> list[tuple[str, object, str, str]]:
-    """(name, value, source, help) for every server setting."""
-    from_file = read_config(path, parser)
-    rows = []
-    for dest, action in file_settings(parser).items():
-        if dest in from_file:
-            value, source = from_file[dest], "file"
-        else:
-            value, source = action.default, "default"
-        rows.append((dest, value, source, action.help or ""))
-    return rows
+    settings = parser.parse_args([])
+    settings.runtime_dir = runtime_dir
+    settings.config = path
+    return settings
 
 
 def is_switch(action: argparse.Action) -> bool:
@@ -124,8 +67,26 @@ def is_switch(action: argparse.Action) -> bool:
     return action.nargs == 0 and isinstance(action.const, bool)
 
 
+def parse_value(parser: argparse.ArgumentParser, key: str, value):
+    """A value as the file holds it, converted and checked like the command line."""
+    action = file_settings(parser).get(key)
+    if action is None:
+        raise ValueError(f"unknown setting {key!r}")
+    if is_switch(action):
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} is true or false, not {value!r}")
+    elif value is not None and action.type is not None:
+        try:
+            value = action.type(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key}: {value!r} is not a valid value") from None
+    if action.choices is not None and value not in action.choices:
+        raise ValueError(f"{key} is one of {list(action.choices)}, not {value!r}")
+    return value
+
+
 def parse_setting(parser: argparse.ArgumentParser, key: str, text: str):
-    """Text typed for a setting, converted and checked as read_config would."""
+    """Text typed for a setting (the management window), converted and checked."""
     action = file_settings(parser).get(key)
     if action is None:
         raise ValueError(f"unknown setting {key!r}")
@@ -137,13 +98,7 @@ def parse_setting(parser: argparse.ArgumentParser, key: str, text: str):
         if lowered in ("false", "off", "no", "0"):
             return False
         raise ValueError(f"{key} is on or off (true/false), not {text!r}")
-    try:
-        value = action.type(text) if action.type is not None else text
-    except (TypeError, ValueError):
-        raise ValueError(f"{key}: {text!r} is not a valid value") from None
-    if action.choices is not None and value not in action.choices:
-        raise ValueError(f"{key} is one of {list(action.choices)}, not {text!r}")
-    return value
+    return parse_value(parser, key, text)
 
 
 def _read_raw(path: Path) -> dict:
@@ -157,7 +112,7 @@ def _read_raw(path: Path) -> dict:
 
 
 def _read_known(path: Path, parser: argparse.ArgumentParser) -> dict:
-    """The file's settings the server knows, as written."""
+    """The file's settings the engine knows, as written (writing drops the rest)."""
     known = file_settings(parser)
     return {key: value for key, value in _read_raw(path).items() if key in known}
 
@@ -172,7 +127,8 @@ def _write_raw(path: Path, raw: dict) -> None:
 
 
 def set_setting(path: Path, parser: argparse.ArgumentParser, key: str, text: str):
-    """Write one setting into the file; returns the value as stored."""
+    """Write one setting into the file; returns the value as stored. A broken
+    file raises ValueError (it is not overwritten)."""
     value = parse_setting(parser, key, text)
     raw = _read_known(path, parser)
     raw[key] = str(value) if isinstance(value, Path) else value
@@ -191,11 +147,5 @@ def unset_setting(path: Path, parser: argparse.ArgumentParser, key: str) -> bool
 
 
 def learning_mode(settings: argparse.Namespace) -> str:
-    """on, paused or off: the learning setting (REDESIGN §6.7); unset is on."""
+    """on or off: the learning setting (REDESIGN §6.7); unset is on."""
     return settings.learning or "on"
-
-
-def set_learning_mode(settings: argparse.Namespace, parser: argparse.ArgumentParser,
-                      mode: str) -> None:
-    """Store the learning setting."""
-    set_setting(settings.config, parser, "learning", mode)
