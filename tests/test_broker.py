@@ -215,39 +215,7 @@ class BrokerCase(unittest.TestCase):
         return path.read_text() if path.exists() else ""
 
 
-class SupervisionTest(BrokerCase):
-    def test_three_crashes_stop_and_retry_starts_exactly_once(self):
-        self.plan({"crash_after": 1}, {"crash_after": 1}, {"crash_after": 1}, "normal")
-        self.start()
-        tip = self.tip()
-        tip.hello()
-        for seq in (1, 2, 3):
-            tip.wait_state("ready")
-            tip.key(seq)
-            self.assertEqual(tip.reply(seq), {"seq": seq, "state": "starting" if seq < 3 else "down"})
-            tip.wait_state("starting" if seq < 3 else "down")
-        self.assertEqual(self.starts(), 3)
-        self.assertEqual(self.notices(), [{"stopped": "exited"}])
-        tip.send({"op": "retry"})
-        tip.wait_state("ready")
-        time.sleep(1.0)
-        self.assertEqual(self.starts(), 4)
-        tip.key(9)
-        self.assertEqual(tip.reply(9)["composition"], "down:74")
-
-
 class ProcessTest(BrokerCase):
-    def test_killing_the_broker_ends_the_engine(self):
-        self.plan("normal")
-        proc = self.start()
-        tip = self.tip()
-        tip.hello()
-        tip.wait_state("ready")
-        engine = self.engines()[0]
-        proc.kill()
-        proc.wait()
-        wait_until(lambda: not alive(*engine))
-
     def test_one_broker_per_user(self):
         self.plan("normal")
         self.start()

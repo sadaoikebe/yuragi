@@ -2,7 +2,7 @@
 
 The recorded key events go through the same dispatch() as the engine. Checked:
 no event raises, and the document formed by concatenating commits is the
-recorded one. The per-event expectations in the files are not compared.
+recorded one. The steps are the key events only.
 """
 
 from __future__ import annotations

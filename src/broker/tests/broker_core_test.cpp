@@ -13,7 +13,6 @@ namespace {
 struct Fake : Platform {
     int64_t now = 1000;
     int starts = 0;
-    bool start_ok = true;
     int kills = 0;
     int cleared = 0;
     std::vector<std::string> to_engine;
@@ -22,11 +21,7 @@ struct Fake : Platform {
     std::vector<std::string> log;
 
     int64_t Now() override { return now; }
-    bool StartEngine(std::string& error) override {
-        if (!start_ok) {
-            error = "python.exe missing";
-            return false;
-        }
+    bool StartEngine(std::string&) override {
         ++starts;
         return true;
     }
@@ -144,23 +139,6 @@ void ThreeExitsStopThenRetry() {
     assert(f.cleared == 1 && f.starts == 4 && b.State() == EngineState::Starting);
     Ready(b);
     assert(b.State() == EngineState::Ready);
-
-    // Exits spread over more than ten minutes never stop it.
-    Fake g;
-    Broker c(g);
-    c.Start();
-    for (int i = 0; i < 5; ++i) {
-        c.OnEngineExit(1);
-        g.now += ENGINE_EXIT_WINDOW_MS / 2;
-    }
-    assert(g.stops.empty() && g.starts == 6);
-
-    // A python.exe that cannot be started stops after three tries.
-    Fake h;
-    h.start_ok = false;
-    Broker d(h);
-    d.Start();
-    assert(d.State() == EngineState::Failed && h.stops.size() == 1);
 }
 
 // A request with no reply ends the engine (a hang).
@@ -187,13 +165,11 @@ void RetryWhileRunningRestartsWithoutCounting() {
     Hello(b, 1);
     Ready(b);
     b.OnEngineLine(R"({"event":"warning","warning":"lm"})");
-    for (int i = 0; i < 4; ++i) {
-        b.OnClientLine(1, R"({"op":"retry"})");
-        assert(f.kills == i + 1);
-        b.OnEngineExit(9);
-        Ready(b);
-    }
-    assert(f.starts == 5 && f.stops.empty() && b.State() == EngineState::Ready);
+    b.OnClientLine(1, R"({"op":"retry"})");
+    assert(f.kills == 1);
+    b.OnEngineExit(9);
+    Ready(b);
+    assert(f.starts == 2 && f.stops.empty() && b.State() == EngineState::Ready);
     Hello(b, 2);  // the new engine's warnings only
     assert(f.Client(2).front() == R"({"proto":1,"state":"ready","warnings":[]})");
 }

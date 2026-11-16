@@ -1,4 +1,4 @@
-# 毎回の push と PR で: Python の試験 (アプリが死なずに動くことの確認)、ブローカーの試験 (REDESIGN §5.7, §10)、
+# 毎回の push と PR で: Python の試験 (普通に使ったときの動き)、ブローカーの試験 (REDESIGN §5.7, §10)、
 # TIP の判断の試験 (§7.8)。
 # Linux ではブローカーの中核を偽の土台で試し、Windows では MSVC で本物の
 # yuragi-broker.exe を作って、偽エンジン・偽 TIP と名前付きパイプで動かす。
@@ -95,7 +95,7 @@ jobs:
           ctest --test-dir build/tip -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "TIP tests failed" }
 
-      - name: ブローカーの §5.7 試験 (名前付きパイプ・ジョブ・ウィンドウ 0 枚)
+      - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験)
         shell: pwsh
         env:
           YURAGI_BROKER: ${{ github.workspace }}\dist\yuragi-broker.exe

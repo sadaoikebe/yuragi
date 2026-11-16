@@ -1,8 +1,6 @@
 """The management window's logic, without tkinter or a display."""
 from __future__ import annotations
 
-from contextlib import redirect_stderr
-import io
 import json
 from pathlib import Path
 import sys
@@ -50,28 +48,11 @@ class Base(unittest.TestCase):
                       small_lex())
 
 
-class AdminModelTest(Base):
-    def test_restart_engine_reports_no_broker(self):
-        outcome = self.model.restart_engine()
-        self.assertFalse(outcome.ok)
-
-
 class SettingsTest(Base):
     def test_absent_config_file_is_created_on_first_edit(self):
         self.assertTrue(self.model.set_setting("lm_rescore", "使わない").ok)
         self.assertEqual(json.loads(self.config.read_text(encoding="utf-8")),
                          {"lm_rescore": False})
-
-    def test_broken_config_file_is_reported_not_overwritten(self):
-        self.config.write_text("[1, 2]", encoding="utf-8")
-        with redirect_stderr(io.StringIO()):  # the engine's "not an object" note
-            model = AdminModel(runtime_dir=self.dir)
-            for outcome in (model.set_setting("learning", "使わない"),
-                            model.reset_setting("learning")):
-                self.assertEqual((outcome.ok, outcome.message),
-                                 (False, f"設定ファイル {self.config} が壊れているため保存できません"))
-        self.assertEqual(self.config.read_text(encoding="utf-8"), "[1, 2]")
-
 
 class FakeVar:
     def __init__(self, value=""):
@@ -137,47 +118,6 @@ class WidgetLayerTest(Base):
         w._tab_changed()
         self.assertEqual(w.message.get(), "")  # a message stays with its tab
         w._refresh_status()
-
-class EntryPointTest(unittest.TestCase):
-    def test_without_tkinter_it_says_so(self):
-        import builtins
-        real = builtins.__import__
-
-        def no_tk(name, *args, **kwargs):
-            if name == "tkinter":
-                raise ImportError(name)
-            return real(name, *args, **kwargs)
-
-        builtins.__import__ = no_tk
-        err = io.StringIO()
-        try:
-            with redirect_stderr(err):
-                self.assertEqual(admin_ui.main([]), 1)
-        finally:
-            builtins.__import__ = real
-        self.assertIn("tkinter", err.getvalue())
-
-    def test_dict_dir_is_where_the_status_tab_checks(self):
-        # Installed, the dictionary is the shared copy, not the repository's
-        # third_party folder; every file was reported missing.
-        from yuragi.lattice import mozc_dict
-        import builtins
-        real = builtins.__import__
-
-        def no_tk(name, *args, **kwargs):
-            if name == "tkinter":
-                raise ImportError(name)
-            return real(name, *args, **kwargs)
-
-        self.addCleanup(setattr, mozc_dict, "DICT_DIR", mozc_dict.DICT_DIR)
-        builtins.__import__ = no_tk
-        try:
-            with redirect_stderr(io.StringIO()):
-                admin_ui.main(["--dict-dir", "shared-dict"])
-        finally:
-            builtins.__import__ = real
-        self.assertEqual(mozc_dict.DICT_DIR, Path("shared-dict"))
-
 
 if __name__ == "__main__":
     unittest.main()

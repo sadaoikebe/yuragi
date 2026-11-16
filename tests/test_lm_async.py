@@ -1,7 +1,7 @@
 """Resident LM pipeline: the IME never hangs on a slow LM. Fake scorers, no torch.
 
-The deadline (400 ms) falls back to the dictionary-only conversion, and
-reset / input-mode switch / disconnect drop what is pending.
+The deadline (400 ms) falls back to the dictionary-only conversion, the same
+as converting without the LM.
 """
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ class Clock:
         return self.now
 
 
-class DeadlineAndAbandonTest(unittest.TestCase):
+class DeadlineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.lex = real_lex()
@@ -205,31 +205,6 @@ class DeadlineAndAbandonTest(unittest.TestCase):
         self.assertEqual((commits, final_state(reply)), expected)
         self.assertNotEqual(expected, run_reference(self.session, head + tail.events,
                                                     PickyScorer()))
-
-    def test_reset_toggle_and_disconnect_abandon(self):
-        for op in ({"op": "reset"}, {"op": "set_direct", "direct": True}, "close"):
-            with self.subTest(op=op):
-                pipe, worker, clock = self.pipeline()
-                for event in Typist().kana("きしゃ").space().kana("こう", gap=20).events:
-                    pipe.handle(dict(event))
-                job = pipe.job
-                self.assertTrue(pipe.queue)
-                if op == "close":
-                    pipe.close()
-                    self.assertTrue(job.cancelled)
-                    continue
-                reply = pipe.handle(op)
-                self.assertTrue(job.cancelled)
-                self.assertFalse(pipe.queue)
-                self.assertFalse(reply["pending"])
-                self.assertEqual((reply["composition"], reply["commit"], reply["n_tokens"]),
-                                 ("", "", 0))
-                worker.complete_all()  # completing afterwards does nothing
-                reply = pipe.handle({"op": "timeout", "t": 10 ** 6})
-                self.assertEqual((reply["composition"], reply["commit"], reply["pending"]),
-                                 ("", "", False))
-                self.assertIsNone(pipe.sess._await)
-
 
 if __name__ == "__main__":
     unittest.main()

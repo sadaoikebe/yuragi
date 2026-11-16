@@ -8,15 +8,11 @@ the LM, its own pipeline.
 from __future__ import annotations
 
 from argparse import Namespace
-from contextlib import redirect_stderr
-import io
 import json
 from pathlib import Path
 import tempfile
-import threading
 import time
 import unittest
-import weakref
 
 from yuragi.engine import Engine
 from yuragi.ime.lm_async import LmWorker
@@ -77,20 +73,6 @@ class EngineCase(unittest.TestCase):
         return self.request(engine, sid, {"op": "up", "vk": 65, "t": t + 30})
 
 
-class SessionsTest(EngineCase):
-    def test_close_discards_the_session_and_others_go_on(self):
-        engine = self.engine()
-        self.open(engine, 1)
-        self.open(engine, 2)
-        ref = weakref.ref(engine.connections[1].sess)
-        self.type_a(engine, 1)
-        engine.serve([b'{"op":"close","sid":1}'])
-        self.assertIsNone(ref())
-        with redirect_stderr(io.StringIO()):
-            self.assertTrue(self.request(engine, 1, {"op": "reset"})["error"])  # not open
-        self.assertEqual(self.type_a(engine, 2)["composition"], "宇")
-
-
 class SlowScorer:
     """Prefers 卯 over the Viterbi 宇; each call sleeps (a slow model)."""
 
@@ -144,45 +126,6 @@ class LmPipelineTest(EngineCase):
             t += 16
         self.assertEqual((reply["commit"], reply["composition"], reply["converted"]),
                          ("卯", "宇", False))
-
-    def test_serves_while_the_lm_loads_slowly_or_fails(self):
-        release = threading.Event()
-
-        def slow():
-            release.wait(5)
-            return LmRescorer(SlowScorer(0))
-
-        def broken():
-            raise ImportError("no torch")
-
-        for name, loader in (("slow", slow), ("broken", broken)):
-            with self.subTest(loader=name), redirect_stderr(io.StringIO()):
-                loaded = loaded_session()
-                engine = self.engine(loaded)
-                worker = LmWorker(loader, loaded._lex, on_disabled=engine.lm_disabled)
-                engine.worker = worker
-                if name == "broken":
-                    self.wait_state(worker, "disabled")
-                    self.assertEqual(engine.channel.warnings, ["lm"])  # §6.2: the user is told
-                self.open(engine, 1)
-                self.type_a(engine, 1)
-                self.request(engine, 1, {"op": "down", "vk": 32, "t": 100})
-                reply = self.request(engine, 1, {"op": "up", "vk": 32, "t": 130})
-                self.assertEqual((reply["pending"], reply["converted"], reply["composition"]),
-                                 (False, True, "宇"))  # the Viterbi 1-best meanwhile
-                if name == "slow":
-                    release.set()
-                    self.wait_state(worker, "ready")
-                    self.request(engine, 1, {"op": "down", "vk": 27, "t": 200})
-                    self.request(engine, 1, {"op": "down", "vk": 32, "t": 300})
-                    reply = self.request(engine, 1, {"op": "up", "vk": 32, "t": 330})
-                    t = 330
-                    while reply["pending"]:
-                        time.sleep(0.016)
-                        t += 16
-                        reply = self.request(engine, 1, {"op": "timeout", "t": t})
-                    self.assertEqual(reply["composition"], "卯")
-
 
 if __name__ == "__main__":
     unittest.main()

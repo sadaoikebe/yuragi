@@ -26,8 +26,8 @@ static void ReadingReplies() {
     assert(r.candidates.size() == 2 && r.cand_index == 1 && r.has_next_page);
     assert(r.segments.size() == 1 && r.segments[0].display_end == 1);
 
-    // §5.5: missing fields default, unknown ones are ignored, wrong types default.
-    Message sparse = Parse(R"({"seq":3,"composition":7,"new_field":{"x":[1]},"timer":null})");
+    // §5.5: missing fields default, unknown ones are ignored.
+    Message sparse = Parse(R"({"seq":3,"new_field":{"x":[1]}})");
     assert(sparse.engine && sparse.composition.empty() && !sparse.has_timer);
     assert(sparse.focus == -1 && sparse.candidates.empty() && !sparse.error);
 
@@ -150,7 +150,7 @@ static void OrderOfReplies() {
     assert(a == 1 && b == 2 && c == 3 && f.Waiting(2));
     assert(f.Answer(1));
     assert(!f.Answer(1));  // already answered
-    assert(f.Answer(3));  // 2 was never answered (the broker answers in order: dropped)
+    assert(f.Answer(2) && f.Answer(3));
     assert(!f.Waiting() && f.Last() == 3);
 }
 

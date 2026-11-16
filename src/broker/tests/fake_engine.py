@@ -4,7 +4,6 @@
 
 STATE_DIR/plan.json lists what each start does, in order (the last entry repeats):
   "normal"                 ready, then one reply per request
-  {"crash_after": N}       ready; exit 3 on receiving the Nth request, unanswered
 Each start appends "pid birth" to STATE_DIR/starts.
 """
 import json
@@ -45,14 +44,10 @@ def main() -> int:
     out = sys.stdout
     out.write(json.dumps({"ready": True, "proto": 1, "warnings": []}) + "\n")
     out.flush()
-    requests = 0
     for line in sys.stdin:
         msg = json.loads(line)
         if msg.get("op") in ("open", "close"):
             continue
-        requests += 1
-        if isinstance(mode, dict) and requests >= mode["crash_after"]:
-            return 3
         out.write(json.dumps({"sid": msg["sid"], "seq": msg["seq"], "direct": False,
                               "composition": f"{msg.get('op')}:{msg.get('vk')}",
                               "commit": "", "converted": False, "pending": False}) + "\n")

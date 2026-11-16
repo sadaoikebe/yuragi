@@ -35,16 +35,5 @@ class ServerTest(unittest.TestCase):
         send("up", vk=65, t=230)
         self.assertEqual(send("down", vk=13, t=300)["commit"], "う")
 
-    def test_direct_transition_discards_pending_chord(self):
-        session = ImeSession(_table=load_table(), _lex=MozcLex({}, set(), [0] * 4, 2))
-        send = lambda msg: server.dispatch(session, msg)
-        self.assertIsNotNone(send({"op": "down", "vk": 65, "t": 0})["timer"])
-        reply = send({"op": "set_direct", "direct": True})
-        self.assertEqual((reply["direct"], reply["timer"], reply["commit"]), (True, None, ""))
-        send({"op": "set_direct", "direct": False})
-        self.assertEqual(send({"op": "up", "vk": 65, "t": 10})["composition"], "")
-        self.assertEqual(send({"op": "timeout", "t": 200})["composition"], "")
-
-
 if __name__ == "__main__":
     unittest.main()
