@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "description": "既存80msの前/丁度でのトークン確定と変換。新文字のdownで確定し、timeoutで新composition表示。",
+  "description": "既存80msの前/丁度でのトークン確定と変換。離した直後の down は新しい打鍵。新文字のdownで確定し、timeoutで新composition表示。",
   "lexicon": [],
   "steps": [
     {"event": {"op": "down", "t": 0, "vk": 87}, "expect": {"composition": "", "commit": "", "converted": false, "fsm": "S2", "n_tokens": 0, "timer": 80, "candidates": [], "cand_index": 0, "segments": [], "focus": -1, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
     {"event": {"op": "timeout", "t": 79}, "expect": {"composition": "", "commit": "", "converted": false, "fsm": "S2", "n_tokens": 0, "timer": 80, "candidates": [], "cand_index": 0, "segments": [], "focus": -1, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
     {"event": {"op": "timeout", "t": 80}, "expect": {"composition": "か", "commit": "", "converted": false, "fsm": "S1", "n_tokens": 1, "timer": null, "candidates": [], "cand_index": 0, "segments": [{"start": 0, "end": 1, "surface": "か", "reading": "か", "literal": false, "fixed": false, "display_start": 0, "display_end": 1}], "focus": 0, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
+    {"event": {"op": "up", "t": 80, "vk": 87}},
     {"event": {"op": "down", "t": 81, "vk": 87}, "expect": {"composition": "か", "commit": "", "converted": false, "fsm": "S1", "n_tokens": 1, "timer": null, "candidates": [], "cand_index": 0, "segments": [{"start": 0, "end": 1, "surface": "か", "reading": "か", "literal": false, "fixed": false, "display_start": 0, "display_end": 1}], "focus": 0, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
     {"event": {"op": "up", "t": 90, "vk": 87}, "expect": {"composition": "か", "commit": "", "converted": false, "fsm": "S1", "n_tokens": 1, "timer": null, "candidates": [], "cand_index": 0, "segments": [{"start": 0, "end": 1, "surface": "か", "reading": "か", "literal": false, "fixed": false, "display_start": 0, "display_end": 1}], "focus": 0, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
     {"event": {"op": "down", "t": 190, "vk": 32}, "expect": {"composition": "か", "commit": "", "converted": false, "fsm": "S3", "n_tokens": 1, "timer": 270, "candidates": [], "cand_index": 0, "segments": [{"start": 0, "end": 1, "surface": "か", "reading": "か", "literal": false, "fixed": false, "display_start": 0, "display_end": 1}], "focus": 0, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": ""}},
@@ -17,6 +18,6 @@
     {"event": {"op": "down", "t": 570, "vk": 13}, "expect": {"composition": "", "commit": "か", "converted": false, "fsm": "S1", "n_tokens": 0, "timer": null, "candidates": [], "cand_index": 0, "segments": [], "focus": -1, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": "かか"}},
     {"event": {"op": "up", "t": 600, "vk": 13}, "expect": {"composition": "", "commit": "", "converted": false, "fsm": "S1", "n_tokens": 0, "timer": null, "candidates": [], "cand_index": 0, "segments": [], "focus": -1, "candidate_page": 0, "candidate_kinds": [], "has_next_page": false, "committed": "かか"}}
   ],
-  "committed": "かか",
+  "committed": "かかか",
   "composition": ""
 }

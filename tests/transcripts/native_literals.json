@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "数字・記号キーの単独面（全角。[ は 、、] は空）、Shift英字、Shift英字のあとは英数の続きで Shift記号も刻印の上段の半角、Ctrl/Alt/Winショートカット、続きの Space は押下で変換、変換後の Shift記号は全角。キーアップ/リピートで重複しない。",
+  "description": "数字・記号キーの単独面（全角。[ は 、、] は空）、Shift英字、Shift英字のあとは英数の続きで Shift記号も刻印の上段の半角、Ctrl/Alt/Winショートカット、続きの Space は押下で変換、変換後の Shift記号は全角。キーアップで重複しない。押しっぱなしのリピートは同じ文字をもう一度入れる（Shift英字の A が2つ）。",
   "lexicon": [],
   "steps": [
     {
@@ -3851,6 +3851,6 @@
       }
     }
   ],
-  "committed": "０９、￥’－＝｀A!):?！",
+  "committed": "０９、￥’－＝｀AA!):?！",
   "composition": ""
 }

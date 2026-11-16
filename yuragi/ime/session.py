@@ -47,6 +47,7 @@ SCRIPT_VKS = (VK_F6, VK_F7, VK_F8, VK_F9, VK_F10)  # the one-shot spellings
 VK_TAB = 0x09
 CTRL_VKS = {0x11, 0xA2, 0xA3}  # Ctrl, left and right
 PREDICTION = "predict"  # Segment.context of the predictions' segment
+IDEOGRAPHIC_SPACE = "\u3000"  # Space with no input (全角の空白)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +177,6 @@ class ImeSession:
     _table: dict = field(default_factory=dict)
     _lex: MozcLex | None = None
     _modifiers: set[int] = field(default_factory=set)
-    _literal_down: set[int] = field(default_factory=set)
     # A symbol chord inside a press splits it: the chords after it are another
     # press (no press crosses a literal, alternation.py). press → its alias.
     _press_alias: dict[int, int] = field(default_factory=dict)
@@ -209,8 +209,8 @@ class ImeSession:
         self.tokens.clear()
         self.fsm.reset()
         self.fsm.down_keys.clear()
+        self.fsm.last = None
         self._modifiers.clear()
-        self._literal_down.clear()
         self._press_alias.clear()
         self._carry.clear()
         self._left_surface = ""
@@ -249,12 +249,6 @@ class ImeSession:
             else:
                 self._modifiers.discard(vk)
             return None
-        # A literal's release must not become a kana event if Shift was released
-        # first. The same guard prevents native key repeat from doubling tokens.
-        if vk in self._literal_down:
-            if not down:
-                self._literal_down.discard(vk)
-            return None
         shift = "shift" in mods if mods is not None else bool(self._modifiers & SHIFT_VKS)
         shortcut = (bool(set(mods) & {"ctrl", "alt", "win"}) if mods is not None
                     else bool(self._modifiers & SHORTCUT_VKS))
@@ -289,13 +283,11 @@ class ImeSession:
                             self.forget_candidate()
                     else:
                         self.undo_learning()
-                    self._literal_down.add(vk)
                     return None
                 return self._then(pending, learning_key)
 
             def script_key() -> None:
                 self._select_script(vk)
-                self._literal_down.add(vk)
                 return None
             return self._then(pending, script_key)
         if kind == "EDIT":
@@ -307,10 +299,9 @@ class ImeSession:
                 and vk in (VK_LEFT, VK_RIGHT)):
             pending = self._finish_pending()
             self._resize(1 if vk == VK_RIGHT else -1)
-            self._literal_down.add(vk)
             return pending
-        # Candidate shortcuts precede the digit keys' faces. Consume their up
-        # and HID repeat too; Shift+digits still enter their symbols.
+        # Candidate shortcuts precede the digit keys' faces (a repeat acts
+        # again, as a new press); Shift+digits still enter their symbols.
         if down and not shift and self.converted:
             if vk in (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT) or (
                     self.candidates and ord("1") <= vk <= ord("9")):
@@ -319,11 +310,9 @@ class ImeSession:
                 pending = None
             picked = self._on_cand_key(vk)
             if picked is not None:
-                self._literal_down.add(vk)
                 return (pending or "") + picked
         if (down and vk == VK_TAB and not shift and self.prediction != "off"
                 and self._predict_key()):
-            self._literal_down.add(vk)
             return None
         if down and kind in ("M", "O") and self._alnum_continues():
             # 英数の続き: no chord FSM; keys type their engravings, Space converts
@@ -338,11 +327,7 @@ class ImeSession:
             if not down:
                 return None
             pending = self._finish_pending()
-
-            def literal_key() -> str | None:
-                self._literal_down.add(vk)
-                return self._ingest([Literal(literal)])
-            return self._then(pending, literal_key)
+            return self._then(pending, lambda: self._ingest([Literal(literal)]))
         if kind not in ("M", "O"):
             if down and not self.tokens:
                 self._lm_context = ""  # Arrows/Home/Tab etc.: the caret may have moved.
@@ -351,8 +336,6 @@ class ImeSession:
         due = self.flush_timeout(now_ms)
 
         def chord_key() -> str | None:
-            if down and f"{kind}:{key}" in self.fsm.down_keys:
-                return None  # HID repeat is not the next character stroke.
             insert = ""
             if down and kind == "M" and self.converted:
                 # Preserve a pending Space chord: only composition is committed here.
@@ -441,7 +424,7 @@ class ImeSession:
         """Tab: open predictions, or the next one; False leaves Tab as it was.
 
         Only unconverted input with no chord or conversion in flight asks;
-        with no prediction nothing changes and Tab goes to the application.
+        with no prediction nothing changes (the TIP eats Tab while composing).
         """
         if self.predicting:
             self._cycle(1)
@@ -840,8 +823,9 @@ class ImeSession:
                             self._refresh(rescore=True)
                         self._open_cands()
                 else:
-                    insert += " "
-                    self._note_commit(" ")
+                    # No input: a space, full width as the kana mode's default.
+                    insert += IDEOGRAPHIC_SPACE
+                    self._note_commit(IDEOGRAPHIC_SPACE)
                 continue
             mapped = to_lattice_token(tok, self._table)
             if mapped is None:

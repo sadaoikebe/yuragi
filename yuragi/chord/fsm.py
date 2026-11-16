@@ -38,6 +38,12 @@ its exits give a plain character, and Space up leaves it pending (S2).
 
 Everything is decided once, from key order and timing; a token is never
 changed after it is emitted.
+
+Key repeat (a down of a key already down) does not move the machine: the key
+gives its last token again. A chord held down repeats the chord (のののの,
+the same press and turn, so the same face); a lone Space repeats ThumbTap.
+A key whose last token is not its own (Space after the character of a
+chord) repeats nothing.
 """
 
 from __future__ import annotations
@@ -93,6 +99,7 @@ class ChordFsm:
     last_length: int | None = None  # held length of the last released character
     down_keys: set[str] = field(default_factory=set)
     pressed_at: dict[str, int] = field(default_factory=dict)  # character key → down time
+    last: Token | None = None  # the last token emitted (key repeat gives it again)
 
     def reset(self) -> None:
         """Close the press logically (literal/edit boundary). Physical keys,
@@ -135,14 +142,21 @@ class ChordFsm:
 
     # -- events ----------------------------------------------------------
 
+    def _emit(self, out: list[Token]) -> list[Token]:
+        if out:
+            self.last = out[-1]
+        return out
+
     def on_down(self, kind: str, key: str, now: int) -> list[Token]:
         kid = f"{kind}:{key}"
         if kid in self.down_keys:
-            return []  # HID repeat
+            # Key repeat: no new stroke; the key's own last token again.
+            last = self.last
+            return [last] if last is not None and last.key == key else []
         self.down_keys.add(kid)
         if kind == "M":
             self.pressed_at[key] = now
-            return self._m_down(key, now)
+            return self._emit(self._m_down(key, now))
         if kind == "O":
             self._o_down(now)
         return []
@@ -154,12 +168,15 @@ class ChordFsm:
             start = self.pressed_at.pop(key, None)
             if start is not None:
                 self.last_length = now - start
-            return out
+            return self._emit(out)
         if kind == "O":
-            return self._o_up(now)
+            return self._emit(self._o_up(now))
         return []
 
     def on_timeout(self, now: int) -> list[Token]:
+        return self._emit(self._timeout(now))
+
+    def _timeout(self, now: int) -> list[Token]:
         if self.timer_deadline is None or now < self.timer_deadline:
             return []
         self.timer_deadline = None

@@ -27,7 +27,8 @@ unconverted input asks for predictions of the input's end (the longest tail
 that has any, starting at one of the last MAX_TAILS word boundaries of the
 live conversion); they open in the ordinary
 candidate window and are moved, selected and committed with the ordinary
-candidate keys. With no prediction, Tab does exactly what it did before.
+candidate keys. With no prediction nothing changes (the TIP still eats Tab
+while there is input).
 """
 from __future__ import annotations
 

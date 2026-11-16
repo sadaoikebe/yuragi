@@ -27,7 +27,7 @@ def type_keys(s, keys):
 
 
 def tap(s, vk):
-    """A full press: a held key's repeat does not act again."""
+    """A full press: down and up."""
     reply = dispatch(s, {"op": "down", "vk": vk})
     dispatch(s, {"op": "up", "vk": vk})
     return reply

@@ -218,7 +218,9 @@ inline bool WantKey(uint32_t vk, Mods mods, const Local& local) {
     bool converted = local.converted;
     if (CharacterVk(vk) || vk == VK_SPACE_) return true;
     if (vk == VK_RETURN_ || vk == VK_BACK_ || vk == VK_ESCAPE_) return composing;
-    if (vk == VK_F7_) return true;
+    // F6/F7 with no input are the application's; Shift+F7 (undo the last
+    // learning) is ours with or without input.
+    if (vk == VK_F7_) return composing || mods.shift;
     if (vk == VK_F6_) return composing;
     if (vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_) return composing && !mods.shift;
     if (vk == VK_TAB_) return composing && !mods.shift;
@@ -241,10 +243,11 @@ inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before
     if (CharacterVk(vk) || vk == VK_SPACE_) return state_mask;
     if (vk == VK_BACK_ || vk == VK_RETURN_ || vk == VK_ESCAPE_) return before.composing && state_mask;
     if (vk == VK_DOWN_ && mods.CtrlOnly()) return before.composing && state_mask;  // as Enter
-    if (vk == VK_F7_) return true;
-    if (vk == VK_F6_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_)
+    if (vk == VK_F7_ && mods.shift) return true;
+    if (vk == VK_F6_ || vk == VK_F7_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_)
         return before.composing || before.converted;
-    if (vk == VK_TAB_) return r.predicting;
+    // Tab while composing is ours even with no prediction: the input stays.
+    if (vk == VK_TAB_) return before.composing || r.predicting;
     Local wanted = before;
     wanted.awaiting = false;
     return before.converted && WantKey(vk, mods, wanted);

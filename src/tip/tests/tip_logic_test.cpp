@@ -127,6 +127,15 @@ static void EatingKeys() {
     Local composing;
     composing.composing = true;
     assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, tab));
+    // Tab with no prediction stays ours while composing; with no input it is the app's.
+    Message typed = Parse(R"({"seq":1,"composition":"x","n_tokens":1})");
+    assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, typed));
+    assert(!EatAfterReply(true, VK_TAB_, none, idle, false, 0, empty));
+    // F7 with no input is the application's (F6 already was); Shift+F7 is ours.
+    assert(!WantKey(VK_F7_, none, idle) && !WantKey(VK_F6_, none, idle));
+    assert(WantKey(VK_F7_, none, typing) && WantKey(VK_F7_, shift, idle));
+    assert(!EatAfterReply(true, VK_F7_, none, idle, false, 0, empty));
+    assert(EatAfterReply(true, VK_F7_, none, composing, false, 1, typed));
     // Ctrl+↓ as Enter: eaten after input, whether the rest stays or not.
     Message rest = Parse(R"({"seq":1,"composition":"y","commit":"x","n_tokens":1,"converted":true})");
     Message whole = Parse(R"({"seq":1,"commit":"x"})");
