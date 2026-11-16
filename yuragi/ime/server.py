@@ -111,9 +111,8 @@ def argument_parser() -> argparse.ArgumentParser:
     lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads")
     lm.add_argument("--lm-timing", action="store_true",
                     help="log rescoring time per conversion to stderr (no text)")
-    lm.add_argument("--lm-prefetch", choices=("thumb", "typing", "off"), default="thumb",
-                    help="engine: start the LM early on thumb press (default), "
-                         "on every keystroke, or never")
+    lm.add_argument("--lm-prefetch", choices=("thumb", "off"), default="thumb",
+                    help="engine: start the LM early on thumb press (default), or never")
     lm.add_argument("--lm-deadline-ms", type=float, default=400,
                     help="engine: fall back to the Viterbi 1-best after this wait")
     lm.add_argument("--lm-grace-ms", type=float, default=30,

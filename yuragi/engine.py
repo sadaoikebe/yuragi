@@ -269,8 +269,8 @@ class Engine:
         log(f"LM loaded in {time.perf_counter() - start:.1f} s")
         return rescorer
 
-    def lm_disabled(self, reason: str) -> None:
-        log(f"LM rescoring not used ({reason})")
+    def lm_disabled(self) -> None:
+        log("LM rescoring not used (it could not be loaded)")
         self.channel.warning("lm")
 
     def warm_up(self) -> None:

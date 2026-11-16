@@ -25,10 +25,6 @@ GRACE_MS = 30
 DEADLINE_MS = 400
 POLL_MS = 10
 PREFETCH_DELAY_MS = 30
-MAX_QUEUE = 512
-STALL_MS = 5000
-MAX_ERRORS = 3
-EDGES_MS = (1, 2, 5, 10, 20, 30, 50, 100, 150, 250, 400, 1000, float("inf"))
 
 
 @dataclass(eq=False)
@@ -44,78 +40,17 @@ class Job:
     done: threading.Event = field(default_factory=threading.Event)
     picks: list | None = None
     error: bool = False
-    stats: dict = field(default_factory=dict)  # LmRescorer.last + run time
-
-
-class Histogram:
-    def __init__(self):
-        self.counts = [0] * len(EDGES_MS)
-
-    def add(self, ms: float) -> None:
-        self.counts[next(i for i, edge in enumerate(EDGES_MS) if ms <= edge)] += 1
-
-    def report(self) -> dict:
-        return {"le_ms": [e if e != float("inf") else "inf" for e in EDGES_MS],
-                "counts": list(self.counts)}
-
-
-class LmStats:
-    """Counts since server start, no text."""
-
-    def __init__(self, clock=time.monotonic):
-        self.clock = clock
-        self.started = clock()
-        self.lock = threading.Lock()
-        self.request_ms = Histogram()
-        self.wait_ms = Histogram()
-        self.job_ms = Histogram()
-        self.conversions = dict.fromkeys(("inline", "pending", "timeout", "bypass", "error"), 0)
-        self.adopted = 0
-        self.prefetch = {"started": 0, "cancelled": 0}
-        self.worker_busy_ms = 0.0
-
-    def observe(self, histogram: str, ms: float) -> None:
-        with self.lock:
-            getattr(self, histogram).add(ms)
-
-    def conversion(self, kind: str) -> None:
-        with self.lock:
-            self.conversions[kind] += 1
-
-    def bump(self, name: str, key: str | None = None) -> None:
-        with self.lock:
-            if key is None:
-                setattr(self, name, getattr(self, name) + 1)
-            else:
-                getattr(self, name)[key] += 1
-
-    def busy(self, ms: float) -> None:
-        with self.lock:
-            self.worker_busy_ms += ms
-
-    def report(self, lm: str) -> dict:
-        with self.lock:
-            return {"lm": lm, "request_ms": self.request_ms.report(),
-                    "conversions": dict(self.conversions), "wait_ms": self.wait_ms.report(),
-                    "job_ms": self.job_ms.report(), "adopted": self.adopted,
-                    "prefetch": dict(self.prefetch),
-                    "worker_busy_ms": round(self.worker_busy_ms, 3),
-                    "uptime_s": round(self.clock() - self.started, 3)}
 
 
 class LmWorker:
     """One daemon thread; the only user of the scorer."""
 
-    def __init__(self, loader, lex, *, stats: LmStats | None = None, stall_ms: float = STALL_MS,
-                 clock=time.monotonic, on_disabled=None):
-        """on_disabled(reason): told once when the LM is not used any more
-        ("unavailable": it could not be loaded; "errors": it failed MAX_ERRORS
-        times in a row). Called on the worker thread."""
+    def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None):
+        """on_disabled(): told once when the LM could not be loaded. Called on
+        the worker thread."""
         self.loader = loader
         self.on_disabled = on_disabled
         self.lex = lex
-        self.stats = stats if stats is not None else LmStats()
-        self.stall_ms = stall_ms
         self.clock = clock
         self.state = "loading"
         self.template = None
@@ -123,8 +58,6 @@ class LmWorker:
         self._wanted: deque[Job] = deque()  # first come, first served
         self._slots: dict[tuple[int, str], Job] = {}  # (owner, kind) -> queued prefetch/prime
         self._running: Job | None = None
-        self._running_since = 0.0
-        self._errors = 0
         self._stopped = False
         self.thread = threading.Thread(target=self._run, name="lm-worker", daemon=True)
         self.thread.start()
@@ -132,9 +65,7 @@ class LmWorker:
     # -- connection side ----------------------------------------------------
     def available(self) -> bool:
         with self._cond:
-            stalled = (self._running is not None
-                       and (self.clock() - self._running_since) * 1000 > self.stall_ms)
-            return self.state == "ready" and not stalled
+            return self.state == "ready"
 
     def submit(self, job: Job) -> None:
         with self._cond:
@@ -176,8 +107,6 @@ class LmWorker:
     def _drop(self, job: Job) -> None:
         """A queued job that will never run (caller holds the lock)."""
         job.cancelled = True
-        if job.kind == "convert" and not job.wanted:
-            self.stats.bump("prefetch", "cancelled")
         job.done.set()
 
     def stop(self) -> None:
@@ -212,7 +141,7 @@ class LmWorker:
             with self._cond:
                 self.state = "disabled"
             if self.on_disabled is not None:
-                self.on_disabled("unavailable")
+                self.on_disabled()
             return
         gc.freeze()  # the model's objects must not be traversed by full GC
         with self._cond:
@@ -243,50 +172,28 @@ class LmWorker:
                 if job.cancelled:
                     job.done.set()
                     continue
-                self._running, self._running_since = job, self.clock()
+                self._running = job
                 return job
 
     def _execute(self, job: Job) -> None:
-        start = self.clock()
-        if job.kind == "convert" and not job.wanted:
-            self.stats.bump("prefetch", "started")
         try:
             if job.kind == "convert":
-                rescorer = replace(self.template, last={})
                 request = job.request
                 job.picks = conversion_picks(
                     request.parts, self.lex, request.learning, request.left_surface,
-                    request.lm_context, rescorer, cancelled=lambda: job.cancelled)
-                job.stats = dict(rescorer.last)
+                    request.lm_context, replace(self.template, last={}),
+                    cancelled=lambda: job.cancelled)
             else:
                 prime = getattr(self.template.scorer, "prime", None)
                 if prime is not None:
                     prime(job.context)
-            self._errors = 0
         except Exception as exc:
+            # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True
-            self._errors += 1
-            print(f"LM job failed ({type(exc).__name__}); {self._errors} in a row",
-                  file=sys.stderr, flush=True)
-        elapsed = (self.clock() - start) * 1000
-        job.stats["job_ms"] = elapsed
-        self.stats.busy(elapsed)
-        disabled = False
+            print(f"LM job failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         with self._cond:
             self._running = None
-            if self._errors >= MAX_ERRORS and self.state != "disabled":
-                self.state = "disabled"
-                disabled = True
-            if job.wanted:
-                self.stats.observe("job_ms", elapsed)
-            elif job.kind == "convert" and job.cancelled:
-                self.stats.bump("prefetch", "cancelled")
             job.done.set()
-        if disabled:
-            print(f"LM rescoring disabled after {MAX_ERRORS} failures in a row",
-                  file=sys.stderr, flush=True)
-            if self.on_disabled is not None:
-                self.on_disabled("errors")
 
 
 PENDING = object()
@@ -295,25 +202,21 @@ PENDING = object()
 class ConnectionPipeline:
     """Per connection. Called with the server's dispatch lock held."""
 
-    def __init__(self, sess: ImeSession, worker, *, stats: LmStats | None = None,
+    def __init__(self, sess: ImeSession, worker, *,
                  grace_ms: float = GRACE_MS, deadline_ms: float = DEADLINE_MS,
-                 poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | typing | off
-                 prefetch_delay_ms: float = PREFETCH_DELAY_MS, max_queue: int = MAX_QUEUE,
-                 clock=time.monotonic):
+                 poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | off
+                 prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic):
         self.sess = sess
         self.worker = worker
-        self.stats = stats if stats is not None else worker.stats
         self.grace_ms = grace_ms
         self.deadline_ms = deadline_ms
         self.poll_ms = poll_ms
         self.prefetch = prefetch
         self.prefetch_delay_ms = prefetch_delay_ms
-        self.max_queue = max_queue
         self.clock = clock
         self.queue: deque[dict] = deque()
         self.last_t = 0
         self.job: Job | None = None  # the awaited conversion's job
-        self.awaited_at = 0.0
         self.spec: Job | None = None  # the last prefetch
         self.spec_key: tuple | None = None
         self.primed = ""  # left context last sent to prime
@@ -329,30 +232,24 @@ class ConnectionPipeline:
             self.queue[-1] = msg  # consecutive timeouts: the last one is equivalent
         else:
             self.queue.append(msg)
-        commit, grace, inline = "", False, False
+        commit, grace = "", False
         while True:
             if self.sess._await is not None:
                 outcome = self._outcome(wait=grace)
                 grace = False
                 if outcome is PENDING:
                     break
-                self._resolved(outcome, inline)
                 commit += self.sess.finish_conversion(outcome)
                 self.job = None
                 continue
             if not self.queue:
                 break
             m = self.queue.popleft()
-            available = self.worker.available()
-            self.sess.lm_deferred = available
-            was_converted = self.sess.converted
+            self.sess.lm_deferred = self.worker.available()
             commit += apply_op(self.sess, m)
-            if (not available and not was_converted and self.sess.converted
-                    and not self.sess.predicting):
-                self.stats.conversion("bypass")
             if self.sess._await is not None:
                 self._submit_convert()
-                grace = inline = True
+                grace = True
         self._prefetch()
         reply = snapshot(self.sess, op)
         reply["commit"] = commit
@@ -381,12 +278,10 @@ class ConnectionPipeline:
                 and spec.request.key == request.key):
             self.worker.promote(spec, deadline)
             self.job = spec
-            self.stats.bump("adopted")
         else:
             self.worker.cancel_owner(self)
             self.job = Job("convert", self, request, wanted=True, deadline=deadline)
             self.worker.submit(self.job)
-        self.awaited_at = self.clock()
 
     def _outcome(self, *, wait: bool):
         job = self.job
@@ -394,21 +289,10 @@ class ConnectionPipeline:
             job.done.wait(self.grace_ms / 1000)
         if job.done.is_set():
             return None if job.error or job.picks is None else job.picks
-        if self.clock() >= job.deadline or len(self.queue) > self.max_queue:
+        if self.clock() >= job.deadline:
             job.cancelled = True
             return None
         return PENDING
-
-    def _resolved(self, picks, inline: bool) -> None:
-        job = self.job
-        if picks is not None:
-            kind = "inline" if inline else "pending"
-        elif job.done.is_set() and job.error:
-            kind = "error"
-        else:
-            kind = "timeout"
-        self.stats.conversion(kind)
-        self.stats.observe("wait_ms", (self.clock() - self.awaited_at) * 1000)
 
     def _prefetch(self) -> None:
         sess = self.sess
@@ -419,12 +303,12 @@ class ConnectionPipeline:
             self.worker.submit(Job("prime", self, None, context=sess._lm_context))
         if self.prefetch == "off" or sess.converted or not sess.tokens:
             return
-        if self.prefetch == "thumb" and sess.fsm.state != "S3":
+        if sess.fsm.state != "S3":
             return  # S3: only a thumb key is down, awaiting the chord decision
         request = sess.conversion_request()
         if request is None or request.key == self.spec_key:
             return
-        delay = self.prefetch_delay_ms if self.prefetch == "thumb" else 0
-        self.spec = Job("convert", self, request, not_before=self.clock() + delay / 1000)
+        self.spec = Job("convert", self, request,
+                        not_before=self.clock() + self.prefetch_delay_ms / 1000)
         self.spec_key = request.key
         self.worker.submit(self.spec)

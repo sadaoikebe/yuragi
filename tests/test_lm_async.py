@@ -1,23 +1,18 @@
-"""Resident LM pipeline: the IME never hangs on a slow, broken or stalled LM.
-Fake scorers, no torch.
+"""Resident LM pipeline: the IME never hangs on a slow LM. Fake scorers, no torch.
 
-The deadline (400 ms) falls back to the dictionary-only conversion, an overflowing
-queue stops the wait, reset / input-mode switch / disconnect drop what is pending,
-and the worker survives model exceptions and stalls.
+The deadline (400 ms) falls back to the dictionary-only conversion, and
+reset / input-mode switch / disconnect drop what is pending.
 """
 from __future__ import annotations
 
 from dataclasses import replace
-import threading
-import time
 import unittest
 
 from yuragi.chord.keys import VK_TO_M
-from yuragi.ime.lm_async import ConnectionPipeline, Job, LmStats, LmWorker
+from yuragi.ime.lm_async import ConnectionPipeline, Job
 from yuragi.ime.lm_rescore import LmRescorer, conversion_picks
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table, reverse_table
 from tests.real_dictionary import real_lex
 
@@ -47,7 +42,6 @@ class ManualWorker:
         self.template = LmRescorer(scorer)
         self.delay = delay  # conversion index -> completes before the Nth later request
         self.eager_prefetch = eager_prefetch
-        self.stats = LmStats()
         self.ready = True
         self.jobs: list[Job] = []
         self.countdown: dict[int, int] = {}
@@ -205,24 +199,12 @@ class DeadlineAndAbandonTest(unittest.TestCase):
             reply = pipe.handle(dict(event))
             commits += reply["commit"]
         self.assertTrue(job.cancelled)
-        self.assertEqual(pipe.stats.conversions["timeout"], 1)
         worker.complete_all()  # a late result changes nothing
         self.assertFalse(pipe.handle({"op": "timeout", "t": 0})["pending"])
         expected = run_reference(self.session, head + tail.events, None)
         self.assertEqual((commits, final_state(reply)), expected)
         self.assertNotEqual(expected, run_reference(self.session, head + tail.events,
                                                     PickyScorer()))
-
-    def test_queue_overflow_falls_back(self):
-        events = Typist().kana("きしゃ").space().kana("こうせいする", gap=20).tap(VK_RETURN).events
-        pipe, worker, clock = self.pipeline(max_queue=3)
-        commits = ""
-        for event in events + [TERMINAL]:
-            reply = pipe.handle(dict(event))
-            commits += reply["commit"]
-        self.assertEqual(pipe.stats.conversions["timeout"], 1)
-        self.assertEqual((commits, final_state(reply)),
-                         run_reference(self.session, events, None))
 
     def test_reset_toggle_and_disconnect_abandon(self):
         for op in ({"op": "reset"}, {"op": "set_direct", "direct": True}, "close"):
@@ -247,81 +229,6 @@ class DeadlineAndAbandonTest(unittest.TestCase):
                 self.assertEqual((reply["composition"], reply["commit"], reply["pending"]),
                                  ("", "", False))
                 self.assertIsNone(pipe.sess._await)
-
-
-def small_lex():
-    lex = MozcLex({"う": [Entry("宇", "う", 1, 1, 100), Entry("卯", "う", 1, 1, 200)]},
-                  {"う"}, [0] * 4, 2)
-    return lex
-
-
-class Recording:
-    """Scorer stand-in for LmWorker tests; prime is optional."""
-
-    def __init__(self, preferred="卯", gate: threading.Event | None = None,
-                 fail: bool = False, sleep: float = 0):
-        self.preferred = preferred
-        self.gate = gate
-        self.fail = fail
-        self.sleep = sleep
-        self.calls: list[str] = []
-
-    def nll(self, context, candidates):
-        self.calls.append("nll:" + context)
-        if self.sleep:
-            time.sleep(self.sleep)
-        if self.fail and context:
-            raise RuntimeError("model failure")
-        return [0.0 if c == self.preferred else 10.0 for c in candidates]
-
-    def prime(self, context):
-        self.calls.append("prime:" + context)
-        if self.gate is not None:
-            self.gate.wait(5)
-
-
-def ready_worker(scorer, **kwargs):
-    worker = LmWorker(lambda: LmRescorer(scorer), small_lex(), **kwargs)
-    deadline = time.monotonic() + 5
-    while worker.state == "loading" and time.monotonic() < deadline:
-        time.sleep(0.005)
-    scorer.calls.clear()
-    return worker
-
-
-def u_request(context="上"):
-    sess = ImeSession(_table=load_table(), _lex=small_lex())
-    sess.on_key(True, 0x41, 0)
-    sess.on_key(False, 0x41, 30)
-    sess._lm_context = context
-    return sess.conversion_request()
-
-
-class LmWorkerTest(unittest.TestCase):
-    def test_three_errors_disable(self):
-        scorer = Recording(fail=True)
-        worker = ready_worker(scorer)
-        owner = object()
-        for i in range(3):
-            self.assertTrue(worker.available())
-            job = Job("convert", owner, u_request(f"文{i}"), wanted=True)
-            worker.submit(job)
-            self.assertTrue(job.done.wait(2))
-            self.assertTrue(job.error)
-        self.assertEqual(worker.state, "disabled")
-        self.assertFalse(worker.available())
-
-    def test_stalled_job_makes_worker_unavailable(self):
-        gate = threading.Event()
-        scorer = Recording(gate=gate)
-        worker = ready_worker(scorer, stall_ms=50)
-        job = Job("prime", object(), None, context="x")
-        worker.submit(job)
-        time.sleep(0.1)
-        self.assertFalse(worker.available())
-        gate.set()
-        self.assertTrue(job.done.wait(2))
-        self.assertTrue(worker.available())
 
 
 if __name__ == "__main__":
