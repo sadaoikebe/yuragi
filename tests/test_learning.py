@@ -11,7 +11,7 @@ from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import load_lex
+from tests.real_dictionary import real_lex
 
 
 def press_shift(s, vk):
@@ -24,7 +24,7 @@ def press_shift(s, vk):
 class LearningTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = load_lex()
+        cls.lex = real_lex()
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

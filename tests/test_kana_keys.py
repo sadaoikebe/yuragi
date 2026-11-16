@@ -6,8 +6,8 @@ import unittest
 from yuragi.chord.fsm import Plain
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import load_lex
 from yuragi.lattice.table import load_table
+from tests.real_dictionary import real_lex
 
 VK_F7, VK_F10 = 0x76, 0x79
 
@@ -36,7 +36,7 @@ def tap(s, vk):
 class KanaKeyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = load_lex()
+        cls.lex = real_lex()
 
     def session(self):
         return ImeSession(_lex=self.lex, learning_path=None)

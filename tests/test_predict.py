@@ -7,7 +7,7 @@ from yuragi.chord.fsm import Plain
 from yuragi.ime import predict as P
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import load_lex
+from tests.real_dictionary import real_lex
 
 VK_TAB, VK_RETURN = 0x09, 0x0D
 
@@ -31,7 +31,7 @@ def press(s, vk, mods=None):
 class Fixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = load_lex()
+        cls.lex = real_lex()
         cls.index = P.ReadingIndex()
 
     def session(self, *, learning=None, prediction=P.DEFAULT_MODE):

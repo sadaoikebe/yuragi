@@ -17,8 +17,9 @@ from yuragi.ime.lm_async import ConnectionPipeline, Job, LmStats, LmWorker
 from yuragi.ime.lm_rescore import LmRescorer, conversion_picks
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import Entry, MozcLex, load_lex
+from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table, reverse_table
+from tests.real_dictionary import real_lex
 
 # Up of an unclassified key: a no-op for every session state. Sent last to both
 # sides so the subject has one request in which to resolve what is still pending.
@@ -172,7 +173,7 @@ class Clock:
 class DeadlineAndAbandonTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = load_lex()
+        cls.lex = real_lex()
 
     def session(self):
         return ImeSession(_table=load_table(), _lex=self.lex, learning_path=None)
