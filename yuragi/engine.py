@@ -10,7 +10,6 @@ Broker → engine:
   {"sid":3,"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}
       op as for yuragi.ime.server: down/up/timeout/reset/set_direct
 Engine → broker:
-  {"progress":"cache"}                     while the dictionary cache is rebuilt (every 5 s)
   {"ready":true,"proto":1,"warnings":[...]}
   {"sid":3,"seq":17, ...the reply of yuragi.ime.server...}   one per request, in order
       "error":true   the request raised; the session was started afresh (§6.4)
@@ -37,7 +36,6 @@ import traceback
 
 PROTO = 1
 MAX_TOKENS = 200  # REDESIGN §11: the input length a conversion handles
-PROGRESS_SECONDS = 5
 DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
 # Warm-up input (§6.3): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
@@ -100,31 +98,6 @@ class Channel:
         for code in warnings:
             log(f"warning {code}")
         self.send({"ready": True, "proto": PROTO, "warnings": warnings})
-
-
-class Progress:
-    """{"progress":"cache"} now and every PROGRESS_SECONDS until stopped."""
-
-    def __init__(self, channel: Channel):
-        self.channel = channel
-        self._stop = threading.Event()
-        self._thread = None
-
-    def start(self) -> None:
-        log("rebuilding the dictionary cache")
-        self._thread = threading.Thread(target=self._run, name="progress", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        while True:
-            self.channel.send({"progress": "cache"})
-            if self._stop.wait(PROGRESS_SECONDS):
-                return
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join()
 
 
 def argument_parser() -> argparse.ArgumentParser:
@@ -216,17 +189,14 @@ class Engine:
         settings = self.read_settings(args, config, server)
         self.settings = settings
 
-        progress = Progress(self.channel)
         try:
-            lex = mozc_dict.load_lex(on_rebuild=progress.start)
+            lex = mozc_dict.load_lex()
         except (FileNotFoundError, mozc_dict.DictionaryFormatError) as exc:
             log(where(exc))
             fatal("dictionary-unreadable")
         except mozc_dict.CacheWriteError as exc:
             log(f"{where(exc)} (errno {exc.errno})")
             fatal("cache-not-written")
-        finally:
-            progress.stop()
 
         loaded = server.load_session(settings, with_lm=False, lex=lex,
                                      create_learning_file=True)

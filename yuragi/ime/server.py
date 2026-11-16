@@ -139,7 +139,7 @@ def load_session(args, with_lm: bool = True, *, lex=None,
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
     with_lm=False leaves sess.lm unset (the engine loads it on a worker).
-    lex: an already loaded lexicon (the engine loads it itself, for its progress).
+    lex: an already loaded lexicon (the engine loads it itself).
     create_learning_file: learning on makes a missing history file (the engine).
     """
     store = None

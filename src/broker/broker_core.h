@@ -19,7 +19,6 @@ namespace broker {
 constexpr int ENGINE_MAX_EXITS = 3;  // this many exits within the window: stop
 constexpr int64_t ENGINE_EXIT_WINDOW_MS = 600000;
 constexpr int64_t ENGINE_HANG_MS = 5000;
-constexpr int64_t ENGINE_START_SILENCE_MS = 30000;
 constexpr int64_t NEVER = INT64_MAX;
 
 using ClientId = uint64_t;
@@ -66,7 +65,6 @@ public:
     // For the platform and the tests.
     EngineState State() const { return state_; }
     const char* ClientState() const;  // ready, starting, down
-    Stop LastStop() const { return last_stop_; }
 
 private:
     struct Client {
@@ -99,8 +97,6 @@ private:
     bool restarting_ = false;  // killed on purpose to start again (Retry while running)
     bool killing_ = false;
     Stop kill_reason_ = Stop::None;
-    int64_t last_output_ = 0;
-    Stop last_stop_ = Stop::None;
     std::string last_fatal_;  // the engine's last "fatal ..." stderr line
     std::vector<std::string> warnings_;  // of this engine, in the hello reply (the management window shows them)
 };

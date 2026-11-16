@@ -216,17 +216,11 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
                                              f"{exc.strerror}") from exc
 
 
-def load_lex(force: bool = False, *, user_lexicon: bool = True,
-             on_rebuild=None) -> MozcLex:
-    """The lexicon from the cache, or parsed from the text and cached.
-
-    on_rebuild: called before a parse of the text (minutes on a slow PC).
-    """
+def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:
+    """The lexicon from the cache, or parsed from the text and cached."""
     lex = None if force else read_cache(CACHE)
     if lex is None:
         require_dict_files(LOADER_FILES)
-        if on_rebuild is not None:
-            on_rebuild()
         print("parsing Mozc OSS dictionary (first run)...", file=sys.stderr, flush=True)
         by_reading, prefixes = _parse_dict_files()
         connect, pos_size = _parse_connection()

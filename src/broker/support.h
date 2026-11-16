@@ -81,7 +81,7 @@ bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& e
 // end it. Exit codes below.
 enum SelfTestResult {
     SELFTEST_OK = 0,
-    SELFTEST_NOT_READY = 1,  // exited or fell silent before ready
+    SELFTEST_NOT_READY = 1,  // exited, or not ready in time
     SELFTEST_NOT_CONVERTED = 2,
     SELFTEST_NO_REPLY = 4,
     SELFTEST_CANNOT_START = 5,

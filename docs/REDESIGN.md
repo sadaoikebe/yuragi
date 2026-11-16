@@ -181,7 +181,7 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
             ready 受信
  STARTING ───────────────► READY
     ▲  │                     │
-    │  │ 終了（無音・無応答で強制終了を含む）
+    │  │ 終了（無応答で強制終了を含む）
     └──┴─────────────────────┘  10 分間に 3 回目の終了なら ──► FAILED
                                                                   │
  STARTING ◄──────(利用者が「もう一度試す」／次のサインイン)────────┘
@@ -190,8 +190,6 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 - **終了の検知**はプロセスのハンドルを待つ（ポーリングしない）。
 - **無応答の検知**: エンジンに渡した要求の返事が `ENGINE_HANG_MS` 来なければ、エンジンを強制終了して
   「終了」と同じ扱いにする。エンジンは必ず即答する作りなので（LM 待ちは `pending` で即答）、これは故障。
-- **起動中の無音**: STARTING の間、エンジンから `ENGINE_START_SILENCE_MS` 何も来なければ同じく強制終了。
-  辞書キャッシュの作り直し（数分）の間は、エンジンが 5 秒ごとに `{"progress":"cache"}` を出す。
 - 終了したら、すぐ起動し直す。ただし `ENGINE_EXIT_WINDOW_MS`（10 分）の間の `ENGINE_MAX_EXITS`（3 回）目の
   終了なら FAILED に入り、§9.3 の通知を 1 回出す。**以後、自分からは何も起動しない。**
   終了コードと `logs\engine.log` の最後の `fatal` 行は `broker.log` に残す（利用者への文言は 1 種類）。
@@ -257,7 +255,7 @@ TIP → ブローカー:
 
 判断はすべて `broker_core` にあり、偽の土台と時計で試す（`src/broker/tests/broker_core_test.cpp`、どの OS でも）:
 起動中の打鍵は `starting` で返る、終了で `reset` と起動し直し、10 分に 3 回で FAILED と通知 1 回、
-`retry` で起動、無音・無応答で強制終了。
+`retry` で起動、無応答で強制終了。
 
 Windows では本物の `yuragi-broker.exe` を、偽のエンジン（`src/broker/tests/fake_engine.py`。
 「N 件目で落ちる」を選べる）と偽の TIP（パイプにつなぐ）で動かす（`tests/test_broker.py`）:
@@ -294,7 +292,7 @@ Windows では本物の `yuragi-broker.exe` を、偽のエンジン（`src/brok
 | `personal_lexicon.jsonl` の壊れた行 | その行だけ飛ばす | 設定ウィンドウに件数 |
 | `learning.jsonl` の壊れた行 | その行だけ飛ばす | 設定ウィンドウに件数 |
 | `learning.jsonl` が読めない（他が開いている等） | 学習なしで動く（ファイルが変われば読み直す） | なし（ログに 1 行） |
-| 辞書キャッシュが読めない | 消して、辞書から 1 回だけ作り直す（数分。その間 `progress` を出す） | 起動中の表示（§9.2） |
+| 辞書キャッシュが読めない | 消して、辞書から 1 回だけ作り直す（数分） | 起動中の表示（§9.2） |
 | 辞書ファイルが無い（中身はインストール時に照合済み。起動時は在るかだけ見る） | **止まる** | あり（停止の通知） |
 | LM のモデル・torch が読めない | LM なしで起動（変換はできる） | あり（`lm`） |
 | Python のモジュールが読めない | **止まる** | あり（停止の通知） |
@@ -660,7 +658,6 @@ Windows の通知（`Shell_NotifyIcon` の通知。フォーカスを取らな�
 | `ENGINE_MAX_EXITS` | 3 | ブローカー | `ENGINE_EXIT_WINDOW_MS` の間にこれだけ終了したら止める |
 | `ENGINE_EXIT_WINDOW_MS` | 600000 | ブローカー | 同上の窓（10 分） |
 | `ENGINE_HANG_MS` | 5000 | ブローカー | 要求の返事が無いとき、故障とみなすまで |
-| `ENGINE_START_SILENCE_MS` | 30000 | ブローカー | 起動中、無音を故障とみなすまで |
 | `MAX_TOKENS` | 200 | エンジン | 変換中の入力の長さの上限 |
 | `COMPACT_MIN_LINES` | 5000 | エンジン | 学習履歴の整理を始める行数 |
 | `LEARN_EXPIRE_DAYS` | 365 | エンジン | 学習記録を落とす経過日数（教えた未知語を除く） |

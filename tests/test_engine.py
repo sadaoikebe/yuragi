@@ -127,13 +127,12 @@ class EngineCase(unittest.TestCase):
 
 
 class CacheTest(EngineCase):
-    def test_zero_byte_cache_is_rebuilt_with_progress(self):
+    def test_zero_byte_cache_is_rebuilt(self):
         cache = self.tmp / "cache"
         cache.mkdir()
         (cache / mozc_dict.CACHE.name).write_bytes(b"")
         engine = self.start("--cache-dir", cache)
-        ready, before = engine.wait_ready()
-        self.assertIn({"progress": "cache"}, before)
+        engine.wait_ready()
         self.assertGreater((cache / mozc_dict.CACHE.name).stat().st_size, 1_000_000)
         self.assertEqual(list(cache.glob("*.tmp")), [])
         self.assertIn("dictionary cache unreadable", engine.log())

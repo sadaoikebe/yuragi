@@ -78,7 +78,6 @@ void Broker::Broadcast(const std::string& line) {
 void Broker::StartEngine() {
     killing_ = false;
     kill_reason_ = Stop::None;
-    last_output_ = platform_.Now();
     warnings_.clear();  // a new engine tells its own
     for (auto& [id, client] : clients_) client.session = false;
     SetState(EngineState::Starting);
@@ -158,13 +157,11 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
 }
 
 void Broker::OnEngineLine(const std::string& line) {
-    last_output_ = platform_.Now();
     Value msg;
     if (!ParseObject(line, msg)) {
         Log("unreadable line from the engine; ignored");
         return;
     }
-    if (msg.Get("progress").kind != Value::Null) return;  // still starting, not silent
     if (msg.Get("ready").kind == Value::Boolean && msg.Get("ready").boolean) {
         if (state_ != EngineState::Starting) return;
         Log("engine ready");
@@ -201,7 +198,6 @@ void Broker::OnEngineLine(const std::string& line) {
 }
 
 void Broker::OnEngineStderrLine(const std::string& line) {
-    last_output_ = platform_.Now();
     if (line.compare(0, 6, "fatal ") == 0) last_fatal_ = line;
 }
 
@@ -250,7 +246,6 @@ void Broker::EngineGone(int code) {
         StartEngine();
         return;
     }
-    last_stop_ = reason;
     Log(std::string("engine given up: ") + StopName(reason));
     SetState(EngineState::Failed);
     platform_.NotifyStopped(reason);  // §9.3: once; nothing starts by itself after this
@@ -271,12 +266,6 @@ void Broker::Retry() {
 
 void Broker::OnTimer() {
     int64_t now = platform_.Now();
-    if (state_ == EngineState::Starting && !killing_ &&
-        now - last_output_ >= ENGINE_START_SILENCE_MS) {
-        Log("the engine said nothing for " + std::to_string(ENGINE_START_SILENCE_MS) +
-            " ms while starting; ending it");
-        Kill(Stop::Hang);
-    }
     if (state_ == EngineState::Ready && !killing_ && !in_flight_.empty() &&
         now - in_flight_.front().sent >= ENGINE_HANG_MS) {
         Log("no reply from the engine for " + std::to_string(ENGINE_HANG_MS) + " ms; ending it");
@@ -286,7 +275,6 @@ void Broker::OnTimer() {
 
 int64_t Broker::NextDeadline() const {
     if (killing_) return NEVER;
-    if (state_ == EngineState::Starting) return last_output_ + ENGINE_START_SILENCE_MS;
     if (state_ == EngineState::Ready && !in_flight_.empty())
         return in_flight_.front().sent + ENGINE_HANG_MS;
     return NEVER;

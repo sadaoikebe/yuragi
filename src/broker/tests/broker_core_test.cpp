@@ -163,26 +163,20 @@ void ThreeExitsStopThenRetry() {
     assert(d.State() == EngineState::Failed && h.stops.size() == 1);
 }
 
-// A silent start or a request with no reply ends the engine (a hang).
-void SilentOrHungEngineIsKilled() {
+// A request with no reply ends the engine (a hang).
+void HungEngineIsKilled() {
     Fake f;
     Broker b(f);
     b.Start();
-    Advance(b, f, ENGINE_START_SILENCE_MS - 1);
+    Hello(b, 1);
+    Ready(b);
+    b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
+    Advance(b, f, ENGINE_HANG_MS - 1);
     assert(f.kills == 0);
     Advance(b, f, 1);
     assert(f.kills == 1);
     b.OnEngineExit(9);
     assert(f.starts == 2);
-    Hello(b, 1);
-    Ready(b);
-    b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
-    Advance(b, f, ENGINE_HANG_MS);
-    assert(f.kills == 2);
-    b.OnEngineExit(9);
-    b.OnEngineExit(9);
-    assert(b.LastStop() == Stop::Hang || b.LastStop() == Stop::Exited);
-    assert(f.stops.size() == 1);
 }
 
 // Retry while running (new settings): a fresh engine, not counted as an exit.
@@ -211,7 +205,7 @@ int main() {
     OldTipIsToldToLetKeysThrough();
     ExitWhileReadyResetsAndRestarts();
     ThreeExitsStopThenRetry();
-    SilentOrHungEngineIsKilled();
+    HungEngineIsKilled();
     RetryWhileRunningRestartsWithoutCounting();
     std::puts("broker_core_test: all passed");
     return 0;

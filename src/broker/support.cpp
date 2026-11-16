@@ -101,6 +101,7 @@ bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& e
 
 namespace {
 constexpr int64_t SELFTEST_REPLY_MS = ENGINE_HANG_MS;
+constexpr int64_t SELFTEST_START_MS = 600000;  // a first start builds the dictionary cache
 constexpr int64_t SELFTEST_EXIT_MS = 10000;
 // かいはつ on the NICOLA-A plain layer, then Space: one conversion.
 constexpr int SELFTEST_KEYS[] = {0x57, 0x4C, 0x48, 0x4F, 0x20};
@@ -108,7 +109,7 @@ constexpr int SELFTEST_KEYS[] = {0x57, 0x4C, 0x48, 0x4F, 0x20};
 
 void SelfTest::Start() {
     std::string error;
-    deadline_ = platform_.Now() + ENGINE_START_SILENCE_MS;
+    deadline_ = platform_.Now() + SELFTEST_START_MS;
     if (!platform_.StartEngine(error)) {
         phase_ = Finished;
         platform_.Log("selftest: the engine could not be started: " + error);
@@ -126,10 +127,6 @@ void SelfTest::OnEngineLine(const std::string& line) {
     tip_json::Value v;
     if (!tip_json::Parser(line).Parse(v) || v.kind != tip_json::Value::Object) return;
     if (phase_ == Starting) {
-        if (v.Get("progress").kind != tip_json::Value::Null) {
-            deadline_ = platform_.Now() + ENGINE_START_SILENCE_MS;
-            return;
-        }
         if (v.Get("ready").boolean) {
             platform_.Log("selftest: engine ready");
             phase_ = Converting;
@@ -155,7 +152,6 @@ void SelfTest::OnEngineLine(const std::string& line) {
 
 void SelfTest::OnEngineStderrLine(const std::string& line) {
     if (line.compare(0, 6, "fatal ") == 0) last_fatal_ = line;
-    if (phase_ == Starting) deadline_ = platform_.Now() + ENGINE_START_SILENCE_MS;
 }
 
 void SelfTest::Done(int code, const std::string& why) {
@@ -186,7 +182,7 @@ void SelfTest::OnTimer() {
         return;
     }
     result_ = phase_ == Starting ? SELFTEST_NOT_READY : SELFTEST_NO_REPLY;
-    platform_.Log(phase_ == Starting ? "selftest: the engine fell silent before ready"
+    platform_.Log(phase_ == Starting ? "selftest: the engine was not ready in time"
                                      : "selftest: no reply from the engine");
     phase_ = Ending;
     deadline_ = NEVER;
