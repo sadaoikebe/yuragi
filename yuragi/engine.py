@@ -263,9 +263,9 @@ class Engine:
         from yuragi.ime.session import ImeSession
         loaded = self.loaded
         return ImeSession(
-            _table=loaded._table, _lex=loaded._lex, _learning=loaded._learning,
-            personal=loaded.personal, prediction=loaded.prediction,
-            predict_index=loaded.predict_index)
+            _table=loaded._table, _lex=loaded._lex, _symbols=loaded._symbols,
+            _learning=loaded._learning, personal=loaded.personal,
+            prediction=loaded.prediction, predict_index=loaded.predict_index)
 
     def new_pipeline(self, sess):
         if self.worker is None:

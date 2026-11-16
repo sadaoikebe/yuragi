@@ -9,6 +9,11 @@ Confirmed bunsetsu are also whole-bunsetsu arcs of the lattice (spans), so a
 spelling absent from the dictionary (user_word, from a kana confirmation) can
 be converted to, and predictions come from them (predict.py).
 
+A symbol chosen from its reading (kind "symbol", symbol_readings.py) is
+recorded too, marked "symbol": the one confirmed last leads that reading's
+symbols (LearningView.symbol), and it is nothing else (no head, arc or
+prediction).
+
 This process appends its own rows and updates the index directly. A file that
 changed otherwise (the management window forgot a pair) is read again from the
 start at the next conversion: one stat per conversion tells. Compaction runs
@@ -42,6 +47,7 @@ class Confirmation:
     lid: int
     rid: int
     user_word: bool = False
+    symbol: bool = False  # a symbol from its reading: orders the symbols only
 
 
 @dataclass(frozen=True)
@@ -81,12 +87,16 @@ class LearningView:
 
     def __init__(self, index: tuple, revision: int):
         # _index(): shared by the views of one revision
-        self._last, self._recent, self._entries, self._prefixes = index
+        self._last, self._recent, self._entries, self._prefixes, self._symbols = index
         self.revision = revision
 
     def head(self, reading: str) -> Confirmation | None:
         """The confirmation that comes first for this reading: the latest."""
         return self._last.get(reading)
+
+    def symbol(self, reading: str) -> str | None:
+        """The symbol last chosen from this reading, if any."""
+        return self._symbols.get(reading)
 
     def has_prefix(self, reading: str) -> bool:
         return reading in self._prefixes
@@ -112,15 +122,22 @@ class LearningView:
 def _index(rows: dict[tuple[str, str], Confirmation]) -> tuple:
     """From the live rows (one per pair, oldest first): reading -> the latest
     row; the rows, the most recent first; reading -> those of its pairs; every
-    prefix of a learned reading."""
-    recent = list(reversed(rows.values()))
+    prefix of a learned reading; reading -> the symbol chosen last. Symbol rows
+    are only in the last."""
     last: dict[str, Confirmation] = {}
+    symbols: dict[str, str] = {}
+    recent: list[Confirmation] = []
+    for row in reversed(rows.values()):
+        if row.symbol:
+            symbols.setdefault(row.reading, row.surface)
+            continue
+        last.setdefault(row.reading, row)
+        recent.append(row)
     entries: dict[str, list[Confirmation]] = {}
     for row in recent:
-        last.setdefault(row.reading, row)
         entries.setdefault(row.reading, []).append(row)
     prefixes = {r[:i] for r in entries for i in range(1, len(r) + 1)}
-    return last, recent, entries, prefixes
+    return last, recent, entries, prefixes, symbols
 
 
 class LearningStore:
@@ -208,6 +225,10 @@ class LearningStore:
         now = time.time()
         rows = []
         for c in selections:
+            if c.kind == "symbol" and c.reading:
+                rows.append(Confirmation(c.reading, c.surface, now,
+                                         0, c.lid, c.rid, symbol=True))
+                continue
             if c.kind in ("literal", "number", "date", "alnum") or not c.reading:
                 continue
             cost, lid, rid = c.word_cost, c.lid, c.rid

@@ -10,10 +10,11 @@ user's PC from the source named below. The one exception is the tkinter
 files for the settings window ("Python tkinter files" below), which the
 release attaches as `python-<version>-tkinter-amd64.zip`.
 
-One thing that is stored in this repository (and so is in the release's
-source zip) is also not MIT: a list of 157 entries taken from the Mozc
+Two things that are stored in this repository (and so are in the release's
+source zip) are also not MIT: a list of 157 entries taken from the Mozc
 dictionary (`docs/zero-row-entries.tsv`, under the Mozc dictionary terms
-below).
+below), and Mozc's symbol data (`data/symbol.tsv`, under Mozc's
+BSD-3-Clause license; "Mozc symbol data" below).
 
 The kana layout and the rules for telling simultaneous key presses from
 sequential ones follow the NICOLA layout specification published by the
@@ -46,6 +47,19 @@ dictionary (public domain). The IPAdic / ICOT and Okinawa terms are in the
 fetched `README.txt` (kept next to the dictionary). The Google
 BSD-3-Clause text is Mozc's own license, not part of the fetched files.
 All of them are reproduced below as required.
+
+### Mozc symbol data
+
+Location: `data/symbol.tsv` (in the release's source zip and the installed
+application).
+
+`src/data/symbol/symbol.tsv` of Mozc at the same upstream commit as the
+dictionary (pinned in `data/dictionary-manifest.json`), stored in git
+without changes.
+Conversion uses it to offer symbols for their readings (きごう, やじるし).
+It is not part of `src/data/dictionary*`, so the IPAdic / ICOT and Okinawa
+terms do not apply to it: only Mozc's BSD-3-Clause license below
+(Copyright 2010-2018, Google Inc.) does.
 
 ### Google / Mozc (BSD-3-Clause)
 

@@ -24,12 +24,13 @@ from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
 from yuragi.lattice.token_viterbi import decode_tokens
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Candidate, CandidateStream, Segment,
-                       candidates, learned_row, segments_from, with_learned)
+                       candidates, learned_row, segments_from, with_learned, with_symbols)
 from .learning import LearningStore
 from .lm_rescore import CONTEXT_CHARS, LmRescorer, conversion_picks
 from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
 from .symbols import symbol_spellings
+from .symbol_readings import load_symbols
 from .predict import DEFAULT_MODE as DEFAULT_PREDICTION, MAX_TAILS, ReadingIndex, predict
 
 VK_LEFT = 0x25
@@ -171,6 +172,7 @@ class ImeSession:
     _lm_context: str = ""  # text committed on this connection since the last reset
     _table: dict = field(default_factory=dict)
     _lex: MozcLex | None = None
+    _symbols: dict[str, tuple[str, ...]] | None = None  # reading → symbols, shared
     _modifiers: set[int] = field(default_factory=set)
     # A symbol chord inside a press splits it: the chords after it are another
     # press (no press crosses a literal, alternation.py). press → its alias.
@@ -192,6 +194,8 @@ class ImeSession:
             self._table = load_table()
         if self._lex is None:
             self._lex = load_lex()
+        if self._symbols is None:
+            self._symbols = load_symbols()
 
     def reset(self) -> None:
         """Discard composition and all input state after focus loss/termination.
@@ -668,8 +672,8 @@ class ImeSession:
                 reading = first.reading
                 rows = itertools.chain((first,), rows)
             row = learning.head(reading) if learning is not None else None
-            segment.choices = CandidateStream(with_learned(
-                rows, learned_row(row) if row else None))
+            segment.choices = CandidateStream(with_symbols(with_learned(
+                rows, learned_row(row) if row else None), self._symbols, learning))
             segment.context = context
             if not reselect:
                 segment.index = segment.choices.find(segment.selected)

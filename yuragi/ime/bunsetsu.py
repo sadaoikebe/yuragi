@@ -19,6 +19,11 @@ from .dates import date_spellings
 # analyses, not the number of homonyms, and never limits the kana escape route.
 COST_WINDOW = UNK_COST // 2
 PAGE_SIZE = 9
+# Symbols from the reading (Mozc's symbol rewriter simplified):
+# after this many rows, at most SYMBOL_HEAD symbols (with the first 3 rows,
+# the first page); the rest last.
+SYMBOL_OFFSET = 3
+SYMBOL_HEAD = 6
 
 
 @lru_cache(maxsize=1)
@@ -168,6 +173,45 @@ def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
     # Last, so every existing row keeps its place (and its number key).
     if now is not None:
         yield from _date_rows(dictionary, now)
+
+
+def with_symbols(rows: Iterator[Candidate],
+                 symbols: dict[str, tuple[str, ...]] | None,
+                 learning=None) -> Iterator[Candidate]:
+    """A clause's rows (candidates()) with the symbols of its reading.
+
+    The first row's reading (the interval's 1-best) looks them up
+    (symbol_readings.load_symbols). At most SYMBOL_HEAD of them come after the
+    first SYMBOL_OFFSET rows, never first; the rest come last. The symbol last
+    chosen from the reading (learning, a LearningView) leads them; the others
+    keep the file's order. A later row with a symbol's spelling is dropped.
+    """
+    first = None
+    found: tuple[str, ...] = ()
+    shown: set[str] = set()
+    inserted: set[str] = set()
+
+    def symbol_rows(surfaces) -> Iterator[Candidate]:
+        for surface in surfaces:
+            if surface not in shown and surface not in inserted:
+                inserted.add(surface)
+                yield Candidate(surface, first.reading, first.score, first.lid, first.rid,
+                                "symbol")
+
+    for n, c in enumerate(rows):
+        if first is None:
+            first = c
+            found = symbols.get(c.reading, ()) if symbols else ()
+            chosen = learning.symbol(c.reading) if learning is not None else None
+            if chosen in found:
+                found = (chosen,) + tuple(s for s in found if s != chosen)
+        if c.surface in inserted:
+            continue
+        shown.add(c.surface)
+        yield c
+        if n + 1 == SYMBOL_OFFSET:
+            yield from symbol_rows(found[:SYMBOL_HEAD])
+    yield from symbol_rows(found)
 
 
 def _katakana(hiragana: str) -> str:
