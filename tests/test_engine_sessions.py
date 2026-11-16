@@ -1,5 +1,4 @@
-"""The engine's sessions, in process (what tests/test_resident.py checked for the
-resident server it replaces, REDESIGN §6.1 and §10 stage 5).
+"""The engine's sessions, in process (REDESIGN §6.1).
 
 One engine serves every TIP connection: the dictionary, the face table, the
 learning history and the word list are loaded once and shared; each sid has
@@ -104,7 +103,7 @@ class SlowScorer:
 
 
 class LmPipelineTest(EngineCase):
-    """Design 2026-11-12 §7 tests 7-8, through the engine's sessions."""
+    """The LM pipeline (lm_async.py), through the engine's sessions."""
 
     def wait_state(self, worker, state):
         deadline = time.monotonic() + 5

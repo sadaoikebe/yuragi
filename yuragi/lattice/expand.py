@@ -1,4 +1,4 @@
-"""Token faces and the shared Stage 2 literal/reading boundary."""
+"""Token faces and the shared literal/reading boundary."""
 
 
 def is_literal_face(text: str) -> bool:
@@ -9,7 +9,7 @@ def is_literal_face(text: str) -> bool:
 def literal_text(text: str) -> str:
     if len(text) != 1:
         raise ValueError("a literal face must contain exactly one character")
-    return text  # P gives ， and [ gives 、 (symbols design §4.1): no rewriting
+    return text  # P gives ， and [ gives 、: no rewriting
 
 
 def token_branches(token: dict) -> list[str]:

@@ -1,4 +1,4 @@
-"""The engine only: LM rescoring off the key path (design 2026-11-12, D1-D8).
+"""The engine only: LM rescoring off the key path.
 
 LmWorker owns the scorer on one daemon thread. ConnectionPipeline sits between a
 connection and its ImeSession: a ThumbTap with LM work leaves the session
@@ -61,7 +61,7 @@ class Histogram:
 
 
 class LmStats:
-    """Counts since server start, no text (design §8)."""
+    """Counts since server start, no text."""
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock

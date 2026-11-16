@@ -112,7 +112,7 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=None,
                         help="settings file (default <runtime dir>/config.json; "
                              "command-line options override it)")
-    lm = parser.add_argument_group("Stage 5b LM rescoring (on by default in the engine)")
+    lm = parser.add_argument_group("LM rescoring (on by default in the engine)")
     lm.add_argument("--lm-rescore", action="store_true", default=None,
                     help="rescore the k-best with a causal LM on Space (needs torch+transformers)")
     lm.add_argument("--no-lm-rescore", action="store_false", dest="lm_rescore",

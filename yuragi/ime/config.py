@@ -1,9 +1,9 @@
-"""One settings file for the conversion server (S1).
+"""One settings file for the conversion server.
 
 ~/.yuragi-ime/config.json holds any of the server's options under their
 command-line names (lm_deadline_ms for --lm-deadline-ms). A value in the file
 replaces the built-in default; an option given on the command line still wins.
-No file means the built-in defaults, exactly as before.
+No file means the built-in defaults.
 
 The TIP keeps its own ~/.yuragi-ime/tip.json (read by the C++ side); the
 settings inventory below lists both so there is one place to look.

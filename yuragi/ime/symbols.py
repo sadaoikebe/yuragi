@@ -1,24 +1,24 @@
-"""Candidates for a typed symbol (symbols design §5, the half-width receiver).
+"""Candidates for a typed symbol (the half-width receiver).
 
 Keys never type half-width characters; converting offers them. A symbol
 segment's rows are the typed symbol first (the 1-best composition stays as
-typed, full-width first, design §7 I), then its half-width counterpart, then
+typed, full-width first), then its half-width counterpart, then
 a few near symbols. A run of digits has its own rows (numbers.py).
 """
 from __future__ import annotations
 
-# Not in the full-width ASCII block, so not mechanical: 「 → [ is in §5; 」 → ]
-# is its pair. ’ ” are the faces of the ' key, whose half-width forms are ' ".
+# Not in the full-width ASCII block, so not mechanical: 「 → [ and its pair 」 → ].
+# ’ ” are the faces of the ' key, whose half-width forms are ' ".
 _HALF_EXTRA = {"「": "[", "」": "]", "’": "'", "”": '"', "￥": "¥"}
 
-# §5 item 2, in the design's direction: typed symbol → near symbols. 」 mirrors 「.
+# Typed symbol → near symbols. 」 mirrors 「.
 NEAR = {
     "、": "，",
     "。": "．…‥",  # 。 then convert: the usual way to the ellipsis
     "”": "“",
     "’": "‘",
     "￥": "＼",
-    "～": "〜",  # U+FF5E → the wave dash U+301C (§7 F)
+    "～": "〜",  # U+FF5E → the wave dash U+301C
     "「": "［【〔",
     "」": "］】〕",
 }

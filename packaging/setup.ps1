@@ -141,7 +141,7 @@ function Write-EngineJson([string]$path, [string]$app, [string[]]$extra) {
 Say ""
 Say "== ゆらぎ本体のダウンロード"
 $Stage = Join-Path $StagingRoot $Tag
-# staging は自分の作業場: 前回の途中のものがあれば消して作り直す (A-16)。
+# staging は自分の作業場: 前回の途中のものがあれば消して作り直す。
 if (Test-Path -LiteralPath $Stage) { Remove-Item -LiteralPath $Stage -Recurse -Force }
 $Download = Join-Path $Stage "download"
 New-Item -ItemType Directory -Force $Download | Out-Null

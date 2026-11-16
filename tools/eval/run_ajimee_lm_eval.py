@@ -1,4 +1,4 @@
-"""Stage 5b: AJIMEE amb exact match with/without LM rescoring, plus latency.
+"""AJIMEE amb exact match with/without LM rescoring, plus latency.
 
 Run (needs torch + transformers + sentencepiece):
   python -m tools.eval.run_ajimee_lm_eval --alpha 0 1 2 --k 8 --context both

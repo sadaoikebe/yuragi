@@ -1,7 +1,8 @@
-"""Stage 5b: optional causal-LM rescoring of the conversion k-best (Space only).
+"""Optional causal-LM rescoring of the conversion k-best (Space only).
 
-Off by default. Nothing here imports torch/transformers until a scorer is
-constructed, so the default IME path has no new dependency.
+The engine uses it unless the setting lm_rescore turns it off. Nothing here
+imports torch/transformers until a scorer is constructed, so a session without
+it has no new dependency.
 
 score(candidate) = (cost - cost of the current 1-best) + alpha * 500 * NLL_LM
 NLL is the sum of the candidate's token negative log-likelihoods (nats) given

@@ -464,8 +464,7 @@ class ProcessTest(BrokerCase):
 
     @unittest.skipUnless(WINDOWS, "the named pipe")
     def test_management_tools_name_the_real_pipe(self):
-        # It once raised (ERROR_INVALID_HANDLE) and the window showed "not running"
-        # beside a running broker.
+        # The window must not show "not running" beside a running broker.
         from yuragi.ime import broker_client
         sid = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True,
                              text=True, check=True).stdout.strip().split(",")[-1].strip('"')

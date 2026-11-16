@@ -1,9 +1,8 @@
-"""Pin the dictionary set with a SHA-256 manifest and check it (D3).
+"""Pin the dictionary set with a SHA-256 manifest and check it.
 
-The dictionary plan (§4) starts by recording the current files as they are,
-then pins upstream_commit to the google/mozc commit fetch_mozc_dict uses. This
-module writes that manifest and verifies the working set against it: every
-required file present with the recorded size and hash, and no unrecorded
+The manifest pins upstream_commit to the google/mozc commit fetch_mozc_dict
+uses. This module writes that manifest and verifies the working set against
+it: every required file present with the recorded size and hash, and no unrecorded
 dictionary*.txt (the loader globs them, so a stray file would change results).
 
   python -m yuragi.lattice.dict_manifest write --label local-snapshot-20261111

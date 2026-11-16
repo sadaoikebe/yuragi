@@ -1,4 +1,4 @@
-"""The management window's logic (S4), without tkinter or a display."""
+"""The management window's logic, without tkinter or a display."""
 from __future__ import annotations
 
 from contextlib import redirect_stderr

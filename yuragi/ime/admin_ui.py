@@ -1,4 +1,4 @@
-"""The management window: word registration, learning, settings, status (S4).
+"""The management window: word registration, learning, settings, status.
 
   python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE] [--dict-dir DIR]
 

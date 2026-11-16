@@ -1,4 +1,4 @@
-"""Looking after the learning history file (D2): list, forget, promote, the
+"""Looking after the learning history file: list, forget, promote, the
 learning setting (on/paused/off), compact, clear.
 
 Everything here goes through LearningStore's replay, so what is listed is
@@ -39,7 +39,7 @@ def search(path: Path, query: str) -> list[LearnedPair]:
 
 
 def forget(path: Path, reading: str, surface: str) -> bool:
-    """The same suppression as F6 on the candidate; False if nothing was learned."""
+    """The same suppression as Shift+F6 on the candidate; False if nothing was learned."""
     store = LearningStore(path)
     if not store.has_pair(reading, surface):
         return False

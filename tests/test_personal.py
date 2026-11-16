@@ -1,4 +1,4 @@
-"""The personal word list file (D1): written, read back, and hand edits survived."""
+"""The personal word list file: written, read back, and hand edits survived."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,9 +1,8 @@
-"""Spellings for a run of typed digits (a number rewriter, U2).
+"""Spellings for a run of typed digits (a number rewriter).
 
 The typed digits stay first, so the 1-best composition is unchanged. The
 other rows are the usual IME spellings of the same number. The digit keys
-type full-width digits (symbols design §2.1); the half-width ones are the
-next row (§5).
+type full-width digits; the half-width ones are the next row.
 """
 from __future__ import annotations
 

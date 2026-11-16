@@ -74,7 +74,7 @@ class MozcLex:
 def left_id_after(literal: str, lex: MozcLex) -> int:
     """POS context for a kana run after a literal: a digit reads as a numeral.
 
-    Any other literal (punctuation, Latin) is a sentence boundary, as before.
+    Any other literal (punctuation, Latin) is a sentence boundary.
     Small test lexicons have no Mozc numeral POS and keep the boundary.
     """
     digit = literal and ("0" <= literal[-1] <= "9" or "０" <= literal[-1] <= "９")

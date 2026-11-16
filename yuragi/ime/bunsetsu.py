@@ -60,7 +60,7 @@ class Segment:
 
 def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:
     # Literal pieces from ambiguous faces get their own selectable interval.
-    # Stage 2A's fixed literals are instead created by ImeSession._refresh().
+    # Fixed literals are instead created by ImeSession._refresh().
     groups: list[list[Piece]] = []
     for piece in pieces:
         if (not groups or piece.literal or piece.learned or groups[-1][-1].literal

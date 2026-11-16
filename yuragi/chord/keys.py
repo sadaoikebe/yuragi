@@ -57,7 +57,7 @@ VK_TO_M: dict[int, str] = {
     VK_OEM_COMMA: ",",
     VK_OEM_PERIOD: ".",
     VK_OEM_2: "/",
-    # The digit row and the other symbol keys (symbols design §2): plain and
+    # The digit row and the other symbol keys: plain and
     # thumb faces in data/nicola_a.json, so they take part in the chord FSM.
     **{0x30 + d: str(d) for d in range(10)},
     VK_OEM_3: "`",
@@ -82,10 +82,9 @@ MODIFIER_VKS = {
     0xA5,  # L/R shift/ctrl/alt
 }
 
-# Shift is the little-finger layer and never joins a chord (symbols design §7 K):
-# Shift+letters are the native upper-case letters (the design leaves them as
-# they were, §8); Shift+digits/symbols give the upper engraving in full width
-# (rule 1), with ' giving ” (the user's decision). Ctrl/Alt/Win shortcuts
+# Shift is the little-finger layer and never joins a chord:
+# Shift+letters are the native upper-case letters; Shift+digits/symbols give
+# the upper engraving in full width, with ' giving ”. Ctrl/Alt/Win shortcuts
 # bypass the session.
 SHIFT_VKS = {VK_SHIFT, 0xA0, 0xA1}
 SHORTCUT_VKS = MODIFIER_VKS - SHIFT_VKS

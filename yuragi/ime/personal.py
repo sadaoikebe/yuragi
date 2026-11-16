@@ -1,4 +1,4 @@
-"""The user's own word list (D1), separate from data/user_lexicon.jsonl.
+"""The user's own word list, separate from data/user_lexicon.jsonl.
 
 data/user_lexicon.jsonl is part of the evaluation condition (the hand-written
 corrections the Mozc/AJIMEE scores are measured with), so personal words must

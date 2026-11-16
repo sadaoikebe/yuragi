@@ -227,8 +227,7 @@ inline bool WantKey(uint32_t vk, Mods mods, const Local& local) {
     return false;
 }
 
-// After the reply came in time: whether the key was consumed (the rules of
-// the TIP before the redesign, unchanged).
+// After the reply came in time: whether the key was consumed.
 inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before,
                           bool before_timer, int before_tokens, const Message& r) {
     if (r.direct || r.pass_through) return false;

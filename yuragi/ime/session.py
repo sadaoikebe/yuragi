@@ -2,8 +2,8 @@
 
 Literal characters split the lattice into independent BOS/EOS-delimited runs.
 The FSM's timing and chord decisions are unchanged. The digit row and the
-symbol keys are chord keys too (symbols design §2): their plain and thumb
-faces are literals, and Shift gives the full-width upper engraving (§3).
+symbol keys are chord keys too: their plain and thumb faces are literals,
+and Shift gives the full-width upper engraving.
 """
 
 from __future__ import annotations
@@ -110,8 +110,7 @@ def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
             return None
         texts = set(faces.values())
         if len(texts) == 1 and is_literal_face(next(iter(texts))):
-            # A symbol key's thumb face is the same for either thumb (symbols
-            # design §1.4): the chord is that literal whichever side is read.
+            # A symbol key's thumb face is the same for either thumb: the chord is that literal whichever side is read.
             return {"kind": "literal", "text": literal_text(texts.pop())}
         kind = "amb" if len(faces) > 1 else "shift"
         token = {"kind": kind, "key": tok.key, "faces": faces}
@@ -150,7 +149,7 @@ class ImeSession:
     learning_path: Path | None = DEFAULT_LEARNING_PATH
     _learning: LearningStore | None = None
     _learning_undo: list[list[str]] = field(default_factory=list)
-    # Stage 5b, off unless a rescorer is given (server --lm-rescore).
+    # LM rescoring, off unless a rescorer is given (server --lm-rescore).
     lm: LmRescorer | None = None
     # Resident pipeline only: a ThumbTap leaves the LM pick to a worker.
     lm_deferred: bool = False
@@ -166,8 +165,8 @@ class ImeSession:
     # press (no press crosses a literal, alternation.py). press → its alias.
     _press_alias: dict[int, int] = field(default_factory=dict)
     _next_alias: int = -1
-    clock: Callable[[], datetime] = datetime.now  # date rows (U3); fixed in transcripts
-    personal: PersonalLexicon | None = None  # the user's word list (D1), shared
+    clock: Callable[[], datetime] = datetime.now  # date rows; fixed in transcripts
+    personal: PersonalLexicon | None = None  # the user's word list, shared
     prediction: str = DEFAULT_PREDICTION  # "off" or "tab" (predict.py)
     predict_index: ReadingIndex = field(default_factory=ReadingIndex)  # shared
     predicting: bool = False  # the focused candidates are predictions
@@ -385,7 +384,7 @@ class ImeSession:
         """Tab: open predictions, or the next one; False leaves Tab as it was.
 
         Only unconverted input with no chord or conversion in flight asks;
-        with no prediction nothing changes (Tab keeps its old meaning).
+        with no prediction nothing changes and Tab goes to the application.
         """
         if self.predicting:
             self._cycle(1)
@@ -926,7 +925,7 @@ class ImeSession:
 
 def _stops(segments: list[Segment]) -> list[int]:
     """Focus stops: every segment. A symbol or a run of digits has its own
-    rows (the half-width receiver, symbols design §5)."""
+    rows (symbols.py, numbers.py)."""
     return list(range(len(segments)))
 
 
