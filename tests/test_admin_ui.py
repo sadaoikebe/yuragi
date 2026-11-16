@@ -32,10 +32,7 @@ class Base(unittest.TestCase):
         self.dir = Path(tmp.name)
         self.config = self.dir / "config.json"
         self.learning = self.dir / "learning.jsonl"
-        self.personal = self.dir / "personal.jsonl"
-        self.config.write_text(json.dumps({"learning_file": str(self.learning),
-                                           "personal_file": str(self.personal)}),
-                               encoding="utf-8")
+        self.personal = self.dir / "personal_lexicon.jsonl"
         # Never the broker of the machine running the tests: no broker by default.
         self.broker = {"status": None, "retry": False}
         for name in ("status", "retry"):
@@ -61,16 +58,16 @@ class AdminModelTest(Base):
 
 class SettingsTest(Base):
     def test_absent_config_file_is_created_on_first_edit(self):
-        self.config.unlink()
-        model = AdminModel(runtime_dir=self.dir)
-        self.assertTrue(model.set_setting("lm_k", "4").ok)
-        self.assertEqual(json.loads(self.config.read_text(encoding="utf-8")), {"lm_k": 4})
+        self.assertTrue(self.model.set_setting("lm_rescore", "使わない").ok)
+        self.assertEqual(json.loads(self.config.read_text(encoding="utf-8")),
+                         {"lm_rescore": False})
 
     def test_broken_config_file_is_reported_not_overwritten(self):
         self.config.write_text("[1, 2]", encoding="utf-8")
         with redirect_stderr(io.StringIO()):  # the engine's "not an object" note
             model = AdminModel(runtime_dir=self.dir)
-            for outcome in (model.set_setting("lm_k", "4"), model.reset_setting("lm_k")):
+            for outcome in (model.set_setting("learning", "使わない"),
+                            model.reset_setting("learning")):
                 self.assertEqual((outcome.ok, outcome.message),
                                  (False, f"設定ファイル {self.config} が壊れているため保存できません"))
         self.assertEqual(self.config.read_text(encoding="utf-8"), "[1, 2]")
@@ -127,16 +124,16 @@ class WidgetLayerTest(Base):
         self.assertEqual([x.surface for x in read_words(self.personal)], ["ヌエ"])
         w._forget()
         self.assertEqual([p.surface for p in self.model.learned()], ["肩"])
-        w.settings_tree.selection.return_value = (str(list(SETTINGS).index("lm_k")),)
+        w.settings_tree.selection.return_value = (str(list(SETTINGS).index("prediction")),)
         w._pick_setting()
-        self.assertEqual((w.s_label.get(), w.s_value.get()), ("言語モデルで比べる候補の数", "8"))
-        self.assertEqual(w.s_help.get(), SETTINGS["lm_k"].help)  # whole, not cut by the column
-        w.s_value.set("4")
+        self.assertEqual((w.s_label.get(), w.s_value.get()), ("入力の予測", "Tab キーで出す"))
+        self.assertEqual(w.s_help.get(), SETTINGS["prediction"].help)  # whole, not cut by the column
+        w.s_value.set("使わない")
         w._save_setting()
-        self.assertEqual(json.loads(self.config.read_text(encoding="utf-8"))["lm_k"], 4)
+        self.assertEqual(json.loads(self.config.read_text(encoding="utf-8"))["prediction"], "off")
         self.assertIn("再起動", w.message.get())
         w._reset_setting()
-        self.assertNotIn("lm_k", json.loads(self.config.read_text(encoding="utf-8")))
+        self.assertNotIn("prediction", json.loads(self.config.read_text(encoding="utf-8")))
         w._tab_changed()
         self.assertEqual(w.message.get(), "")  # a message stays with its tab
         w._refresh_status()

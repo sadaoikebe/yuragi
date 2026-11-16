@@ -138,8 +138,7 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-dir", type=Path, default=None,
                         help="where the dictionary cache is kept (default data/cache)")
     parser.add_argument("--lm-model", default=None,
-                        help="the installed LM model directory (engine.json); a lm_model "
-                             "in config.json still wins")
+                        help="the installed LM model directory (engine.json)")
     return parser
 
 
@@ -156,8 +155,7 @@ class Connection:
         if self.pipeline is not None:
             reply = self.pipeline.handle(msg)
         else:
-            reply = process_request(self.sess, msg, log_text=self.engine.log_text,
-                                    lm_timing=self.engine.lm_timing)
+            reply = process_request(self.sess, msg)
         sess = self.sess
         if len(sess.tokens) > MAX_TOKENS and not sess.converted and sess._await is None:
             # §6.5: the key is taken silently, the input stays as it was.
@@ -192,7 +190,6 @@ class Engine:
         self.loaded = None
         self.worker = None
         self.settings = None
-        self.log_text = self.lm_timing = False
 
     # -- startup -----------------------------------------------------------------
     def load(self, args: argparse.Namespace) -> None:
@@ -218,7 +215,6 @@ class Engine:
 
         settings = self.read_settings(args, config, server)
         self.settings = settings
-        self.log_text, self.lm_timing = settings.log_text, settings.lm_timing
 
         progress = Progress(self.channel)
         try:
@@ -236,7 +232,7 @@ class Engine:
                                      create_learning_file=True)
         store = loaded._learning
         if store is not None:
-            log(f"learning {config.learning_mode(settings)}: {store.lines} lines, "
+            log(f"learning on: {store.lines} lines, "
                 f"{len(store.records())} live, {store.skipped} skipped")
             try:
                 compacted = store.compact_if_needed()
@@ -255,15 +251,14 @@ class Engine:
             log("LM rescoring off (setting)")
 
     def read_settings(self, args, config, server) -> argparse.Namespace:
-        """config.json in the data directory over the built-in defaults (§6.2)."""
-        parser = server.argument_parser()
-        parser.set_defaults(learning_file=args.data_dir / "learning.jsonl",
-                            personal_file=args.data_dir / "personal_lexicon.jsonl")
-        if args.lm_model is not None:
-            parser.set_defaults(lm_model=args.lm_model)
-        settings = config.load(parser, config_path=args.data_dir / config.CONFIG_NAME)
-        if settings.lm_rescore is None:
-            settings.lm_rescore = True  # the product path: on unless config.json says otherwise
+        """config.json in the data directory (§6.2); everything else as the
+        stdio host's defaults."""
+        settings = server.argument_parser().parse_args([])
+        settings.learning_file = args.data_dir / "learning.jsonl"
+        settings.personal_file = args.data_dir / "personal_lexicon.jsonl"
+        settings.lm_model = args.lm_model
+        for key, value in config.load(args.data_dir / config.CONFIG_NAME).items():
+            setattr(settings, key, value)
         return settings
 
     def load_lm(self, server, settings):
@@ -308,8 +303,7 @@ class Engine:
             return None
         from yuragi.ime.lm_async import ConnectionPipeline
         s = self.settings
-        return ConnectionPipeline(sess, self.worker, log_text=s.log_text,
-                                  lm_timing=s.lm_timing, grace_ms=s.lm_grace_ms,
+        return ConnectionPipeline(sess, self.worker, grace_ms=s.lm_grace_ms,
                                   deadline_ms=s.lm_deadline_ms, prefetch=s.lm_prefetch,
                                   prefetch_delay_ms=s.lm_prefetch_delay_ms)
 

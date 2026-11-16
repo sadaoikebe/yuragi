@@ -11,8 +11,7 @@ window does and imports no tkinter, so it is tested without a display;
 AdminWindow only lays out widgets and forwards to it.
 
 Everything the window shows is Japanese: setting names, values, descriptions,
-status and messages come from the tables here, never from the option names or
-the CLI's English.
+status and messages come from the tables here.
 
 Word and learning changes reach a running engine at its next conversion or
 keystroke; settings are read when the engine starts (状態タブ: 変換エンジンを再起動).
@@ -20,8 +19,10 @@ keystroke; settings are read when the engine starts (状態タブ: 変換エン�
 from __future__ import annotations
 
 import argparse
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
+import io
 import json
 import os
 from pathlib import Path
@@ -48,21 +49,14 @@ class Outcome:
 class SettingText:
     label: str
     help: str
-    values: dict[str, str]  # stored text -> shown; {} for free text
-    # The built-in default is None for some settings, which the engine reads as a
-    # value of its own: implied is that value as stored text (offered for editing),
-    # unset what is shown when it has no stored form (an empty field means it).
-    implied: str = ""
-    unset: str = ""
+    values: dict  # value in config.json -> shown
 
 
-ON_OFF = {"true": "オン", "false": "オフ"}
-
-# Every setting config.json can hold, in the order the window lists them.
+# The settings config.json holds, in the order the window lists them.
 SETTINGS: dict[str, SettingText] = {
     "learning": SettingText(
         "学習", "確定した変換を覚えて、次から上位に出します。",
-        {"on": "学習する", "off": "使わない"}, implied="on"),
+        {"on": "学習する", "off": "使わない"}),
     "prediction": SettingText(
         "入力の予測", "変換する前の入力中に Tab キーを押すと、学習した内容と辞書から"
         "続きの候補を出します。",
@@ -70,45 +64,7 @@ SETTINGS: dict[str, SettingText] = {
     "lm_rescore": SettingText(
         "言語モデル", "変換するとき、言語モデル（文のつながりが自然かを判断するもの）で"
         "候補の順位を見直します。使わないときは、辞書だけで変換します。",
-        {"true": "使う", "false": "使わない"}, implied="true"),
-    "lm_prefetch": SettingText(
-        "言語モデルの先読み", "変換を速くするため、変換キーを押す前から言語モデルの"
-        "計算を始めておきます。",
-        {"thumb": "親指キーを押したとき", "typing": "キーを打つたび", "off": "先読みしない"}),
-    "lm_deadline_ms": SettingText(
-        "言語モデルを待つ上限（ミリ秒）", "変換キーを押してからこの時間を過ぎても言語モデルの"
-        "結果が出ないときは、辞書だけの結果を出します。", {}),
-    "lm_grace_ms": SettingText(
-        "変換キーを押したあとに待つ時間（ミリ秒）", "変換キーを押したあと、表示を変える前に"
-        "言語モデルの結果を待つ時間です。間に合わないときは表示をそのままにして待ち続け、"
-        "その間に打ったキーは結果が出てから順に処理します。", {}),
-    "lm_prefetch_delay_ms": SettingText(
-        "先読みを始めるまでの時間（ミリ秒）", "「親指キーを押したとき」の先読みで、親指キーを"
-        "押してから計算を始めるまでの時間です。", {}),
-    "lm_model": SettingText(
-        "言語モデルの種類", "使う言語モデル（Hugging Face のモデル名か、モデルのフォルダ）。"
-        "空欄なら標準のモデルを使います。",
-        {}, unset="標準のモデル"),
-    "lm_alpha": SettingText(
-        "言語モデルの重み", "大きいほど、辞書より言語モデルの判断を重く見ます。", {},
-        implied="1.0"),
-    "lm_k": SettingText(
-        "言語モデルで比べる候補の数", "辞書で出した候補のうち、上から何件を言語モデルで"
-        "比べるかです。",
-        {}, implied="8"),
-    "lm_threads": SettingText(
-        "言語モデルが使う CPU のスレッド数", "言語モデルの計算に使う CPU のスレッド数です。"
-        "空欄にすると、自動で決めます。", {}, unset="自動"),
-    "personal_file": SettingText(
-        "個人辞書のファイル", "「単語登録」で登録した単語を保存するファイルです。", {}),
-    "learning_file": SettingText(
-        "学習履歴のファイル", "学習した内容を保存するファイルです。", {}),
-    "log_text": SettingText(
-        "入力した文字をログに残す（開発用）", "入力中の文字と確定した文字を、変換エンジンのログに"
-        "書きます。入力内容がファイルに残るので、普段はオフにします。", ON_OFF),
-    "lm_timing": SettingText(
-        "言語モデルの処理時間をログに残す（開発用）", "変換ごとの言語モデルの処理時間を"
-        "変換エンジンのログに書きます（入力内容は書きません）。", ON_OFF),
+        {True: "使う", False: "使わない"}),
 }
 
 LEARNING_STATES = {"on": "学習中", "off": "使わない設定"}
@@ -127,20 +83,9 @@ class SettingRow:
     name: str  # the key in config.json
     label: str
     value: str  # as shown, with （既定） when nothing is stored
-    edit: str  # what the edit box starts with
-    choices: list[str]  # shown values to offer; [] means free text
+    edit: str  # what the list starts with
+    choices: list[str]  # shown values to offer
     help: str
-
-
-def _stored_text(value) -> str:
-    """A value as config.json would hold it, as text."""
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
 
 
 def _dictionary_problem(problem: str) -> str:
@@ -158,21 +103,13 @@ class AdminModel:
     """The window's behaviour, on the engine's files; every change re-reads them."""
 
     def __init__(self, runtime_dir: Path | None = None, config_path: Path | None = None):
-        self.runtime_dir = runtime_dir
-        self.config_path = config_path
-        self.reload()
-
-    def reload(self) -> None:
-        """Re-read config.json (it decides where the word and learning files are)."""
-        from .server import argument_parser
-        self.parser = argument_parser()
-        self.settings = config.load(argument_parser(), self.runtime_dir, self.config_path)
+        self.runtime_dir = runtime_dir or config.DEFAULT_RUNTIME_DIR
+        self.config_file = config_path or self.runtime_dir / config.CONFIG_NAME
+        # The engine's files (yuragi.engine: --data-dir).
+        self.personal_file = self.runtime_dir / "personal_lexicon.jsonl"
+        self.learning_file = self.runtime_dir / "learning.jsonl"
 
     # -- word registration (personal lexicon) --------------------------------
-
-    @property
-    def personal_file(self) -> Path:
-        return self.settings.personal_file
 
     def words(self) -> list[personal.Word]:
         return personal.read_words(self.personal_file)
@@ -198,12 +135,13 @@ class AdminModel:
 
     # -- learning --------------------------------------------------------------
 
-    @property
-    def learning_file(self) -> Path:
-        return self.settings.learning_file
+    def _values(self) -> dict:
+        """The settings the engine would use (a broken file: its note is the engine's)."""
+        with contextlib.redirect_stderr(io.StringIO()):
+            return config.load(self.config_file)
 
     def learning_state(self) -> str:
-        return learning_admin.state(self.settings)
+        return self._values()["learning"]
 
     def learned(self, query: str = "") -> list[learning_admin.LearnedPair]:
         if not self.learning_file.exists():
@@ -246,64 +184,39 @@ class AdminModel:
 
     # -- settings --------------------------------------------------------------
 
-    @property
-    def config_file(self) -> Path:
-        return self.settings.config
-
     def setting_rows(self) -> list[SettingRow]:
-        stored = config.read_config(self.config_file, self.parser)
-        actions = config.file_settings(self.parser)
+        values = self._values()
+        try:
+            stored = config.stored(self.config_file)
+        except (OSError, ValueError):
+            stored = {}
         rows = []
         for name, text in SETTINGS.items():
-            action = actions[name]
-            value = stored[name] if name in stored else action.default
-            raw = _stored_text(value) or text.implied
-            edit = text.values.get(raw, raw)
-            shown = edit if raw else text.unset
-            if name not in stored:
-                shown += "（既定）"
-            rows.append(SettingRow(name, text.label, shown, edit, list(text.values.values()),
-                                   text.help))
+            shown = text.values[values[name]]
+            rows.append(SettingRow(name, text.label, shown + ("" if name in stored else "（既定）"),
+                                   shown, list(text.values.values()), text.help))
         return rows
 
     def set_setting(self, name: str, shown: str) -> Outcome:
-        """Write a value to config.json; empty text goes back to the default."""
+        """Write a value to config.json."""
         text = SETTINGS[name]
-        if not shown.strip():
-            return self.reset_setting(name)
-        stored = {v: k for k, v in text.values.items()}.get(shown.strip(), shown)
+        value = {v: k for k, v in text.values.items()}.get(shown.strip())
+        if value is None:
+            return Outcome(False, f"「{text.label}」は一覧から選んでください")
         try:
-            value = config.parse_setting(self.parser, name, stored)
-        except ValueError:
-            return Outcome(False, f"「{text.label}」には{self._expected(name)}")
-        try:
-            config.set_setting(self.config_file, self.parser, name, stored)
+            config.set_setting(self.config_file, name, value)
         except ValueError:
             return Outcome(False, f"設定ファイル {self.config_file} が壊れているため保存できません")
-        self.reload()
-        raw = _stored_text(value)
-        return Outcome(True, f"「{text.label}」を「{text.values.get(raw, raw)}」にしました。"
-                             f"{RESTART_NOTE}")
-
-    def _expected(self, name: str) -> str:
-        action = config.file_settings(self.parser)[name]
-        if SETTINGS[name].values:
-            return "一覧から選んでください"
-        if action.type is int:
-            return "整数を入力してください"
-        if action.type is float:
-            return "数値を入力してください"
-        return "正しい値を入力してください"
+        return Outcome(True, f"「{text.label}」を「{shown.strip()}」にしました。{RESTART_NOTE}")
 
     def reset_setting(self, name: str) -> Outcome:
         label = SETTINGS[name].label
         try:
-            removed = config.unset_setting(self.config_file, self.parser, name)
+            removed = config.unset_setting(self.config_file, name)
         except ValueError:
             return Outcome(False, f"設定ファイル {self.config_file} が壊れているため保存できません")
         if not removed:
             return Outcome(True, f"「{label}」は既定値のままです")
-        self.reload()
         return Outcome(True, f"「{label}」を既定値に戻しました。{RESTART_NOTE}")
 
     # -- status ----------------------------------------------------------------
@@ -319,8 +232,7 @@ class AdminModel:
             rows.append(("変換エンジン", ENGINE_STATES.get(broker["state"], broker["state"])))
         warnings = [WARNINGS.get(w, w) for w in (broker or {}).get("warnings", [])]
         rows.append(("注意", "、".join(warnings) if warnings else "なし"))
-        runtime_dir = self.settings.runtime_dir or config.DEFAULT_RUNTIME_DIR
-        stop = broker_client.last_stop(runtime_dir / "logs")
+        stop = broker_client.last_stop(self.runtime_dir / "logs")
         rows.append(("最後に止まった理由",
                      f"{STOP_REASONS.get(stop['stopped'], stop['stopped'])}"
                      f"（{stop['time'].replace('T', ' ')}）"
@@ -564,13 +476,9 @@ class AdminWindow:
         edit.pack(side="bottom", fill="x", pady=(self.px(6), 0))
         self.s_name, self.s_label, self.s_value = "", tk.StringVar(), tk.StringVar()
         ttk.Label(edit, textvariable=self.s_label).pack(side="left")
-        # A list for settings with choices, a text field for numbers and paths.
-        field = ttk.Frame(edit)
-        field.pack(side="left", padx=self.px(4))
-        self.s_box = self._combobox(field, self.s_value, [], 30)
+        self.s_box = self._combobox(edit, self.s_value, [], 30)
         self.s_box.configure(state="disabled")  # until an item is picked
-        self.s_entry = ttk.Entry(field, textvariable=self.s_value, width=32)
-        self.s_box.pack()
+        self.s_box.pack(side="left", padx=self.px(4))
         ttk.Button(edit, text="保存", command=self._save_setting).pack(side="left")
         ttk.Button(edit, text="既定に戻す", command=self._reset_setting
                    ).pack(side="left", padx=self.px(4))
@@ -591,13 +499,7 @@ class AdminWindow:
         self.s_label.set(row.label)
         self.s_help.set(row.help)
         self.s_value.set(row.edit)
-        if row.choices:
-            self.s_entry.pack_forget()
-            self.s_box.configure(values=row.choices, state="readonly")
-            self.s_box.pack()
-        else:
-            self.s_box.pack_forget()
-            self.s_entry.pack()
+        self.s_box.configure(values=row.choices, state="readonly")
 
     def _save_setting(self):
         if self.s_name:

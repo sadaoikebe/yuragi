@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field, replace
 import gc
-import json
 import sys
 import threading
 import time
@@ -300,7 +299,7 @@ class ConnectionPipeline:
                  grace_ms: float = GRACE_MS, deadline_ms: float = DEADLINE_MS,
                  poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | typing | off
                  prefetch_delay_ms: float = PREFETCH_DELAY_MS, max_queue: int = MAX_QUEUE,
-                 clock=time.monotonic, log_text: bool = False, lm_timing: bool = False):
+                 clock=time.monotonic):
         self.sess = sess
         self.worker = worker
         self.stats = stats if stats is not None else worker.stats
@@ -311,8 +310,6 @@ class ConnectionPipeline:
         self.prefetch_delay_ms = prefetch_delay_ms
         self.max_queue = max_queue
         self.clock = clock
-        self.log_text = log_text
-        self.lm_timing = lm_timing
         self.queue: deque[dict] = deque()
         self.last_t = 0
         self.job: Job | None = None  # the awaited conversion's job
@@ -363,9 +360,6 @@ class ConnectionPipeline:
         if reply["pending"]:
             poll = self.last_t + self.poll_ms
             reply["timer"] = poll if reply["timer"] is None else min(reply["timer"], poll)
-        if self.log_text:
-            print(json.dumps({"composition": reply["composition"], "commit": reply["commit"]},
-                             ensure_ascii=False), file=sys.stderr, flush=True)
         return reply
 
     def close(self) -> None:
@@ -415,10 +409,6 @@ class ConnectionPipeline:
             kind = "timeout"
         self.stats.conversion(kind)
         self.stats.observe("wait_ms", (self.clock() - self.awaited_at) * 1000)
-        if self.lm_timing and job.done.is_set() and job.stats:
-            print(json.dumps({"lm": {k: round(v, 3) if isinstance(v, float) else v
-                                     for k, v in job.stats.items()}}),
-                  file=sys.stderr, flush=True)
 
     def _prefetch(self) -> None:
         sess = self.sess

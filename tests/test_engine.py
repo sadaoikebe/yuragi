@@ -2,9 +2,8 @@
 
 Each test starts ``python -m yuragi.engine`` with pipes and the broker's
 environment, and talks the line protocol. The real dictionary is used (as for
-the other session tests); the LM is used when torch and a local model are
-present (YURAGI_LM_MODEL=<model directory>), otherwise the engine reports the
-"lm" warning and converts without it.
+the other session tests); the LM is used when torch and the model are
+present, otherwise the engine reports the "lm" warning and converts without it.
 """
 from __future__ import annotations
 
@@ -124,9 +123,6 @@ class EngineCase(unittest.TestCase):
         return engine
 
     def write_config(self, values: dict) -> None:
-        model = os.environ.get("YURAGI_LM_MODEL")
-        if model:
-            values = {"lm_model": model, **values}
         (self.data / "config.json").write_text(json.dumps(values), encoding="utf-8")
 
 

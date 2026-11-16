@@ -31,8 +31,7 @@ from pathlib import Path
 from yuragi.ime.session import ImeSession
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
-from yuragi.ime import config
-from yuragi.ime.config import LEARNING_MODES
+from yuragi.ime.config import DEFAULTS, SETTINGS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
 
 
@@ -87,14 +86,12 @@ def snapshot(sess: ImeSession, op) -> dict:
 
 def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-dir", type=Path, default=None,
-                        help="the user's data directory (default ~/.yuragi-ime)")
     parser.add_argument(
         "--log-text", action="store_true", help="log composition/commit text to stderr (private input)"
     )
     parser.add_argument("--learning-file", type=Path, default=DEFAULT_LEARNING_PATH,
                         help="local UTF-8 JSONL history (created when learning is on)")
-    parser.add_argument("--learning", choices=LEARNING_MODES, default=None,
+    parser.add_argument("--learning", choices=SETTINGS["learning"], default=DEFAULTS["learning"],
                         help="on (the default): learn from conversions; off: neither "
                              "record nor use the history")
     parser.add_argument("--personal-file", type=Path, default=DEFAULT_PERSONAL_PATH,
@@ -102,9 +99,6 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prediction", choices=PREDICTION_MODES, default=DEFAULT_PREDICTION,
                         help="Tab on unconverted input offers continuations from history "
                              "and the dictionary (tab, the default) or does nothing (off)")
-    parser.add_argument("--config", type=Path, default=None,
-                        help="settings file (default <runtime dir>/config.json; "
-                             "command-line options override it)")
     lm = parser.add_argument_group("LM rescoring (on by default in the engine)")
     lm.add_argument("--lm-rescore", action="store_true", default=None,
                     help="rescore the k-best with a causal LM on Space (needs torch+transformers)")
@@ -149,9 +143,8 @@ def load_session(args, with_lm: bool = True, *, lex=None,
     lex: an already loaded lexicon (the engine loads it itself, for its progress).
     create_learning_file: learning on makes a missing history file (the engine).
     """
-    mode = config.learning_mode(args)
     store = None
-    if mode == "on":
+    if args.learning == "on":
         if create_learning_file:
             args.learning_file.parent.mkdir(parents=True, exist_ok=True)
             args.learning_file.touch()  # REDESIGN §6.7: learning on makes the file

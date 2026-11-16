@@ -374,7 +374,7 @@ Enter と「変換中に次の文字を打つ」自動確定の両方で、選�
   `DEADLINE_MS`（400ms）を過ぎた、溜めたキーが `MAX_QUEUE`（512）を超えた、LM のワーカーが
   `STALL_MS`（5 秒）以上ひとつの採点から戻らない、LM が使えない。つまり PC が重いと、同じ打鍵でも
   LM なしの結果になることがある。親指の押下から `PREFETCH_DELAY_MS`（30ms）で先読みを始める
-  （設定 `lm_prefetch`: `thumb` 既定／`typing`／`off`）。
+  （評価用の引数 `--lm-prefetch`: `thumb` 既定／`typing`／`off`）。
 - LM が `MAX_ERRORS`（3）回続けて失敗したら、エンジンを起動し直すまで LM を使わず、注意 `lm` を出す。
 - LM を待っている間に `reset`・`set_direct` が来たら、その変換と溜めたキーを捨てる
   （未変換の入力は残る）。直接入力のモードが実際には変わらなかった場合も捨てるので、同期で動かした
@@ -408,13 +408,13 @@ down/up で追跡する。
 
 ## 11. 設定
 
-`~/.yuragi-ime/config.json` に、`yuragi.ime.server` の引数と同じ名前（`lm_deadline_ms` など）で書く
-（`yuragi/ime/config.py`）。ファイルの値、無ければ既定値。ファイルのどこかが壊れていたら（JSON でない、知らないキー、
-型や選択肢に合わない値）、ファイル全体を使わずすべて既定値で動き、ログに 1 行残す。読むのはエンジンの起動時。
-全項目と今の値は設定ウィンドウの「設定」タブで見られる。書き換えも設定ウィンドウで、`yuragi.ime.server` の引数と同じ変換・検査を通し、
-知っているキーだけを書き、一時ファイルに書いてから置き換える。反映はエンジンの起動し直し（設定ウィンドウの
-「変換エンジンを再起動」）で。
-主な項目: `learning`（on/off）、`prediction`（tab/off）、`lm_rescore`（true/false）。
+`~/.yuragi-ime/config.json` の項目は 3 つ（`yuragi/ime/config.py`。先頭が既定値）:
+`learning`（`on`／`off`）、`prediction`（`tab`／`off`）、`lm_rescore`（`true`／`false`）。
+知らないキーは無視する。値が選択肢に合わない・JSON のオブジェクトでないときは、すべて既定値で動き、
+ログに 1 行残す。読むのはエンジンの起動時。設定ウィンドウの「設定」タブで見て書き換え、知っているキーだけを
+一時ファイルに書いてから置き換える。反映はエンジンの起動し直し（「変換エンジンを再起動」）で。
+LM の調整（待つ時間、先読み、モデル、重み、候補の数、スレッド数）とログは、評価用の `yuragi.ime.server` の
+引数にだけある。
 
 TIP の設定は別のファイル `~/.yuragi-ime/tip.json`（切り替えキー `toggle_vk` `toggle_mods`、ログ `log` `log_text`。
 [src/tip/README.md](../src/tip/README.md)）。

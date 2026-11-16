@@ -25,8 +25,8 @@ from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 
-SETTINGS = Namespace(log_text=False, lm_timing=False, lm_grace_ms=30, lm_deadline_ms=400,
-                     lm_prefetch="thumb", lm_prefetch_delay_ms=30)
+SETTINGS = Namespace(lm_grace_ms=30, lm_deadline_ms=400, lm_prefetch="thumb",
+                     lm_prefetch_delay_ms=30)
 
 
 def loaded_session():
@@ -61,7 +61,6 @@ class EngineCase(unittest.TestCase):
         engine.loaded = loaded or loaded_session()
         engine.worker = worker
         engine.settings = settings
-        engine.log_text = settings.log_text
         return engine
 
     def open(self, engine, sid):

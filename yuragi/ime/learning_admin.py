@@ -1,5 +1,5 @@
 """Looking after the learning history file for the management window:
-list, forget, promote, the learning setting (on/off).
+list, forget, promote.
 
 Everything here goes through LearningStore's reading of the file, so what is
 listed is exactly what conversion uses; a running engine reads the file again
@@ -57,8 +57,3 @@ def promote(path: Path, personal_path: Path, reading: str, surface: str,
         return None
     return personal.add_word(personal_path, reading, surface, pos)
 
-
-def state(settings) -> str:
-    """on or off (the learning setting, REDESIGN §6.7)."""
-    from .config import learning_mode
-    return learning_mode(settings)
