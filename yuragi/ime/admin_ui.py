@@ -55,7 +55,7 @@ class SettingText:
 # The settings config.json holds, in the order the window lists them.
 SETTINGS: dict[str, SettingText] = {
     "learning": SettingText(
-        "学習", "確定した変換を覚えて、次から上位に出します。",
+        "学習", "確定した変換を覚えて、次から先頭に出します。",
         {"on": "学習する", "off": "使わない"}),
     "prediction": SettingText(
         "入力の予測", "変換する前の入力中に Tab キーを押すと、学習した内容と辞書から"
@@ -151,10 +151,10 @@ class AdminModel:
                 else learning_admin.pairs(self.learning_file))
 
     @staticmethod
-    def learned_row(pair: learning_admin.LearnedPair) -> tuple[str, str, int, str, str]:
-        """reading, surface, contexts, last confirmed, ○ if learned from kana as a word."""
+    def learned_row(pair: learning_admin.LearnedPair) -> tuple[str, str, str, str]:
+        """reading, surface, last confirmed, ○ if learned from kana as a word."""
         when = datetime.fromtimestamp(pair.last).strftime("%Y-%m-%d %H:%M")
-        return (pair.reading, pair.surface, pair.contexts, when, "○" if pair.user_word else "")
+        return (pair.reading, pair.surface, when, "○" if pair.user_word else "")
 
     def learning_counts(self) -> str:
         pairs = self.learned()
@@ -457,8 +457,8 @@ class AdminWindow:
         self._combobox(actions, self.l_pos, POS_NAMES, 9).pack(side="left", padx=(0, self.px(4)))
         ttk.Button(actions, text="選択を単語登録", command=self._promote).pack(side="left")
         self.learning_tree = self._table(
-            frame, ("読み", "変換", "文脈の数", "最後の確定", "単語として覚えた"),
-            (160, 200, 70, 140, 110))
+            frame, ("読み", "変換", "最後の確定", "単語として覚えた"),
+            (160, 200, 140, 110))
 
     def _forget(self):
         row = self._selected(self.learning_tree)

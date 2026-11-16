@@ -81,8 +81,8 @@ class ManualWorker:
             return
         if job.kind == "convert" and not job.cancelled:
             r = job.request
-            job.picks = conversion_picks(r.parts, self.lex, r.learning, r.left_surface,
-                                         r.lm_context, replace(self.template, last={}),
+            job.picks = conversion_picks(r.parts, self.lex, r.learning, r.lm_context,
+                                         replace(self.template, last={}),
                                          cancelled=lambda: job.cancelled)
         job.done.set()
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import itertools
 from typing import Callable
 import unicodedata
 
@@ -23,7 +24,7 @@ from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
 from yuragi.lattice.token_viterbi import decode_tokens
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Candidate, CandidateStream, Segment,
-                       candidates, segments_from)
+                       candidates, learned_row, segments_from, with_learned)
 from .learning import LearningStore
 from .lm_rescore import CONTEXT_CHARS, LmRescorer, conversion_picks
 from .numbers import is_digit, number_spellings
@@ -142,9 +143,8 @@ class ConversionRequest:
     """Everything the LM worker needs for one conversion, captured at ThumbTap."""
     parts: list  # ImeSession._parts()
     lm_context: str
-    left_surface: str
     learning: object | None  # LearningStore.snapshot()
-    key: tuple  # (repr(parts), lm_context, left_surface, learning revision or None)
+    key: tuple  # (repr(parts), lm_context, learning revision, personal revision)
 
 
 @dataclass
@@ -168,7 +168,6 @@ class ImeSession:
     lm_deferred: bool = False
     _await: ConversionRequest | None = None  # conversion waiting for the worker
     _continuation: Callable[[], str | None] | None = None  # rest of that key event
-    _left_surface: str = ""
     _lm_context: str = ""  # text committed on this connection since the last reset
     _table: dict = field(default_factory=dict)
     _lex: MozcLex | None = None
@@ -207,7 +206,6 @@ class ImeSession:
         self._modifiers.clear()
         self._press_alias.clear()
         self._carry.clear()
-        self._left_surface = ""
         self._lm_context = ""
         self.composition = ""
         self.segments.clear()
@@ -361,9 +359,8 @@ class ImeSession:
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
         return ConversionRequest(
-            parts, self._lm_context, self._left_surface, learning,
-            (repr(parts), self._lm_context, self._left_surface,
-             learning.revision if learning is not None else None,
+            parts, self._lm_context, learning,
+            (repr(parts), self._lm_context, learning.revision if learning is not None else None,
              self.personal.revision if self.personal is not None else None))
 
     def finish_conversion(self, picks) -> str:
@@ -442,11 +439,10 @@ class ImeSession:
                 self._refresh()
                 head = self.segments
                 self.tokens = tokens
-            left = head[-1].selected.surface if head else self._left_surface
             # A press crossing into the tail keeps the head's direction.
             tail = restrict(lattice, start, len(lattice),
                             self._pins(lattice, start, len(lattice), head))
-            found = predict(tail, self._lex, self.predict_index, learning, left,
+            found = predict(tail, self._lex, self.predict_index, learning,
                             self.personal.revision if self.personal is not None else None)
             if not found:
                 if redecoded:
@@ -651,22 +647,29 @@ class ImeSession:
         right = (self.segments[index + 1].selected.lid
                  if index + 1 < len(self.segments)
                  and not self.segments[index + 1].literal else BOS_ID)
-        left_surface = (self.segments[index - 1].selected.surface
-                        if index > 0 else self._left_surface)
         learning = self._learning.snapshot() if self._learning is not None else None
         lattice = self._lattice()
         # A press crossing the segment's boundary keeps its neighbors' direction.
         pins = self._pins(lattice, segment.start, segment.end,
                           (s for k, s in enumerate(self.segments) if k != index))
-        context = (left, right, left_surface,
-                   (learning.revision, learning.now) if learning is not None else None,
+        context = (left, right, learning.revision if learning is not None else None,
                    self.personal.revision if self.personal is not None else None,
                    tuple(sorted((p, tuple(sorted(d))) for p, d in pins.items())))
         if segment.choices is None or segment.context != context:
             assert self._lex is not None
-            segment.choices = CandidateStream(candidates(
+            rows = candidates(
                 restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
-                learning=learning, left_surface=left_surface, now=self.clock()))
+                learning=learning, now=self.clock())
+            reading = segment.selected.reading
+            if reselect and segment.choices is None:
+                # A resized interval (_resize): the old selection is not one of
+                # its rows, so its learning is looked up by its first row's reading.
+                first = next(rows)  # every nonempty interval has a kana/literal path
+                reading = first.reading
+                rows = itertools.chain((first,), rows)
+            row = learning.head(reading) if learning is not None else None
+            segment.choices = CandidateStream(with_learned(
+                rows, learned_row(row) if row else None))
             segment.context = context
             if not reselect:
                 segment.index = segment.choices.find(segment.selected)
@@ -871,12 +874,10 @@ class ImeSession:
         offset = 0
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
-        left_surface = self._left_surface
         parts = self._parts()
         if rescore and self.lm is not None and picks is None:
             self.lm.last = {}
-            picks = conversion_picks(parts, self._lex, learning, self._left_surface,
-                                     self._lm_context, self.lm)
+            picks = conversion_picks(parts, self._lex, learning, self._lm_context, self.lm)
         if picks is not None and len(picks) != sum(isinstance(p, list) for p in parts):
             picks = None
         kana_runs = 0
@@ -900,20 +901,22 @@ class ImeSession:
                         part, part, 0, BOS_ID, BOS_ID, "number" if is_digit(part)
                         else "literal"), literal=True))
                 offset += 1
-                left_surface = part
                 left_id = left_id_after(part, self._lex)
             elif self._lex is not None:
                 if picks is not None:
                     dec = picks[kana_runs]
                 else:
-                    dec, _ = decode_tokens(part, self._lex, learning=learning,
-                                           left_surface=left_surface, left_id=left_id)
+                    dec, _ = decode_tokens(part, self._lex, learning=learning, left_id=left_id)
                 kana_runs += 1
                 self._word_starts.update(offset + p.start for p in dec.pieces if not p.literal)
-                self.segments.extend(segments_from(dec.pieces, offset, self._lex))
+                for segment in segments_from(dec.pieces, offset, self._lex):
+                    # What was confirmed last for the reading comes first.
+                    row = (learning.head(segment.selected.reading)
+                           if learning is not None else None)
+                    if row is not None:
+                        segment.selected = learned_row(row)
+                    self.segments.append(segment)
                 offset += len(part)
-                if self.segments:
-                    left_surface = self.segments[-1].selected.surface
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)
 
@@ -923,20 +926,14 @@ class ImeSession:
 
     def _commit(self, *, reset_input: bool = True) -> str:
         text = self.composition
-        left_surface = self._left_surface
-        selections = []
-        for segment in self.segments:
-            selections.append((segment.selected, left_surface))
-            left_surface = segment.selected.surface
         if self._learning is not None and self._lex is not None:
-            self._learning.confirm(selections, self._lex)
+            self._learning.confirm([s.selected for s in self.segments], self._lex)
         if reset_input:
             context = self._lm_context
             self.reset()
             self._lm_context = context  # an Enter commit keeps the document context
         else:
             self._clear_input()
-        self._left_surface = left_surface
         self._note_commit(text)
         return text
 
@@ -963,8 +960,7 @@ class ImeSession:
         end = head.end
         text = head.selected.surface
         if self._learning is not None and self._lex is not None:
-            self._learning.confirm([(head.selected, self._left_surface)], self._lex)
-        self._left_surface = text
+            self._learning.confirm([head.selected], self._lex)
         if len(self.segments) == 1:
             # Nothing remains: as an ordinary commit by the next character.
             self._clear_input()

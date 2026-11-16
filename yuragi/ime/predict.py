@@ -9,13 +9,10 @@ predict() merges them: history first, then the dictionary, one row per
 surface. A prediction is strictly longer than what was typed; it is never the
 plain conversion of the input (Space already offers that).
 
-What the learning store holds decides how history is used: one row per
-confirmed bunsetsu (reading, surface, left context, time), kept per pair with
-its latest occurrence, decayed with a 30-day half-life and boosted when the
-left context matches. LearningStore.bonus() is exactly that ranking, so a
-history prediction is ranked by it: recent and same-context first. Suppressed
-pairs (Shift+F6) are already gone from the store, so they never come back as
-predictions either.
+What the learning store holds decides how history is used: the latest
+confirmation of each learned (reading, surface) pair, the most recently
+confirmed first. Suppressed pairs (Shift+F6) are already gone from the store,
+so they never come back as predictions either.
 
 The typed input is a token sequence, not one string: an ambiguous thumb chord
 reads either face. The readings are enumerated like the learning store's own
@@ -65,8 +62,8 @@ def typed_readings(tokens: list[dict], is_prefix: Callable[[str], bool],
     return out
 
 
-def history_predictions(store, tokens: list[dict], left_surface: str = "") -> list[Candidate]:
-    """Learned bunsetsu whose reading continues the input, best first.
+def history_predictions(store, tokens: list[dict]) -> list[Candidate]:
+    """Learned bunsetsu whose reading continues the input, the most recent first.
 
     store is a LearningStore snapshot (None: no history).
     """
@@ -75,14 +72,9 @@ def history_predictions(store, tokens: list[dict], left_surface: str = "") -> li
     readings = typed_readings(tokens, store.has_prefix, HISTORY_MIN_KANA)
     if not readings:
         return []
-    rows = []
-    for row in store.learned():
-        if any(len(row.reading) > len(r) and row.reading.startswith(r) for r in readings):
-            rows.append((-store.bonus(row.reading, row.surface, left_surface),
-                         -row.timestamp, row))
-    rows.sort(key=lambda item: item[:2])
     return [Candidate(row.surface, row.reading, 0, row.lid, row.rid, "predict", row.cost)
-            for _, _, row in rows]
+            for row in store.learned()
+            if any(len(row.reading) > len(r) and row.reading.startswith(r) for r in readings)]
 
 
 class ReadingIndex:
@@ -149,7 +141,7 @@ def merge(*sources: Iterable[Candidate], limit: int = MAX_PREDICTIONS) -> list[C
 
 
 def predict(tokens: list[dict], lex: MozcLex, index: ReadingIndex, store,
-            left_surface: str = "", revision: object = None) -> list[Candidate]:
+            revision: object = None) -> list[Candidate]:
     """History rows first, then dictionary rows, one per surface."""
-    return merge(history_predictions(store, tokens, left_surface),
+    return merge(history_predictions(store, tokens),
                  dictionary_predictions(lex, index, tokens, revision=revision))

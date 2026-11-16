@@ -235,12 +235,12 @@ class LmRescorer:
         return pick
 
 
-def conversion_picks(parts, lex: MozcLex, learning, left_surface: str, lm_context: str,
+def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
                      rescorer: LmRescorer, cancelled=lambda: False) -> list[DecodeResult] | None:
     """The LM part of ImeSession._refresh(rescore=True): one pick per kana run.
 
-    Left context and left_surface follow _refresh's loop exactly, so the
-    synchronous and the worker paths pick the same results. None if cancelled.
+    The left context follows _refresh's loop exactly, so the synchronous and
+    the worker paths pick the same results. None if cancelled.
     """
     picks: list[DecodeResult] = []
     text = ""
@@ -248,17 +248,13 @@ def conversion_picks(parts, lex: MozcLex, learning, left_surface: str, lm_contex
     for part in parts:
         if isinstance(part, str):  # literal
             text += part
-            left_surface = part
             left_id = left_id_after(part, lex)
             continue
         if cancelled():
             return None
-        dec, _ = decode_tokens(part, lex, learning=learning, left_surface=left_surface,
-                               left_id=left_id)
+        dec, _ = decode_tokens(part, lex, learning=learning, left_id=left_id)
         dec = rescorer.rescore(lm_context + text, dec, part, lex, left_id)
         picks.append(dec)
         segs = segments_from(dec.pieces, 0, lex)
         text += "".join(s.selected.surface for s in segs)
-        if segs:
-            left_surface = segs[-1].selected.surface
     return picks

@@ -90,7 +90,7 @@ def argument_parser() -> argparse.ArgumentParser:
         "--log-text", action="store_true", help="log composition/commit text to stderr (private input)"
     )
     parser.add_argument("--learning-file", type=Path, default=DEFAULT_LEARNING_PATH,
-                        help="local UTF-8 JSONL history (created when learning is on)")
+                        help="local UTF-8 JSONL history (written when learning is on)")
     parser.add_argument("--learning", choices=SETTINGS["learning"], default=DEFAULTS["learning"],
                         help="on (the default): learn from conversions; off: neither "
                              "record nor use the history")
@@ -134,20 +134,13 @@ def build_rescorer(args):
     return rescorer
 
 
-def load_session(args, with_lm: bool = True, *, lex=None,
-                 create_learning_file: bool = False) -> ImeSession:
+def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
     with_lm=False leaves sess.lm unset (the engine loads it on a worker).
     lex: an already loaded lexicon (the engine loads it itself).
-    create_learning_file: learning on makes a missing history file (the engine).
     """
-    store = None
-    if args.learning == "on":
-        if create_learning_file:
-            args.learning_file.parent.mkdir(parents=True, exist_ok=True)
-            args.learning_file.touch()  # REDESIGN §6.7: learning on makes the file
-        store = LearningStore(args.learning_file)
+    store = LearningStore(args.learning_file) if args.learning == "on" else None
     sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
                       prediction=getattr(args, "prediction", DEFAULT_PREDICTION))
     sess.load()

@@ -45,8 +45,8 @@ class Base(unittest.TestCase):
     def learn(self):
         self.learning.touch()
         store = LearningStore(self.learning)
-        store.confirm([(Candidate("ヌエ", "ぬえ", 0, 1, 1, "kana"), "")], small_lex())
-        store.confirm([(Candidate("肩", "かた", 0, 1851, 1851, word_cost=3000), "")],
+        store.confirm([Candidate("ヌエ", "ぬえ", 0, 1, 1, "kana")], small_lex())
+        store.confirm([Candidate("肩", "かた", 0, 1851, 1851, word_cost=3000)],
                       small_lex())
 
 

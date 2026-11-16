@@ -58,7 +58,6 @@ class _St:
     word_i: int
     prev: int  # index in states[word.start]
     reading: str
-    context: str = ""  # current bunsetsu spelling, used only by the learning layer
     side: str | None = None  # direction of the press open here (alternation.py)
 
 
@@ -104,17 +103,18 @@ def _prune(sts: list[_St], *, mode: Literal["rid", "reading"]) -> list[_St]:
 
 
 def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
-                  left_surface: str = "", left_id: int = BOS_ID) -> tuple[DecodeResult, dict]:
+                  left_id: int = BOS_ID) -> tuple[DecodeResult, dict]:
     """Decode 1-best using RID pruning for accuracy without rescoring.
 
-    left_id is the POS to the left of the run (BOS_ID: a sentence/literal boundary).
+    learning (a LearningView) adds the learned bunsetsu as arcs, at their own
+    cost. left_id is the POS to the left of the run (BOS_ID: a sentence/literal
+    boundary).
     """
     n = len(tokens)
     t0 = time.perf_counter()
     plan = Plan(tokens)
     states: list[list[_St]] = [[] for _ in range(n + 1)]
-    states[0] = [_St(0, BOUNDARY_RID if left_id == BOS_ID else left_id, -1, -1, "",
-                     left_surface)]
+    states[0] = [_St(0, BOUNDARY_RID if left_id == BOS_ID else left_id, -1, -1, "")]
     words: list[Word] = []
     n_spans = 0
 
@@ -133,16 +133,9 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
             for si, st in enumerate(states[i]):
                 if bound and enter is not None and enter != st.side:
                     continue
-                nsc = st.score + word_cost(lex, st.rid, w)
-                context = ""
-                if learning is not None:
-                    if w.learned:
-                        nsc -= learning.bonus(w.entry.reading, w.entry.surface, st.context)
-                    context = learning.next_context(st.context, w,
-                                                    boundary=st.rid == BOUNDARY_RID)
                 states[w.end].append(
-                    _St(nsc, w.rid, wi, si, st.reading + w.entry.reading, context,
-                        exit if bound else st.side)
+                    _St(st.score + word_cost(lex, st.rid, w), w.rid, wi, si,
+                        st.reading + w.entry.reading, exit if bound else st.side)
                 )
 
     if not states[n]:

@@ -1,5 +1,7 @@
-"""Learning (CONVERSION §7): a committed choice comes first next time, Shift+F6
-forgets it, and another process's change to the file is read again."""
+"""Learning (CONVERSION §7): the choice committed last comes first next time,
+whatever comes before it; Shift+F6 forgets it, and another process's change to
+the file is read again."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +15,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_SPACE, VK_F6 = 0x0D, 0x20, 0x75
+VK_RETURN, VK_SPACE, VK_LEFT, VK_F6 = 0x0D, 0x20, 0x25, 0x75
 
 
 class LearningTest(unittest.TestCase):
@@ -52,10 +54,46 @@ class LearningTest(unittest.TestCase):
         dispatch(s, {"op": "down", "vk": VK_RETURN})
         return surface
 
-    def test_a_committed_choice_comes_first_next_time(self):
+    def shown(self, s, text, reading):
+        """Convert text; the segment with this reading, focused."""
+        self.convert(s, text)
+        s.focus = next(i for i, g in enumerate(s.segments) if g.selected.reading == reading)
+        s._open_cands()
+        return s.segments[s.focus]
+
+    def choose(self, s, text, reading, surface):
+        """Convert text, pick this surface for the clause with this reading, commit;
+        what that clause showed before the pick."""
+        segment = self.shown(s, text, reading)
+        before = segment.selected.surface
+        index = 0
+        while segment.choices.ensure(index) and segment.choices.cache[index].surface != surface:
+            index += 1
+        s._select(index)
+        dispatch(s, {"op": "down", "vk": VK_RETURN})
+        return before
+
+    def test_the_last_choice_comes_first(self):
+        # One session, as on the machine: each commit is the next one's left neighbor.
         s = self.session()
-        chosen = self.choose_second(s, "こうせい")
-        self.assertEqual(self.convert(self.session(), "こうせい").selected.surface, chosen)
+        picks = ("公正", "厚生", "公正", "厚生", "構成", "公正")  # back and forth
+        self.choose(s, "こうせい", "こうせい", picks[0])
+        for last, surface in zip(picks, picks[1:]):
+            self.assertEqual(self.choose(s, "こうせい", "こうせい", surface), last)
+
+    def test_a_choice_far_down_comes_first_after_any_neighbor(self):
+        s = self.session()
+        self.choose(s, "きのうはきかん", "きかん", "旗艦")
+        self.assertEqual(self.choose(s, "きょうもきかん", "きかん", "帰還"), "旗艦")
+        self.assertEqual(self.shown(s, "きのうはきかん", "きかん").selected.surface, "帰還")
+
+    def test_a_learned_clause_resizes_to_its_own_rows(self):
+        s = self.session()
+        self.choose(s, "きょうは", "きょうは", "今日は")
+        self.convert(s, "きょうは")
+        dispatch(s, {"op": "down", "vk": VK_LEFT, "mods": ["shift"]})
+        self.assertEqual([g.selected.reading for g in s.segments], ["きょう", "は"])
+        self.assertEqual(s.composition, "今日は")
 
     def test_shift_f6_forgets_the_choice(self):
         s = self.session()
@@ -65,6 +103,11 @@ class LearningTest(unittest.TestCase):
         dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
         self.assertNotEqual(segment.selected.surface, chosen)
         self.assertFalse(LearningStore(self.path).has_pair("こうせい", chosen))
+        # Nothing learned is left to forget: no line, and the selection stays.
+        s._select(2)
+        shown, size = segment.selected.surface, self.path.stat().st_size
+        dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
+        self.assertEqual((segment.selected.surface, self.path.stat().st_size), (shown, size))
 
     def test_forgetting_in_the_window_reaches_a_running_session(self):
         s = self.session()

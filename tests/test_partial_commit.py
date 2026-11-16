@@ -77,7 +77,7 @@ class PartialCommitTest(unittest.TestCase):
         self.path.touch()
 
     def session(self, *, learning=False, table=None):
-        store = LearningStore(self.path, clock=lambda: 1_800_000_000.0) if learning else None
+        store = LearningStore(self.path) if learning else None
         return ImeSession(_table=table or load_table(), _lex=self.lex,
                           _learning=store)
 
@@ -143,12 +143,12 @@ class PartialCommitTest(unittest.TestCase):
         k.convert()
         k.ctrl_down()
         rows = self.rows()
-        self.assertEqual([(r["reading"], r["surface"], r["left"]) for r in rows],
-                         [("わたしは", "私は", "")])
+        self.assertEqual([(r["reading"], r["surface"]) for r in rows],
+                         [("わたしは", "私は")])
         k.ctrl_down()
         rows = self.rows()
-        self.assertEqual([(r["reading"], r["surface"], r["left"]) for r in rows[1:]],
-                         [("がっこうに", "学校に", "私は")])
+        self.assertEqual([(r["reading"], r["surface"]) for r in rows[1:]],
+                         [("がっこうに", "学校に")])
 
     def test_the_committed_head_keeps_the_press_direction(self):
         # い, then one press: w (turn 1) d (turn 2): left え・で or right が・な; る.

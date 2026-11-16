@@ -198,8 +198,7 @@ class Engine:
             log(f"{where(exc)} (errno {exc.errno})")
             fatal("cache-not-written")
 
-        loaded = server.load_session(settings, with_lm=False, lex=lex,
-                                     create_learning_file=True)
+        loaded = server.load_session(settings, with_lm=False, lex=lex)
         store = loaded._learning
         if store is not None:
             log(f"learning on: {store.lines} lines, "

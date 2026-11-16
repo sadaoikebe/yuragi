@@ -74,7 +74,7 @@ def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) 
 
 
 def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
-           *, kana: bool, learning=None, left_surface: str = "") -> Iterator[Candidate]:
+           *, kana: bool, learning=None) -> Iterator[Candidate]:
     """A* on the full word DAG with an exact reverse-DP potential.
 
     Dictionary mode keeps all paths within the score band, then deduplicates
@@ -109,14 +109,11 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
     best = suffix[0].get(initial, inf)
     if best == inf:
         return
-    # Whole-bunsetsu bonuses apply at the terminal. Subtract their upper bound
-    # from unfinished paths to keep A* admissible even with negative bonuses.
-    discount = learning.max_bonus if learning is not None and not kana else 0
-    limit = inf if discount or kana else best + COST_WINDOW
+    limit = inf if kana else best + COST_WINDOW
     serial = count()
     # priority, tie break, cost-so-far, position, RID, open-press side, first LID,
     # surface, reading
-    heap = [(best - discount, next(serial), 0, 0, initial[0], None, BOS_ID, "", "")]
+    heap = [(best, next(serial), 0, 0, initial[0], None, BOS_ID, "", "")]
     seen = set()
     prefixes = {}
     while heap:
@@ -126,8 +123,6 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
         if kana and cost != prefixes.get((pos, rid, side, reading), cost):
             continue
         if pos == n:
-            if not kana and limit == inf:
-                limit = bound + COST_WINDOW
             key = reading if kana else surface
             if key not in seen:
                 seen.add(key)
@@ -144,9 +139,7 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
             nc = cost + word_cost(lex, rid, w)
             nr = reading + e.reading
             ns = surface + e.surface
-            bonus = (learning.bonus(nr, ns, left_surface)
-                     if discount and w.end == n else discount)
-            bound = nc + suffix[w.end][(w.rid, out)] - bonus
+            bound = nc + suffix[w.end][(w.rid, out)]
             if bound > limit:
                 continue
             if kana:
@@ -159,23 +152,44 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
 
 
 def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
-               *, learning=None, left_surface: str = "",
-               now: datetime | None = None) -> Iterator[Candidate]:
-    """Dictionary rows, then kana rows, then date rows (with now)."""
+               *, learning=None, now: datetime | None = None) -> Iterator[Candidate]:
+    """Dictionary rows, then kana rows, then date rows (with now). learning (a
+    LearningView) adds the learned bunsetsu as paths, at their own cost."""
     dictionary = []
-    for c in _paths(tokens, lex, left, right, kana=False,
-                    learning=learning, left_surface=left_surface):
+    for c in _paths(tokens, lex, left, right, kana=False, learning=learning):
         dictionary.append(c)
         yield c
     # Even a reading absent from every dictionary prefix remains reachable.
     for c in _paths(tokens, lex, left, right, kana=True, learning=learning):
         hira = c.reading
-        kata = "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch for ch in hira)
+        kata = _katakana(hira)
         yield Candidate(hira, hira, c.score, c.lid, c.rid, "kana")
         yield Candidate(kata, hira, c.score, c.lid, c.rid, "kana")
     # Last, so every existing row keeps its place (and its number key).
     if now is not None:
         yield from _date_rows(dictionary, now)
+
+
+def _katakana(hiragana: str) -> str:
+    return "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch for ch in hiragana)
+
+
+def learned_row(row) -> Candidate:
+    """A learned confirmation (LearningView.head) as a row: a kana spelling of
+    its reading is a kana row, as when it was chosen."""
+    kind = "kana" if row.surface in (row.reading, _katakana(row.reading)) else "dictionary"
+    return Candidate(row.surface, row.reading, 0, row.lid, row.rid, kind, row.cost)
+
+
+def with_learned(rows: Iterator[Candidate], head: Candidate | None) -> Iterator[Candidate]:
+    """head (learned_row) first, then rows without its spelling."""
+    if head is None:
+        yield from rows
+        return
+    yield head
+    for c in rows:
+        if c.surface != head.surface:
+            yield c
 
 
 def _date_rows(dictionary: list[Candidate], now: datetime) -> Iterator[Candidate]:

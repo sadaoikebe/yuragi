@@ -180,9 +180,8 @@ class LmWorker:
             if job.kind == "convert":
                 request = job.request
                 job.picks = conversion_picks(
-                    request.parts, self.lex, request.learning, request.left_surface,
-                    request.lm_context, replace(self.template, last={}),
-                    cancelled=lambda: job.cancelled)
+                    request.parts, self.lex, request.learning, request.lm_context,
+                    replace(self.template, last={}), cancelled=lambda: job.cancelled)
             else:
                 prime = getattr(self.template.scorer, "prime", None)
                 if prime is not None:

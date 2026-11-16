@@ -18,7 +18,6 @@ from .learning import LearningStore
 class LearnedPair:
     reading: str
     surface: str
-    contexts: int  # distinct left contexts confirmed
     last: float  # timestamp of the latest confirmation
     user_word: bool  # created from a kana spelling absent from the dictionary
 
@@ -27,9 +26,8 @@ def pairs(path: Path) -> list[LearnedPair]:
     """Surviving (reading, surface) pairs, most recent first."""
     store = LearningStore(path)
     out = []
-    for (reading, surface), rows in store.pair_rows():
-        out.append(LearnedPair(reading, surface, len(rows), max(r.timestamp for r in rows),
-                               any(r.user_word for r in rows)))
+    for row in store.records():
+        out.append(LearnedPair(row.reading, row.surface, row.timestamp, row.user_word))
     return sorted(out, key=lambda p: -p.last)
 
 
@@ -39,10 +37,7 @@ def search(path: Path, query: str) -> list[LearnedPair]:
 
 def forget(path: Path, reading: str, surface: str) -> bool:
     """The same suppression as Shift+F6 on the candidate; False if nothing was learned."""
-    store = LearningStore(path)
-    if not store.has_pair(reading, surface):
-        return False
-    return store.suppress(reading, surface)
+    return LearningStore(path).suppress(reading, surface)
 
 
 def is_learned(path: Path, reading: str, surface: str) -> bool:
