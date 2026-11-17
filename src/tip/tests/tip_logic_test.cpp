@@ -174,6 +174,14 @@ static void ConnectingAndSpawning() {
     assert(!MaySpawn(sandboxed));
 }
 
+static void CandidatePlacement() {
+    assert(CandidateTop(400, 420, 176, 4, 1000) == 424);  // room below
+    assert(CandidateTop(800, 820, 176, 4, 1000) == 824);  // exactly fits
+    assert(CandidateTop(800, 820, 177, 4, 1000) == 619);  // one pixel past: above
+    assert(CandidateTop(-120, -100, 176, 4, 0) == -300);  // monitor above the primary
+    assert(CandidateTop(1180, 1210, 264, 6, 1440) == 910);  // scaled height and gap
+}
+
 static void Requests() {
     Mods m;
     m.shift = m.alt = true;
@@ -197,6 +205,7 @@ int main() {
     EatingKeys();
     OrderOfReplies();
     ConnectingAndSpawning();
+    CandidatePlacement();
     Requests();
     std::puts("tip_logic_test: all passed");
     return 0;

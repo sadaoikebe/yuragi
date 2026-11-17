@@ -708,8 +708,9 @@ static int Px(HWND h, int pixels_at_96) {
     return MulDiv(pixels_at_96, (int)GetDpiForWindow(h), 96);
 }
 
-// Below the caret, in screen coordinates; hidden when the text is not laid out.
-static void PlaceBelow(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND window) {
+// Below the caret, or above if it would cross the work area's bottom.
+// Screen coordinates; hidden when the text is not laid out.
+static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND window) {
     if (!window) return;
     ITfContextView* view = nullptr;
     bool positioned = false;
@@ -720,7 +721,13 @@ static void PlaceBelow(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND w
         // collapsed, so a visible caret may come back zero wide (Notepad does):
         // IsRectEmpty would call that empty.
         if (SUCCEEDED(view->GetTextExt(ec, caret, &rect, &clipped)) && rect.bottom > rect.top) {
-            SetWindowPos(window, HWND_TOPMOST, rect.left, rect.bottom + Px(window, 4), 0, 0,
+            RECT bounds{};
+            GetWindowRect(window, &bounds);
+            MONITORINFO monitor{sizeof(MONITORINFO)};
+            GetMonitorInfoW(MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST), &monitor);
+            int y = tip_logic::CandidateTop(rect.top, rect.bottom, bounds.bottom - bounds.top,
+                                            Px(window, 4), monitor.rcWork.bottom);
+            SetWindowPos(window, HWND_TOPMOST, rect.left, y, 0, 0,
                          SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             positioned = true;
         }
@@ -763,7 +770,7 @@ public:
             ITfRange* caret = nullptr;
             if (SUCCEEDED(state_->composition->GetRange(&caret))) {
                 caret->Collapse(ec, TF_ANCHOR_END);
-                PlaceBelow(ec, state_->ctx, caret, *candidate_);
+                PlaceCandidates(ec, state_->ctx, caret, *candidate_);
                 caret->Release();
             }
             return S_OK;
@@ -886,7 +893,7 @@ private:
             selection.range = caret; selection.style.ase = TF_AE_NONE;
             ctx->SetSelection(ec, 1, &selection);
             if (candidate_ && *candidate_ && !commit && reply.converted && !reply.candidates.empty())
-                PlaceBelow(ec, ctx, caret, *candidate_);
+                PlaceCandidates(ec, ctx, caret, *candidate_);
             caret->Release();
         }
         if (commit || text.empty()) End(ec, state_);
@@ -1391,7 +1398,7 @@ public:
         scope_ = password ? Scope::Password : Scope::Allowed;
     }
     void PlaceNotice(TfEditCookie ec, ITfContext* ctx, ITfRange* caret) {
-        if (notice_ != Notice::None) PlaceBelow(ec, ctx, caret, notice_hwnd_);
+        if (notice_ != Notice::None) PlaceCandidates(ec, ctx, caret, notice_hwnd_);
     }
     std::shared_ptr<CompositionState> State() { return state_; }
 

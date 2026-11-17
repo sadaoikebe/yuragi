@@ -309,6 +309,12 @@ inline bool MaySpawn(const SpawnFacts& f) {
     return f.tag_matches && !f.maintenance && f.medium_integrity;
 }
 
+// Keep the candidate list below the caret unless its bottom would leave the work area.
+inline int CandidateTop(int caret_top, int caret_bottom, int height, int gap, int work_bottom) {
+    int below = caret_bottom + gap;
+    return below + height > work_bottom ? caret_top - gap - height : below;
+}
+
 // Requests (the TIP -> broker messages, DESIGN「通信」).
 inline std::string Hello(const std::string& tag) {
     // passes: keys are let through here while the engine is not ready (DESIGN「使えない間の打鍵」).
