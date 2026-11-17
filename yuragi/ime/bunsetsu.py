@@ -20,8 +20,8 @@ from .dates import date_spellings
 COST_WINDOW = UNK_COST // 2
 PAGE_SIZE = 9
 # Symbols from the reading (Mozc's symbol rewriter simplified):
-# after this many rows, at most SYMBOL_HEAD symbols (with the first 3 rows,
-# the first page); the rest last.
+# at most SYMBOL_HEAD symbols after SYMBOL_OFFSET ordinary rows; the rest
+# last. The learned symbol comes first overall.
 SYMBOL_OFFSET = 3
 SYMBOL_HEAD = 6
 
@@ -182,9 +182,9 @@ def with_symbols(rows: Iterator[Candidate],
 
     The first row's reading (the interval's 1-best) looks them up
     (symbol_readings.load_symbols). At most SYMBOL_HEAD of them come after the
-    first SYMBOL_OFFSET rows, never first; the rest come last. The symbol last
-    chosen from the reading (learning, a LearningView) leads them; the others
-    keep the file's order. A later row with a symbol's spelling is dropped.
+    first SYMBOL_OFFSET rows; the rest come last. The symbol last chosen from
+    the reading (learning, a LearningView) comes first overall; the others keep
+    the file's order. A later row with a symbol's spelling is dropped.
     """
     first = None
     found: tuple[str, ...] = ()
@@ -204,7 +204,7 @@ def with_symbols(rows: Iterator[Candidate],
             found = symbols.get(c.reading, ()) if symbols else ()
             chosen = learning.symbol(c.reading) if learning is not None else None
             if chosen in found:
-                found = (chosen,) + tuple(s for s in found if s != chosen)
+                yield from symbol_rows((chosen,))
         if c.surface in inserted:
             continue
         shown.add(c.surface)

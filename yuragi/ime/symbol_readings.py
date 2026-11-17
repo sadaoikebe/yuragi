@@ -5,7 +5,7 @@ data/symbol.tsv (not in the dictionary manifest: it travels with the code).
 Like Mozc, the symbols are not dictionary words: bunsetsu.with_symbols()
 inserts them among a clause's rows when the clause's reading is one of
 theirs, in the file's row order (the one last chosen from that reading
-first: learning.py records it).
+comes first overall: learning.py records it).
 
 Not used: rows whose symbol is empty or contains a character
 outside the BMP (mostly hentaigana), rows described as 部首 (radicals: てへん

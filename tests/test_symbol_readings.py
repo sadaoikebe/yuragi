@@ -67,15 +67,16 @@ class SymbolConversionTest(unittest.TestCase):
         rows = self.assert_symbols_fourth("きごう", "記号", "゛")
         self.assertEqual(rows[SYMBOL_OFFSET + SYMBOL_HEAD].kind, "dictionary")
 
-    def test_a_chosen_symbol_leads_the_symbols_next_time(self):
+    def test_a_chosen_symbol_comes_first_next_time(self):
         s = self.session("かっこ", learning=True)
         rows = self.rows(s, 200)  # 「」 is beyond the first SYMBOL_HEAD: near the end
         s._select(next(i for i, c in enumerate(rows) if c.surface == "「」"))
         self.assertEqual(dispatch(s, {"op": "down", "vk": VK_RETURN})["commit"], "「」")
-        rows = self.rows(self.session("かっこ", learning=True))
-        self.assertTrue(all(c.kind != "symbol" for c in rows[:SYMBOL_OFFSET]))
-        self.assertEqual(rows[SYMBOL_OFFSET].surface, "「」")
-        self.assertEqual(rows[SYMBOL_OFFSET].kind, "symbol")
+        before = rows
+        rows = self.rows(self.session("かっこ", learning=True), 200)
+        self.assertEqual(rows[0].surface, "「」")
+        self.assertEqual(rows[0].kind, "symbol")
+        self.assertEqual(rows[1:], [c for c in before if c.surface != "「」"])
 
     def test_shift_f6_forgets_a_chosen_symbol(self):
         s = self.session("かっこ", learning=True)
@@ -84,13 +85,13 @@ class SymbolConversionTest(unittest.TestCase):
         dispatch(s, {"op": "down", "vk": VK_RETURN})
         s = self.session("かっこ", learning=True)
         rows = self.rows(s)
-        s._select(SYMBOL_OFFSET)
+        s._select(0)
         self.assertEqual(s.segments[s.focus].selected.surface, "「」")
         dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
-        self.assertEqual(s.segments[s.focus].selected, rows[0])  # the newly ranked first
+        self.assertEqual(s.segments[s.focus].selected, rows[1])  # the newly ranked first
         self.assertFalse(LearningStore(self.path).has_pair("かっこ", "「」"))
         rows = self.rows(self.session("かっこ", learning=True), 200)
-        self.assertNotEqual(rows[SYMBOL_OFFSET].surface, "「」")
+        self.assertEqual(rows[SYMBOL_OFFSET].surface, self.symbols["かっこ"][0])
         self.assertEqual(sum(c.surface == "「」" for c in rows), 1)  # still offered
 
 

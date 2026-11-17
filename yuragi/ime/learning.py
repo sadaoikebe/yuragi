@@ -11,7 +11,7 @@ be converted to, and predictions come from them (predict.py).
 
 A symbol chosen from its reading (kind "symbol", symbol_readings.py) is
 recorded too, marked "symbol": the one confirmed last leads that reading's
-symbols (LearningView.symbol), and it is nothing else (no head, arc or
+candidates (LearningView.symbol), and it is nothing else (no head, arc or
 prediction).
 
 This process appends its own rows and updates the index directly. A file that
@@ -47,7 +47,7 @@ class Confirmation:
     lid: int
     rid: int
     user_word: bool = False
-    symbol: bool = False  # a symbol from its reading: orders the symbols only
+    symbol: bool = False  # a symbol from its reading: promotes it in candidates only
 
 
 @dataclass(frozen=True)
