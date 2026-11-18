@@ -15,9 +15,10 @@ Latency work, all exact (no approximation of this score):
   run (incremental extension). The window is the last ctx_tokens..ctx_max-1
   tokens with a start that moves in fixed steps, so scores are deterministic.
   ctx_max == ctx_tokens gives a fixed window of the last ctx_tokens tokens.
-- Each candidate is scored by a plain model forward over its own tokens on
-  top of a fresh copy of the context cache (a forward appends the keys it
-  runs, so the shared context cache itself is never handed over). Only the
+- Candidates are scored together on a copy of the context cache (a forward
+  appends the keys it runs, so the shared context cache itself is never
+  handed over): their common token prefix runs once, then the cache is
+  repeated per candidate and the differing rests run as one batch. Only the
   model/tokenizer/cache public API is used: hand-driving the transformer
   blocks broke silently when transformers dropped GPT2Block's layer_past
   argument (4.57) and the LM scored candidates with no left context at all.
@@ -27,6 +28,7 @@ Latency work, all exact (no approximation of this score):
 from __future__ import annotations
 
 from collections import OrderedDict
+import copy
 from dataclasses import dataclass, field
 import time
 from typing import Protocol, Sequence
@@ -56,8 +58,6 @@ class CausalLmScorer:
                  incremental: bool = True, memo_size: int = 4096) -> None:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        from transformers.cache_utils import DynamicCache
-        self.DynamicCache = DynamicCache
 
         if threads:
             torch.set_num_threads(threads)
@@ -157,22 +157,40 @@ class CausalLmScorer:
         return [self.memo[(context, c)] for c in candidates]
 
     def _kv(self, context: str, cands: list[str]) -> list[float]:
+        """All candidates in two forwards on a copy of the context cache.
+
+        The longest common token prefix runs once (batch 1); the cache is then
+        repeated once per candidate and the rest of every candidate runs as one
+        right-padded batch. Padding sits after each row's real tokens, so the
+        causal mask keeps it out of every score.
+        """
         past, logp = self._context(context)
-        legacy = past.to_legacy_cache()
-        out = []
-        for c in cands:
-            ids = self.encode(c)
-            if not ids:
-                out.append(0.0)
-                continue
-            total = -float(logp[ids[0]])
-            if len(ids) > 1:
-                self.stats["cand_tokens_run"] += len(ids) - 1
-                _, lp = self._run([ids[:-1]],
-                                  self.DynamicCache.from_legacy_cache(legacy))
-                total -= sum(float(lp[0, k, ids[k + 1]])
-                             for k in range(len(ids) - 1))
-            out.append(total)
+        seqs = [self.encode(c) for c in cands]
+        # Prefix shared by all; a lone candidate runs all but its last token.
+        p = 0
+        while p < min(len(s) for s in seqs) and len({s[p] for s in seqs}) == 1:
+            p += 1
+        p = min(p, max(len(s) for s in seqs) - 1)
+        cache = copy.deepcopy(past)
+        head = seqs[0][:p]
+        nll_head = 0.0
+        if head:
+            _, lp = self._run([head], cache)
+            nll_head = -float(logp[head[0]]) - sum(
+                float(lp[0, k - 1, head[k]]) for k in range(1, p))
+            logp = lp[0, -1]
+            self.stats["cand_tokens_run"] += p
+        out = [nll_head - (float(logp[s[p]]) if len(s) > p else 0.0) for s in seqs]
+        rows = [i for i, s in enumerate(seqs) if len(s) > p + 1]
+        if rows:
+            width = max(len(seqs[i]) - p - 1 for i in rows)
+            ids = [seqs[i][p:-1] + [self.pad] * (width - len(seqs[i]) + p + 1) for i in rows]
+            cache.batch_repeat_interleave(len(rows))
+            _, lp = self._run(ids, cache)
+            for r, i in enumerate(rows):
+                tail = seqs[i][p + 1:]
+                self.stats["cand_tokens_run"] += len(tail)
+                out[i] -= sum(float(lp[r, j, t]) for j, t in enumerate(tail))
         return out
 
     def _naive(self, context: str, cands: list[str]) -> list[float]:
