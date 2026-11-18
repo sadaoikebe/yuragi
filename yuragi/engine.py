@@ -174,7 +174,7 @@ class Engine:
                 mozc_dict.CACHE = args.cache_dir / mozc_dict.CACHE.name
             # Imported after the directories are set: some modules read them at import.
             from yuragi.ime import config, server
-            from yuragi.ime.lm_async import LmWorker
+            import yuragi.ime.lm_async  # noqa: F401  (its worker starts after the warm-up)
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
             fatal("program-files-unreadable")
@@ -213,10 +213,7 @@ class Engine:
         if loaded.personal is not None and loaded.personal.skipped:
             log(f"personal lexicon: {loaded.personal.skipped} line(s) skipped")
         self.loaded = loaded
-        if settings.lm_rescore:
-            self.worker = LmWorker(loader=lambda: self.load_lm(server, settings),
-                                   lex=loaded._lex, on_disabled=self.lm_disabled)
-        else:
+        if not settings.lm_rescore:
             log("LM rescoring off (setting)")
 
     def read_settings(self, args, config, server) -> argparse.Namespace:
@@ -230,12 +227,18 @@ class Engine:
             setattr(settings, key, value)
         return settings
 
-    def load_lm(self, server, settings):
+    def load_lm(self, server, settings, warm):
         """On the LM worker: the model is read after ready; conversions use the
-        Viterbi 1-best until it is there."""
+        Viterbi 1-best until it is there. Before that, the warm-up conversion
+        is scored once (DESIGN「暖機」), so the user's first LM scoring is not
+        the slow one."""
+        from yuragi.ime.lm_rescore import conversion_picks
         start = time.perf_counter()
         rescorer = server.build_rescorer(settings)
-        log(f"LM loaded in {time.perf_counter() - start:.1f} s")
+        loaded = time.perf_counter()
+        conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, rescorer)
+        log(f"LM loaded in {loaded - start:.1f} s; "
+            f"warm-up scoring {1000 * (time.perf_counter() - loaded):.0f} ms")
         return rescorer
 
     def lm_disabled(self) -> None:
@@ -243,7 +246,11 @@ class Engine:
         self.channel.warning("lm")
 
     def warm_up(self) -> None:
-        """DESIGN「暖機」: one conversion before ready, so the user's first key is not the slow one."""
+        """DESIGN「暖機」: one conversion before ready, so the user's first key is not the slow one.
+
+        Then the LM worker starts and scores the same conversion before it is used."""
+        from yuragi.ime import server
+        from yuragi.ime.lm_async import LmWorker
         from yuragi.ime.server import process_request
         start = time.perf_counter()
         sess = self.new_session()
@@ -252,11 +259,16 @@ class Engine:
             process_request(sess, {"op": "down", "vk": vk, "t": t})
             process_request(sess, {"op": "up", "vk": vk, "t": t + 20})
             t += 300
+        warm = sess.conversion_request()
         process_request(sess, {"op": "down", "vk": 0x20, "t": t})
         reply = process_request(sess, {"op": "up", "vk": 0x20, "t": t + 20})
         process_request(sess, {"op": "reset"})
         log(f"warm-up conversion {1000 * (time.perf_counter() - start):.0f} ms "
             f"(converted: {reply['converted']})")
+        if self.settings.lm_rescore:
+            settings = self.settings
+            self.worker = LmWorker(loader=lambda: self.load_lm(server, settings, warm),
+                                   lex=self.loaded._lex, on_disabled=self.lm_disabled)
 
     # -- sessions ----------------------------------------------------------------
     def new_session(self):
