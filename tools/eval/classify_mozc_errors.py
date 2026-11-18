@@ -41,7 +41,7 @@ from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import (BOS_ID, CACHE, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
                                        UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex,
-                                       apply_user_lex)
+                                       apply_numerals, apply_user_lex)
 from yuragi.lattice.table import DATA, load_table, reverse_table
 from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end_cost,
                                            nbest_tokens, word_cost)
@@ -116,6 +116,7 @@ def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
         finally:
             mozc_dict.DICT_DIR = original
         lex = MozcLex(by_reading, prefixes, connect, size)
+    apply_numerals(lex)
     changed = set()
     if user is not None:
         # Only a changed/new effective entry is attributed to the overlay.

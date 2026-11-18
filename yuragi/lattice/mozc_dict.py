@@ -177,6 +177,44 @@ def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
     return n
 
 
+NUMERAL_MAX = 9999
+NUMERAL_COST = 1500  # two digits; near a single kana digit (753-2181), under the 4-5k of a 重/中 counter reading
+NUMERAL_COST_PER_DIGIT = 1000  # each digit more: long numbers are rarer than words like 戦後
+_ONES = ["", "いち", "に", "さん", "よん", "ご", "ろく", "なな", "はち", "きゅう"]
+_TENS = ["", "じゅう", "にじゅう", "さんじゅう", "よんじゅう", "ごじゅう", "ろくじゅう",
+         "ななじゅう", "はちじゅう", "きゅうじゅう"]
+_HUNDREDS = ["", "ひゃく", "にひゃく", "さんびゃく", "よんひゃく", "ごひゃく", "ろっぴゃく",
+             "ななひゃく", "はっぴゃく", "きゅうひゃく"]
+_THOUSANDS = ["", "せん", "にせん", "さんぜん", "よんせん", "ごせん", "ろくせん",
+              "ななせん", "はっせん", "きゅうせん"]
+
+
+def numeral_reading(n: int) -> str:
+    """The kana reading of 1..9999 (4 as よん, 7 as なな, 9 as きゅう; 1 is not dropped before 十)."""
+    t, rest = divmod(n, 1000)
+    h, rest = divmod(rest, 100)
+    d, o = divmod(rest, 10)
+    return _THOUSANDS[t] + _HUNDREDS[h] + _TENS[d] + _ONES[o]
+
+
+def apply_numerals(lex: MozcLex) -> None:
+    """Add 10..9999 as Arabic numerals read as a whole.
+
+    The Mozc dictionary has only the single digits as Arabic numerals, and a
+    digit cannot follow a digit (13820), so じゅうさん could never be 13:
+    the lattice took a counter reading (さんじゅう as 3+重, じゅうご as 中5)
+    instead. Like a numeral POS word, the new entries connect as 数 (NUMBER_ID).
+    """
+    for n in range(10, NUMERAL_MAX + 1):
+        reading = numeral_reading(n)
+        bucket = lex.by_reading.setdefault(reading, [])
+        bucket.append(Entry(str(n), reading, NUMBER_ID, NUMBER_ID,
+                            NUMERAL_COST + NUMERAL_COST_PER_DIGIT * (len(str(n)) - 2)))
+        bucket.sort(key=lambda e: e.cost)
+        for i in range(1, len(reading) + 1):
+            lex.prefixes.add(reading[:i])
+
+
 def read_cache(cache: Path) -> MozcLex | None:
     """The cached lexicon; None when there is none or it cannot be read.
 
@@ -232,6 +270,7 @@ def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:
             f"pos={pos_size} cache={CACHE}",
             file=sys.stderr,
         )
+    apply_numerals(lex)
     n = apply_user_lex(lex) if user_lexicon else 0
     if n:
         print(f"  user lexicon: {n} entries from {USER_LEX.name}", file=sys.stderr)
