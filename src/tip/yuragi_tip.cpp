@@ -57,8 +57,7 @@ static const GUID GUID_YuragiProfile = {
 static const GUID GUID_YuragiToggle = {
     0xa7c4e206, 0x0b3a, 0x4f11, {0x9e, 0x61, 0x0c, 0x1a, 0x0b, 0x7e, 0x0a, 0x01}};
 // {A7C4E207-0B3A-4F11-9E61-0C1A0B7E0A01}
-// Alt+` on the Japanese 101 layout (kbd101.dll) reaches TSF as Alt+VK_KANJI,
-// never as VK_OEM_3, so the default toggle also preserves that alias.
+// Alt+` down on kbd101.dll reaches TSF as VK_KANJI.
 static const GUID GUID_YuragiToggleKanji = {
     0xa7c4e207, 0x0b3a, 0x4f11, {0x9e, 0x61, 0x0c, 0x1a, 0x0b, 0x7e, 0x0a, 0x01}};
 
@@ -1179,27 +1178,20 @@ public:
     HRESULT STDMETHODCALLTYPE OnTestKeyUp(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         UINT vk = VkOf(w);
-        *e = Eligible() && ((toggle_down_ && vk == toggle_active_vk_ && toggle_eaten_) ||
+        *e = Eligible() && ((toggle_down_ && ToggleVk(vk) == toggle_active_vk_ && toggle_eaten_) ||
                             (!direct_ && down_eaten_[vk])) ? TRUE : FALSE;
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext*, WPARAM w, LPARAM l, BOOL* e) override {
+    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
         UINT vk = VkOf(w);
         ReleaseToggleLatch();
         if (!Eligible()) return S_OK;
         if (FocusChanged()) FocusMoved();
-        if (toggle_down_ && vk == toggle_active_vk_) {
-            *e = toggle_eaten_ ? TRUE : FALSE;
-            return S_OK;
-        }
-        // The toggle precedes the Alt/Ctrl/Win exclusion; a repeat never toggles again.
         if (ToggleKey(vk)) {
-            if (l & (LPARAM(1) << 30)) return S_OK;
             bool eaten = Toggle();
-            toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = vk;
-            down_eaten_[vk] = eaten;
+            toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = ToggleVk(vk);
             *e = eaten ? TRUE : FALSE;
             return S_OK;
         }
@@ -1224,13 +1216,12 @@ public:
         if (!e) return E_INVALIDARG;
         *e = FALSE;
         UINT vk = VkOf(w);
-        if (!Eligible()) return S_OK;
-        if (toggle_down_ && vk == toggle_active_vk_) {
-            *e = toggle_eaten_ ? TRUE : FALSE;
+        if (toggle_down_ && ToggleVk(vk) == toggle_active_vk_) {
+            *e = Eligible() && toggle_eaten_ ? TRUE : FALSE;
             toggle_down_ = toggle_eaten_ = false;
-            down_eaten_[vk] = false;
             return S_OK;
         }
+        if (!Eligible()) return S_OK;
         bool promised = down_eaten_[vk];
         down_eaten_[vk] = false;
         if (!promised || direct_ || !link_.Connected()) return S_OK;
@@ -1247,12 +1238,8 @@ public:
         if (!Eligible()) return S_OK;
         UINT vk = alias ? preserved_alias_.uVKey : settings_.toggle_vk;
         if (!ToggleKey(vk)) return S_OK;
-        // Shared with the OnKeyDown path, so one press never toggles twice.
-        if (!toggle_down_) {
-            bool eaten = Toggle();
-            toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = vk;
-            down_eaten_[vk] = eaten;
-        }
+        bool eaten = Toggle();
+        toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = ToggleVk(vk);
         *e = toggle_eaten_ ? TRUE : FALSE;
         return S_OK;
     }
@@ -1715,8 +1702,7 @@ private:
     bool Eligible() { return tm_ && !KeyboardDisabled(tm_) && !KeyboardClosed(tm_); }
     bool CanEat(UINT vk) {
         if (!Eligible() || scope_ != Scope::Allowed) return false;
-        if (ToggleKey(vk) || (toggle_down_ && vk == toggle_active_vk_))
-            return tip_logic::Toggles(CurrentMode());
+        if (ToggleKey(vk)) return tip_logic::Toggles(CurrentMode());
         if (direct_ || !link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return false;
         return tip_logic::WantKey(vk, HeldMods(), LocalState());
     }
@@ -1725,16 +1711,14 @@ private:
     static UINT ToggleAlias(UINT vk, unsigned mods) {
         return vk == VK_OEM_3 && (mods & 4) ? VK_KANJI : 0;
     }
-    bool ToggleKey(UINT vk) const {
-        bool ours = vk == settings_.toggle_vk ||
-                    (vk != 0 && vk == ToggleAlias(settings_.toggle_vk, settings_.toggle_mods));
-        return ours && ModMask(HeldMods()) == settings_.toggle_mods;
+    UINT ToggleVk(UINT vk) const {
+        return vk && vk == ToggleAlias(settings_.toggle_vk, settings_.toggle_mods) ? settings_.toggle_vk : vk;
     }
-    // DESIGN「タイマー」: a preserved key's release may never reach OnKeyUp; look at the key
-    // state on the next key instead of on a timer.
+    bool ToggleKey(UINT vk) const {
+        return ToggleVk(vk) == settings_.toggle_vk && ModMask(HeldMods()) == settings_.toggle_mods;
+    }
     void ReleaseToggleLatch() {
         if (toggle_down_ && !(GetKeyState(toggle_active_vk_) & 0x8000)) {
-            down_eaten_[toggle_active_vk_] = false;
             toggle_down_ = toggle_eaten_ = false;
         }
     }
