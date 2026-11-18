@@ -152,9 +152,11 @@ class CausalLmScorer:
                           else self._naive(context, todo))
             for c, s in zip(todo, scores):
                 self.memo[(context, c)] = s
-            while len(self.memo) > self.memo_size:
-                self.memo.popitem(last=False)
-        return [self.memo[(context, c)] for c in candidates]
+        # A cache hit in this batch may also be the oldest entry.
+        result = [self.memo[(context, c)] for c in candidates]
+        while len(self.memo) > self.memo_size:
+            self.memo.popitem(last=False)
+        return result
 
     def _kv(self, context: str, cands: list[str]) -> list[float]:
         """All candidates in two forwards on a copy of the context cache.
