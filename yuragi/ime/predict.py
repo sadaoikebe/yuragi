@@ -115,7 +115,7 @@ def dictionary_predictions(lex: MozcLex, index: ReadingIndex, tokens: list[dict]
             if reading == typed or len(reading) > len(typed) + MAX_EXTRA_KANA:
                 continue
             for e in lex.by_reading.get(reading, ()):
-                if content(e.lid):
+                if content(lex.base_pos(e.lid)):
                     found.append((e.cost, reading, e))
     out: list[Candidate] = []
     seen: set[str] = set()

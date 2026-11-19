@@ -40,6 +40,13 @@ class Fixture(unittest.TestCase):
 
 
 class TabGestureTest(Fixture):
+    def test_tab_predicts_operator_with_internal_pos(self):
+        s = self.session()
+        type_reading(s, "まいな")
+        reply = press(s, VK_TAB)
+        self.assertTrue(reply["predicting"])
+        self.assertIn("マイナス", reply["candidates"])
+
     def test_tab_opens_predictions_and_enter_commits(self):
         s = self.session()
         type_reading(s, "とうきょ")
