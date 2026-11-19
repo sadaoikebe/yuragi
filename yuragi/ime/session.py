@@ -365,11 +365,12 @@ class ImeSession:
 
         Returns the text committed by the rest of the deferred key event.
         """
-        assert self._await is not None
+        request = self._await
+        assert request is not None
         self._await = None
         self.converted = True
         if picks is not None:
-            self._refresh(picks=picks)  # rebuild the segments from the LM's picks
+            self._refresh(picks=picks, request=request)
         self._open_cands()
         rest, self._continuation = self._continuation, None
         text = (rest() if rest is not None else None) or ""
@@ -864,13 +865,16 @@ class ImeSession:
                         pins[press] = pins.get(press, SIDES) & dirs
         return pins
 
-    def _refresh(self, *, rescore: bool = False, picks=None) -> None:
+    def _refresh(self, *, rescore: bool = False, picks=None,
+                 request: ConversionRequest | None = None) -> None:
         """Rebuild segments from the 1-best; with rescore or picks, from the LM's picks."""
         self.segments = []
         self.predicting = False
         offset = 0
         self._sync_personal()
-        learning = self._learning.snapshot() if self._learning is not None else None
+        # Reuse the snapshot that the LM used to build its left context.
+        learning = (request.learning if request is not None else
+                    self._learning.snapshot() if self._learning is not None else None)
         parts = self._parts()
         if rescore and self.lm is not None and picks is None:
             self.lm.last = {}
@@ -906,13 +910,7 @@ class ImeSession:
                     dec, _ = decode_tokens(part, self._lex, learning=learning, left_id=left_id)
                 kana_runs += 1
                 self._word_starts.update(offset + p.start for p in dec.pieces if not p.literal)
-                for segment in segments_from(dec.pieces, offset, self._lex):
-                    # What was confirmed last for the reading comes first.
-                    row = (learning.head(segment.selected.reading)
-                           if learning is not None else None)
-                    if row is not None:
-                        segment.selected = learned_row(row)
-                    self.segments.append(segment)
+                self.segments.extend(segments_from(dec.pieces, offset, self._lex, learning=learning))
                 offset += len(part)
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)

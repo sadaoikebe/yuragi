@@ -63,7 +63,8 @@ class Segment:
     index: int = 0
 
 
-def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:
+def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None,
+                  *, learning=None) -> list[Segment]:
     # A kana run has no literals: ImeSession._refresh() makes their segments.
     groups: list[list[Piece]] = []
     for piece in pieces:
@@ -71,12 +72,18 @@ def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) 
         if not groups or piece.learned or content(lid):
             groups.append([])
         groups[-1].append(piece)
-    return [Segment(offset + g[0].start, offset + g[-1].end,
-                    Candidate("".join(p.surface for p in g), "".join(p.reading for p in g),
-                              0, g[0].lid, g[-1].rid, "dictionary",
-                              sum(p.cost for p in g) + (sum(
-                                  lex.transition(a.rid, b.lid) for a, b in zip(g, g[1:]))
-                                  if lex is not None else 0))) for g in groups]
+    segments = [Segment(offset + g[0].start, offset + g[-1].end,
+                        Candidate("".join(p.surface for p in g), "".join(p.reading for p in g),
+                                  0, g[0].lid, g[-1].rid, "dictionary",
+                                  sum(p.cost for p in g) + (sum(
+                                      lex.transition(a.rid, b.lid) for a, b in zip(g, g[1:]))
+                                      if lex is not None else 0))) for g in groups]
+    if learning is not None:
+        for segment in segments:
+            row = learning.head(segment.selected.reading)
+            if row is not None:
+                segment.selected = learned_row(row)
+    return segments
 
 
 def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,

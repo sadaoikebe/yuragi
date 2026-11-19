@@ -10,15 +10,21 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr
 from dataclasses import replace
 import io
+from pathlib import Path
+import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from yuragi.chord.fsm import Plain
 from yuragi.chord.keys import VK_TO_M
+from yuragi.ime.bunsetsu import Candidate
+from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job, LmWorker
 from yuragi.ime.zenz import ZenzConverter, conversion_picks
 from yuragi.ime.server import dispatch
-from yuragi.ime.session import ConversionRequest, ImeSession
+from yuragi.ime.session import ConversionRequest, ImeSession, Literal
+from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table, reverse_table
 from tests.real_dictionary import real_lex
 
@@ -171,6 +177,43 @@ class Clock:
 
     def __call__(self):
         return self.now
+
+
+class LearnedContextTest(unittest.TestCase):
+    def test_lm_context_matches_the_learned_display(self):
+        for deferred in (False, True):
+            with self.subTest(deferred=deferred), tempfile.TemporaryDirectory() as directory:
+                lex = MozcLex({
+                    "か": [Entry("科", "か", 1, 1, 100), Entry("課", "か", 1, 1, 300)],
+                    "い": [Entry("胃", "い", 1, 1, 100)],
+                }, {"か", "い"}, [0] * 4, 2)
+                learning = LearningStore(Path(directory) / "learning.jsonl")
+                learning.confirm([Candidate("課", "か", 0, 1, 1, word_cost=300)], lex)
+                session = ImeSession(_lex=lex, _learning=learning, _table={
+                    "keys": {"K": {"plain": "か"}, "I": {"plain": "い"}},
+                })
+                session.tokens = [Plain("K"), Literal("、"), Plain("I")]
+                model = Mock()
+                model.review.return_value = None
+                events = Typist().space().events
+                if deferred:
+                    worker = ManualWorker(lex, model, delay=lambda _: 1)
+                    pipe = ConnectionPipeline(session, worker, prefetch="off", clock=worker.clock)
+                    for event in events:
+                        reply = pipe.handle(event)
+                    self.assertTrue(reply["pending"])
+                    # A different session can update the file while inference is pending.
+                    writer = LearningStore(learning.path)
+                    writer.confirm([Candidate("科", "か", 0, 1, 1, word_cost=100)], lex)
+                    worker.complete_all()
+                    reply = pipe.handle(TERMINAL)
+                else:
+                    session.lm = ZenzConverter(model)
+                    for event in events:
+                        reply = dispatch(session, event)
+                self.assertTrue(reply["converted"])
+                self.assertEqual((reply["composition"], model.review.call_args_list[-1].args[:2]),
+                                 ("課、胃", ("課、", "い")))
 
 
 class DeadlineTest(unittest.TestCase):

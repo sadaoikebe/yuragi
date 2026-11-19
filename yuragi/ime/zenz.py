@@ -238,6 +238,6 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
         dec, _ = decode_tokens(part, lex, learning=learning, left_id=left_id)
         dec = converter.rescore(lm_context + text, dec, part, lex, left_id, learning)
         picks.append(dec)
-        segs = segments_from(dec.pieces, 0, lex)
+        segs = segments_from(dec.pieces, 0, lex, learning=learning)
         text += "".join(s.selected.surface for s in segs)
     return picks
