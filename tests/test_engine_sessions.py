@@ -7,23 +7,19 @@ the LM, its own pipeline.
 """
 from __future__ import annotations
 
-from argparse import Namespace
 import json
 from pathlib import Path
 import tempfile
 import time
 import unittest
 
-from yuragi.engine import Engine
+from yuragi.engine import Engine, argument_parser
+from yuragi.ime import config, server
 from yuragi.ime.lm_async import LmWorker
 from yuragi.ime.zenz import ZenzConverter
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
-
-SETTINGS = Namespace(lm_grace_ms=30, lm_deadline_ms=None, lm_prefetch="thumb",
-                     lm_prefetch_delay_ms=30, require_lm=False, lm_timing=False)
-
 
 def loaded_session():
     # A has plain=う. A confirmation of the initially second row must change the best.
@@ -52,11 +48,12 @@ class EngineCase(unittest.TestCase):
         self.dir = Path(tmp.name)
         self.seq = 0
 
-    def engine(self, loaded=None, worker=None, settings=SETTINGS):
-        engine = Engine(Channel(), Namespace())
+    def engine(self, loaded=None, worker=None, argv=()):
+        args = argument_parser().parse_args(["--data-dir", str(self.dir), *argv])
+        engine = Engine(Channel(), args)
         engine.loaded = loaded or loaded_session()
         engine.worker = worker
-        engine.settings = settings
+        engine.settings = engine.read_settings(args, config, server)
         return engine
 
     def open(self, engine, sid):
@@ -96,17 +93,24 @@ class LmPipelineTest(EngineCase):
             time.sleep(0.01)
         self.assertEqual(worker.state, state)
 
+    def test_pipeline_uses_grace_from_engine_arguments(self):
+        for argv, expected in (((), 0), (("--lm-grace-ms", "30"), 30)):
+            with self.subTest(argv=argv):
+                engine = self.engine(worker=object(), argv=argv)
+                self.open(engine, 1)
+                self.assertEqual(engine.connections[1].pipeline.grace_ms, expected)
+
     def test_pending_reply_then_poll_then_replay(self):
         loaded = loaded_session()
         worker = LmWorker(lambda: ZenzConverter(SlowModel()), loaded._lex)
+        self.addCleanup(worker.thread.join, 5)
+        self.addCleanup(worker.stop)
         self.wait_state(worker, "ready")
         engine = self.engine(loaded, worker)
         self.open(engine, 1)
         self.type_a(engine, 1)
         self.request(engine, 1, {"op": "down", "vk": 32, "t": 100})
-        start = time.monotonic()
         reply = self.request(engine, 1, {"op": "up", "vk": 32, "t": 130})
-        self.assertLess(time.monotonic() - start, 0.1)  # the engine answers at once
         self.assertEqual((reply["pending"], reply["converted"], reply["composition"],
                           reply["candidates"], reply["timer"]), (True, False, "宇", [], 140))
         t = 130

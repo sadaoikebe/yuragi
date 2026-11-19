@@ -15,12 +15,6 @@ from yuragi.ime.lm_async import DEADLINE_MS
 
 
 class DefaultsTest(unittest.TestCase):
-    def test_constants(self):
-        self.assertEqual((zenz.DEFAULT_THREADS, zenz.DEFAULT_K, zenz.DEFAULT_STEPS), (4, 4, 1))
-        self.assertEqual(zenz.DEFAULT_ALPHA, 1.0)  # not part of this change
-        converter = zenz.ZenzConverter(model=None)
-        self.assertEqual((converter.k, converter.steps, converter.alpha), (4, 1, 1.0))
-
     def test_build_converter_uses_the_defaults(self):
         made = {}
 

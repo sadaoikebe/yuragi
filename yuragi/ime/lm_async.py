@@ -48,6 +48,7 @@ class Job:
     wanted_at: float | None = None
     started_at: float | None = None
     completed_at: float | None = None
+    completion_lock: threading.Lock = field(default_factory=threading.Lock)
     done: threading.Event = field(default_factory=threading.Event)
     picks: list | None = None
     error: bool = False
@@ -209,7 +210,8 @@ class LmWorker:
             job.error = True
             print(f"LM job failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         with self._cond:
-            job.completed_at = self.clock()
+            with job.completion_lock:
+                job.completed_at = self.clock()
             self._running = None
             job.done.set()
         if self.timing:
@@ -317,24 +319,30 @@ class ConnectionPipeline:
         job = self.job
         if wait and self.grace_ms > 0:
             job.done.wait(self.grace_ms / 1000)
-        now = self.clock()
-        completed = job.completed_at
-        if completed is not None and completed <= job.deadline:
+        # Decide expiry atomically with the worker's publication. The lock
+        # covers the timestamp, while the inference runs outside it.
+        with job.completion_lock:
+            now = self.clock()
+            completed = job.completed_at
+            on_time = completed is not None and completed <= job.deadline
+            if not on_time:
+                if now < job.deadline:
+                    return PENDING
+                job.cancelled = True
+        if on_time:
             self._trace_resolution(job, now, "error" if job.error else "lm")
             if job.error:
                 if self.require_lm:
                     raise RuntimeError("LM conversion failed")
                 return None
             return job.picks
-        if now >= job.deadline:
-            self.worker.cancel_owner(self)
-            self._trace_resolution(job, now, "deadline")
-            if self.require_lm:
-                raise TimeoutError("LM conversion timed out")
-            print(f"LM conversion not done after {self.deadline_ms:.0f} ms (fault); "
-                  "dictionary 1-best used", file=sys.stderr, flush=True)
-            return None
-        return PENDING
+        self.worker.cancel_owner(self)
+        self._trace_resolution(job, now, "deadline")
+        if self.require_lm:
+            raise TimeoutError("LM conversion timed out")
+        print(f"LM conversion not done after {self.deadline_ms:.0f} ms (fault); "
+              "dictionary 1-best used", file=sys.stderr, flush=True)
+        return None
 
     def _trace_resolution(self, job: Job, now: float, outcome: str) -> None:
         if self.timing:

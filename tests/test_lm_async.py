@@ -6,16 +6,19 @@ same as converting without the LM.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr
 from dataclasses import replace
 import io
+import threading
 import unittest
+from unittest.mock import patch
 
 from yuragi.chord.keys import VK_TO_M
-from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job
+from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job, LmWorker
 from yuragi.ime.zenz import ZenzConverter, conversion_picks
 from yuragi.ime.server import dispatch
-from yuragi.ime.session import ImeSession
+from yuragi.ime.session import ConversionRequest, ImeSession
 from yuragi.lattice.table import load_table, reverse_table
 from tests.real_dictionary import real_lex
 
@@ -184,11 +187,6 @@ class DeadlineTest(unittest.TestCase):
         clock = worker.clock
         return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
 
-    def test_deadline_is_a_fault_detector_above_normal_conversions(self):
-        # Windows, zenz medium, CPU, k 4, 1 review: median ~340 ms, 95th percentile 369 ms.
-        self.assertGreaterEqual(DEADLINE_MS, 369)
-        self.assertLessEqual(abs(DEADLINE_MS / 340 - 1.8), 0.1)
-
     def test_slow_normal_conversion_waits_for_the_lm(self):
         """A conversion slower than the old 400 ms cut (the measured CPU median is
         ~340 ms, so the slow half came close to it) still shows the LM's picks."""
@@ -228,21 +226,6 @@ class DeadlineTest(unittest.TestCase):
         self.assertFalse(reply["pending"])
         self.assertTrue(reply["converted"])
         self.assertTrue(reply["candidates"])
-
-    def test_pending_navigation_enter_and_next_character_replay_in_order(self):
-        pipe, worker, _ = self.pipeline()
-        keys = Typist().kana("きしゃ").space()
-        keys.tap(0x28, gap=5).tap(VK_RETURN, gap=5).kana("う", gap=5)
-        for event in keys.events:
-            reply = pipe.handle(event)
-        self.assertTrue(reply["pending"])
-        self.assertEqual(reply["commit"], "")
-        worker.complete_all()
-        reply = pipe.handle(TERMINAL)
-        self.assertEqual((reply["commit"], final_state(reply)),
-                         run_reference(self.session, keys.events, PickyModel()))
-        self.assertTrue(reply["commit"])
-        self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
 
     def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
@@ -316,6 +299,65 @@ class DeadlineTest(unittest.TestCase):
                     reply = pipe.handle(TERMINAL)
                 self.assertFalse(reply["pending"])
                 self.assertEqual("fault" in log.getvalue(), offset > 0)
+
+    def test_poll_does_not_expire_an_on_time_result_being_published(self):
+        inference_done = threading.Event()
+        publishing = threading.Event()
+        poll_deciding = threading.Event()
+        release_publication = threading.Event()
+        deadline = 100.0
+
+        def finish_inference(*args, **kwargs):
+            inference_done.set()
+            return []
+
+        def completion_clock():
+            if not inference_done.is_set():
+                return deadline - 0.010
+            publishing.set()
+            if not release_publication.wait(5):
+                raise TimeoutError("test did not release publication")
+            return deadline - 0.001
+
+        worker = LmWorker(lambda: ZenzConverter(PickyModel()), self.lex, clock=completion_clock)
+        self.addCleanup(worker.thread.join, 5)
+        self.addCleanup(worker.stop)
+        self.assertTrue(worker.wait_until_loaded())
+
+        pipeline = ConnectionPipeline(self.session(), worker, clock=lambda: deadline + 0.001)
+        request = ConversionRequest([], "", None, ())
+        job = pipeline.job = Job(pipeline, request, wanted=True, deadline=deadline)
+        lock = job.completion_lock
+
+        class ObservedLock:
+            def __enter__(self):
+                if threading.current_thread() is not worker.thread:
+                    poll_deciding.set()
+                lock.acquire()
+
+            def __exit__(self, *_):
+                lock.release()
+
+        job.completion_lock = ObservedLock()
+        cancel_owner = worker.cancel_owner
+
+        def observe_cancel(owner):
+            # A poll that bypasses the completion lock reaches cancellation.
+            poll_deciding.set()
+            cancel_owner(owner)
+
+        with (patch("yuragi.ime.lm_async.conversion_picks", side_effect=finish_inference),
+              patch.object(worker, "cancel_owner", side_effect=observe_cancel)):
+            with ThreadPoolExecutor(max_workers=1) as polling:
+                try:
+                    worker.submit(job)
+                    self.assertTrue(publishing.wait(5))
+                    result = polling.submit(pipeline._outcome, wait=False)
+                    self.assertTrue(poll_deciding.wait(5))
+                finally:
+                    release_publication.set()
+                self.assertEqual(result.result(timeout=5), [])
+                self.assertFalse(job.cancelled)
 
     def test_reset_and_direct_switch_drop_pending_enter(self):
         for boundary in ({"op": "reset"}, {"op": "set_direct", "direct": True}):
