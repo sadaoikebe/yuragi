@@ -16,7 +16,7 @@ import unittest
 
 from yuragi.engine import Engine
 from yuragi.ime.lm_async import LmWorker
-from yuragi.ime.lm_rescore import LmRescorer
+from yuragi.ime.zenz import ZenzConverter
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
@@ -73,15 +73,18 @@ class EngineCase(unittest.TestCase):
         return self.request(engine, sid, {"op": "up", "vk": 65, "t": t + 30})
 
 
-class SlowScorer:
-    """Prefers 卯 over the Viterbi 宇; each call sleeps (a slow model)."""
+class SlowModel:
+    """Writes 卯 over the Viterbi 宇; each review sleeps (a slow model)."""
 
-    def __init__(self, sleep=0.2):
+    def __init__(self, sleep=0.1):
         self.sleep = sleep
 
-    def nll(self, context, candidates):
+    def reading_nll(self, readings):
+        return [0.0 for _ in readings]
+
+    def review(self, context, reading, draft, accepted):
         time.sleep(self.sleep)
-        return [0.0 if c.startswith("卯") else 10.0 for c in candidates]
+        return None if draft.startswith("卯") else ("卯".encode(), False)
 
 
 class LmPipelineTest(EngineCase):
@@ -95,7 +98,7 @@ class LmPipelineTest(EngineCase):
 
     def test_pending_reply_then_poll_then_replay(self):
         loaded = loaded_session()
-        worker = LmWorker(lambda: LmRescorer(SlowScorer()), loaded._lex)
+        worker = LmWorker(lambda: ZenzConverter(SlowModel()), loaded._lex)
         self.wait_state(worker, "ready")
         engine = self.engine(loaded, worker)
         self.open(engine, 1)

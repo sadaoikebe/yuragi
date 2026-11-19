@@ -26,7 +26,7 @@ from yuragi.lattice.token_viterbi import decode_tokens
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Candidate, CandidateStream, Segment,
                        candidates, learned_row, segments_from, with_learned, with_symbols)
 from .learning import LearningStore
-from .lm_rescore import CONTEXT_CHARS, LmRescorer, conversion_picks
+from .zenz import CONTEXT_CHARS, ZenzConverter, conversion_picks
 from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
 from .symbols import symbol_spellings
@@ -163,8 +163,8 @@ class ImeSession:
     candidate_kinds: list[str] = field(default_factory=list)
     has_next_page: bool = False
     _learning: LearningStore | None = None
-    # LM rescoring, off unless a rescorer is given (server --lm-rescore).
-    lm: LmRescorer | None = None
+    # The LM (zenz), off unless a converter is given (server --lm-rescore).
+    lm: ZenzConverter | None = None
     # Resident pipeline only: a ThumbTap leaves the LM pick to a worker.
     lm_deferred: bool = False
     _await: ConversionRequest | None = None  # conversion waiting for the worker

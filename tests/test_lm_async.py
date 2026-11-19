@@ -1,4 +1,4 @@
-"""Resident LM pipeline: the IME never hangs on a slow LM. Fake scorers, no torch.
+"""Resident LM pipeline: the IME never hangs on a slow LM. A fake model, no torch.
 
 The deadline (400 ms) falls back to the dictionary-only conversion, the same
 as converting without the LM.
@@ -10,7 +10,7 @@ import unittest
 
 from yuragi.chord.keys import VK_TO_M
 from yuragi.ime.lm_async import ConnectionPipeline, Job
-from yuragi.ime.lm_rescore import LmRescorer, conversion_picks
+from yuragi.ime.zenz import ZenzConverter, conversion_picks
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table, reverse_table
@@ -22,24 +22,25 @@ TERMINAL = {"op": "up", "vk": 0x7B}
 VK_SPACE, VK_RETURN = 0x20, 0x0D
 
 
-class PickyScorer:
-    """Deterministic, context-dependent NLL that often overrides the 1-best."""
+class PickyModel:
+    """Deterministic, context-dependent zenz stand-in that often overrides the 1-best."""
 
-    def __init__(self):
-        self.calls: list[tuple[str, list[str]]] = []
+    def reading_nll(self, readings):
+        return [sum(ord(ch) % 7 for ch in r) * 0.7 for r in readings]
 
-    def nll(self, context, candidates):
-        self.calls.append((context, list(candidates)))
-        return [sum(ord(ch) % 7 for ch in c) * 0.7 + (len(context) % 3) * len(c)
-                for c in candidates]
+    def review(self, context, reading, draft, accepted):
+        # Wants the run to start in kana, except under some contexts.
+        if len(context) % 3 == 2 or draft.startswith(reading[0]):
+            return None
+        return reading[0].encode(), False
 
 
 class ManualWorker:
     """LmWorker's interface; the test decides when each wanted job completes."""
 
-    def __init__(self, lex, scorer, delay=lambda index: 0, eager_prefetch=False):
+    def __init__(self, lex, model, delay=lambda index: 0, eager_prefetch=False):
         self.lex = lex
-        self.template = LmRescorer(scorer)
+        self.template = ZenzConverter(model)
         self.delay = delay  # conversion index -> completes before the Nth later request
         self.eager_prefetch = eager_prefetch
         self.ready = True
@@ -55,7 +56,7 @@ class ManualWorker:
         self.jobs.append(job)
         if job.wanted:
             self._schedule(job)
-        elif job.kind == "prime" or self.eager_prefetch:
+        elif self.eager_prefetch:
             self.complete(job)
 
     def promote(self, job, deadline):
@@ -79,7 +80,7 @@ class ManualWorker:
     def complete(self, job):
         if job.done.is_set():
             return
-        if job.kind == "convert" and not job.cancelled:
+        if not job.cancelled:
             r = job.request
             job.picks = conversion_picks(r.parts, self.lex, r.learning, r.lm_context,
                                          replace(self.template, last={}),
@@ -107,9 +108,9 @@ def final_state(reply: dict) -> dict:
     return {k: v for k, v in reply.items() if k not in ("pending", "timer", "commit")}
 
 
-def run_reference(new_session, events, scorer):
+def run_reference(new_session, events, model):
     sess = new_session()
-    sess.lm = LmRescorer(scorer) if scorer is not None else None
+    sess.lm = ZenzConverter(model) if model is not None else None
     commits = ""
     for event in events + [TERMINAL]:
         reply = dispatch(sess, dict(event))
@@ -174,7 +175,7 @@ class DeadlineTest(unittest.TestCase):
 
     def pipeline(self, **kwargs):
         sess = self.session()
-        worker = ManualWorker(self.lex, PickyScorer(), delay=lambda i: 10 ** 6)
+        worker = ManualWorker(self.lex, PickyModel(), delay=lambda i: 10 ** 6)
         clock = Clock()
         return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
 
@@ -204,7 +205,7 @@ class DeadlineTest(unittest.TestCase):
         expected = run_reference(self.session, head + tail.events, None)
         self.assertEqual((commits, final_state(reply)), expected)
         self.assertNotEqual(expected, run_reference(self.session, head + tail.events,
-                                                    PickyScorer()))
+                                                    PickyModel()))
 
 if __name__ == "__main__":
     unittest.main()

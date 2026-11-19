@@ -99,18 +99,22 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prediction", choices=PREDICTION_MODES, default=DEFAULT_PREDICTION,
                         help="Tab on unconverted input offers continuations from history "
                              "and the dictionary (tab, the default) or does nothing (off)")
-    lm = parser.add_argument_group("LM rescoring (on by default in the engine)")
+    lm = parser.add_argument_group("LM: zenz-v2.5 (on by default in the engine)")
     lm.add_argument("--lm-rescore", action="store_true", default=None,
-                    help="rescore the k-best with a causal LM on Space (needs torch+transformers)")
+                    help="convert with zenz on Space (needs torch+transformers)")
     lm.add_argument("--no-lm-rescore", action="store_false", dest="lm_rescore",
-                    help="disable LM rescoring (the engine's default is on)")
+                    help="convert without the LM (the engine's default is with it)")
     lm.add_argument("--lm-model", default=None,
-                    help="HF model id or local directory (default rinna/japanese-gpt2-small)")
-    lm.add_argument("--lm-alpha", type=float, default=None, help="LM weight (default 1.0)")
-    lm.add_argument("--lm-k", type=int, default=None, help="candidates per kana run (default 8)")
+                    help="HF model id or local directory (default Miwa-Keita/zenz-v2.5-medium)")
+    lm.add_argument("--lm-alpha", type=float, default=None,
+                    help="weight of zenz's reading NLL (default 1)")
+    lm.add_argument("--lm-k", type=int, default=None,
+                    help="k-best surfaces whose readings are compared (default 8)")
+    lm.add_argument("--lm-steps", type=int, default=None,
+                    help="zenz reviews per kana run (default 2)")
     lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads")
     lm.add_argument("--lm-timing", action="store_true",
-                    help="log rescoring time per conversion to stderr (no text)")
+                    help="log the LM's time per conversion to stderr (no text)")
     lm.add_argument("--lm-prefetch", choices=("thumb", "off"), default="thumb",
                     help="engine: start the LM early on thumb press (default), or never")
     lm.add_argument("--lm-deadline-ms", type=float, default=400,
@@ -122,16 +126,17 @@ def argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_rescorer(args):
-    """Import, construct and warm up the LM rescorer (raises without torch etc.)."""
-    from yuragi.ime.lm_rescore import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL,
-                                        CausalLmScorer, LmRescorer)
-    rescorer = LmRescorer(
-        CausalLmScorer(args.lm_model or DEFAULT_MODEL, threads=args.lm_threads),
+def build_converter(args):
+    """Import, construct and warm up the zenz converter (raises without torch etc.)."""
+    from yuragi.ime.zenz import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL, DEFAULT_STEPS,
+                                 ZenzConverter, ZenzModel)
+    converter = ZenzConverter(
+        ZenzModel(args.lm_model or DEFAULT_MODEL, threads=args.lm_threads),
         alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
-        k=DEFAULT_K if args.lm_k is None else args.lm_k)
-    rescorer.scorer.nll("", ["あ", "い"])  # warm up before "ready"
-    return rescorer
+        k=DEFAULT_K if args.lm_k is None else args.lm_k,
+        steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps)
+    converter.warm_up()  # before "ready"
+    return converter
 
 
 def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
@@ -151,24 +156,24 @@ def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
                                 if sess.personal is not None else None)
     if with_lm and args.lm_rescore:
         # The LM is optional equipment: a machine without torch/transformers
-        # (e.g. a fresh install) still gets a working IME, without rescoring.
+        # (e.g. a fresh install) still gets a working IME, without the LM.
         try:
-            sess.lm = build_rescorer(args)
+            sess.lm = build_converter(args)
         except Exception as exc:
-            print(f"LM rescoring unavailable ({type(exc).__name__}); continuing without it",
+            print(f"LM unavailable ({type(exc).__name__}); continuing without it",
                   file=sys.stderr, flush=True)
             sess.lm = None
     return sess
 
 
 def process_request(sess: ImeSession, msg: dict, *, log_text=False, lm_timing=False) -> dict:
-    rescorer = sess.lm
-    if rescorer is not None:
-        rescorer.last = {}
+    converter = sess.lm
+    if converter is not None:
+        converter.last = {}
     reply = dispatch(sess, msg)
-    if lm_timing and rescorer is not None and rescorer.last:
+    if lm_timing and converter is not None and converter.last:
         print(json.dumps({"lm": {k: round(v, 3) if isinstance(v, float) else v
-                                 for k, v in rescorer.last.items()}}),
+                                 for k, v in converter.last.items()}}),
               file=sys.stderr, flush=True)
     if log_text:
         print(json.dumps({"composition": reply["composition"], "commit": reply["commit"]},

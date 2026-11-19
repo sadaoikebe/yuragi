@@ -1,6 +1,6 @@
-"""The engine only: LM rescoring off the key path.
+"""The engine only: the LM (zenz) off the key path.
 
-LmWorker owns the scorer on one daemon thread. ConnectionPipeline sits between a
+LmWorker owns the converter on one daemon thread. ConnectionPipeline sits between a
 connection and its ImeSession: a ThumbTap with LM work leaves the session
 awaiting; the request waits at most GRACE_MS for the worker, otherwise replies
 ``pending`` with the display unchanged. Keys that arrive while pending are
@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 
-from .lm_rescore import conversion_picks
+from .zenz import conversion_picks
 from .server import apply_op, snapshot
 from .session import ConversionRequest, ImeSession
 
@@ -29,10 +29,8 @@ PREFETCH_DELAY_MS = 30
 
 @dataclass(eq=False)
 class Job:
-    kind: str  # "convert" (prefetch too) | "prime"
     owner: object  # the connection's pipeline
-    request: ConversionRequest | None
-    context: str = ""  # prime only
+    request: ConversionRequest
     wanted: bool = False  # a conversion is waiting for this result
     not_before: float = 0.0  # time.monotonic(); delays a prefetch
     deadline: float = 0.0  # when wanted: give up and use the Viterbi 1-best
@@ -43,7 +41,7 @@ class Job:
 
 
 class LmWorker:
-    """One daemon thread; the only user of the scorer."""
+    """One daemon thread; the only user of the model."""
 
     def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None):
         """on_disabled(): told once when the LM could not be loaded. Called on
@@ -56,7 +54,7 @@ class LmWorker:
         self.template = None
         self._cond = threading.Condition()
         self._wanted: deque[Job] = deque()  # first come, first served
-        self._slots: dict[tuple[int, str], Job] = {}  # (owner, kind) -> queued prefetch/prime
+        self._slots: dict[int, Job] = {}  # id(owner) -> queued prefetch
         self._running: Job | None = None
         self._stopped = False
         self.thread = threading.Thread(target=self._run, name="lm-worker", daemon=True)
@@ -72,13 +70,13 @@ class LmWorker:
             if job.wanted:
                 self._wanted.append(job)
             else:
-                slot = (id(job.owner), job.kind)
+                slot = id(job.owner)
                 old = self._slots.pop(slot, None)
                 if old is not None:
                     self._drop(old)
                 running = self._running
                 if (running is not None and running.owner is job.owner
-                        and running.kind == job.kind and not running.wanted):
+                        and not running.wanted):
                     running.cancelled = True  # stops at the next kana-run boundary
                 self._slots[slot] = job
             self._cond.notify()
@@ -88,7 +86,7 @@ class LmWorker:
         with self._cond:
             job.wanted = True
             job.deadline = deadline
-            slot = (id(job.owner), job.kind)
+            slot = id(job.owner)
             if self._slots.get(slot) is job:
                 del self._slots[slot]
                 self._wanted.appendleft(job)
@@ -115,8 +113,8 @@ class LmWorker:
         The worker is a daemon thread doing native (torch) work; if the
         interpreter tears down around it, the process can abort instead of
         exiting. stop() + join() (engine.main) makes exit deterministic:
-        queued jobs are dropped, a running conversion stops at its next
-        kana-run boundary, and a prime is a single bounded scoring pass.
+        queued jobs are dropped and a running conversion stops at its next
+        kana-run boundary.
         """
         with self._cond:
             self._stopped = True
@@ -134,9 +132,9 @@ class LmWorker:
     def _run(self) -> None:
         try:
             template = self.loader()
-            template.scorer.nll("", ["あ", "い"])  # warm up before "ready"
+            template.warm_up()  # before "ready"
         except Exception as exc:
-            print(f"LM rescoring unavailable ({type(exc).__name__}); continuing without it",
+            print(f"LM unavailable ({type(exc).__name__}); continuing without it",
                   file=sys.stderr, flush=True)
             with self._cond:
                 self.state = "disabled"
@@ -177,15 +175,10 @@ class LmWorker:
 
     def _execute(self, job: Job) -> None:
         try:
-            if job.kind == "convert":
-                request = job.request
-                job.picks = conversion_picks(
-                    request.parts, self.lex, request.learning, request.lm_context,
-                    replace(self.template, last={}), cancelled=lambda: job.cancelled)
-            else:
-                prime = getattr(self.template.scorer, "prime", None)
-                if prime is not None:
-                    prime(job.context)
+            request = job.request
+            job.picks = conversion_picks(
+                request.parts, self.lex, request.learning, request.lm_context,
+                replace(self.template, last={}), cancelled=lambda: job.cancelled)
         except Exception as exc:
             # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True
@@ -218,7 +211,6 @@ class ConnectionPipeline:
         self.job: Job | None = None  # the awaited conversion's job
         self.spec: Job | None = None  # the last prefetch
         self.spec_key: tuple | None = None
-        self.primed = ""  # left context last sent to prime
 
     def handle(self, msg: dict) -> dict:
         op = msg.get("op")
@@ -279,7 +271,7 @@ class ConnectionPipeline:
             self.job = spec
         else:
             self.worker.cancel_owner(self)
-            self.job = Job("convert", self, request, wanted=True, deadline=deadline)
+            self.job = Job(self, request, wanted=True, deadline=deadline)
             self.worker.submit(self.job)
 
     def _outcome(self, *, wait: bool):
@@ -297,9 +289,6 @@ class ConnectionPipeline:
         sess = self.sess
         if sess._await is not None or not self.worker.available():
             return
-        if sess._lm_context != self.primed:
-            self.primed = sess._lm_context
-            self.worker.submit(Job("prime", self, None, context=sess._lm_context))
         if self.prefetch == "off" or sess.converted or not sess.tokens:
             return
         if sess.fsm.state != "S3":
@@ -307,7 +296,7 @@ class ConnectionPipeline:
         request = sess.conversion_request()
         if request is None or request.key == self.spec_key:
             return
-        self.spec = Job("convert", self, request,
+        self.spec = Job(self, request,
                         not_before=self.clock() + self.prefetch_delay_ms / 1000)
         self.spec_key = request.key
         self.worker.submit(self.spec)

@@ -214,7 +214,7 @@ class Engine:
             log(f"personal lexicon: {loaded.personal.skipped} line(s) skipped")
         self.loaded = loaded
         if not settings.lm_rescore:
-            log("LM rescoring off (setting)")
+            log("LM off (setting)")
 
     def read_settings(self, args, config, server) -> argparse.Namespace:
         """config.json in the data directory (DESIGN「起動時の読み込み」); everything else as the
@@ -229,26 +229,26 @@ class Engine:
 
     def load_lm(self, server, settings, warm):
         """On the LM worker: the model is read after ready; conversions use the
-        Viterbi 1-best until it is there. Before that, the warm-up conversion
-        is scored once (DESIGN「暖機」), so the user's first LM scoring is not
+        Viterbi 1-best until it is there. Before that, the warm-up input is
+        converted once (DESIGN「暖機」), so the user's first LM conversion is not
         the slow one."""
-        from yuragi.ime.lm_rescore import conversion_picks
+        from yuragi.ime.zenz import conversion_picks
         start = time.perf_counter()
-        rescorer = server.build_rescorer(settings)
+        converter = server.build_converter(settings)
         loaded = time.perf_counter()
-        conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, rescorer)
+        conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, converter)
         log(f"LM loaded in {loaded - start:.1f} s; "
-            f"warm-up scoring {1000 * (time.perf_counter() - loaded):.0f} ms")
-        return rescorer
+            f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
+        return converter
 
     def lm_disabled(self) -> None:
-        log("LM rescoring not used (it could not be loaded)")
+        log("LM not used (it could not be loaded)")
         self.channel.warning("lm")
 
     def warm_up(self) -> None:
         """DESIGN「暖機」: one conversion before ready, so the user's first key is not the slow one.
 
-        Then the LM worker starts and scores the same conversion before it is used."""
+        Then the LM worker starts and converts the same input before it is used."""
         from yuragi.ime import server
         from yuragi.ime.lm_async import LmWorker
         from yuragi.ime.server import process_request

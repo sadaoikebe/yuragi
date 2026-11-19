@@ -180,6 +180,80 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
     )
 
 
+@dataclass(slots=True)
+class _PrefixSt:
+    score: int
+    rid: int
+    side: str | None
+    used: int  # bytes of the prefix the surface so far has matched
+    word: Word | None
+    prev: _PrefixSt | None
+
+
+def decode_prefix(tokens: list[dict], lex: MozcLex, prefix: bytes, *, exact: bool = False,
+                  spell=str.encode, learning=None,
+                  left_id: int = BOS_ID) -> DecodeResult | None:
+    """decode_tokens' 1-best among the paths whose surface starts with prefix.
+
+    Zenzai's prefix constraint: spell(surface) must start with prefix (equal
+    it when exact). It is compared in bytes, so it may end inside a character
+    or a word; a word may run past its end. The same arcs, costs and pruning
+    as decode_tokens, kept per number of matched bytes. None when no path
+    satisfies it.
+    """
+    n = len(tokens)
+    plan = Plan(tokens)
+    full = len(prefix)
+    states: list[list[_PrefixSt]] = [[] for _ in range(n + 1)]
+    states[0] = [_PrefixSt(0, BOUNDARY_RID if left_id == BOS_ID else left_id, None, 0,
+                           None, None)]
+    for i in range(n):
+        if not states[i]:
+            continue
+        states[i] = _prune_prefix(states[i])
+        for w in spans_from(tokens, i, lex, learning, plan):
+            spelling = spell(w.entry.surface)
+            bound, enter, exit = w.sides.bound, w.sides.enter, w.sides.exit
+            for st in states[i]:
+                if bound and enter is not None and enter != st.side:
+                    continue
+                rest = prefix[st.used:]
+                if not (rest.startswith(spelling) if exact or len(spelling) <= len(rest)
+                        else spelling.startswith(rest)):
+                    continue
+                states[w.end].append(_PrefixSt(
+                    st.score + word_cost(lex, st.rid, w), w.rid, exit if bound else st.side,
+                    min(full, st.used + len(spelling)), w, st))
+    ends = [(st.score + end_cost(lex, st.rid), st) for st in states[n] if st.used == full]
+    if not ends:
+        return None
+    score, st = min(ends, key=lambda e: e[0])
+    path: list[Word] = []
+    while st.word is not None:
+        path.append(st.word)
+        st = st.prev
+    path.reverse()
+    pieces = [Piece(w.entry.surface, w.entry.reading, w.entry.lid, w.entry.cost,
+                    w.start, w.end, w.entry.rid, w.literal, w.learned) for w in path]
+    return DecodeResult("".join(w.entry.reading for w in path),
+                        "".join(w.entry.surface for w in path), score, pieces)
+
+
+def _prune_prefix(sts: list[_PrefixSt]) -> list[_PrefixSt]:
+    """_prune(mode="rid") separately for each number of matched bytes."""
+    sts.sort(key=lambda s: s.score)
+    best: set[tuple[int, int, str | None]] = set()
+    kept: Counter[tuple[int, str | None]] = Counter()
+    out = []
+    for s in sts:
+        key = (s.used, s.rid, s.side)
+        if key not in best and kept[s.used, s.side] < POS_KEEP:
+            best.add(key)
+            kept[s.used, s.side] += 1
+            out.append(s)
+    return out
+
+
 def nbest_tokens(
     tokens: list[dict],
     lex: MozcLex,
