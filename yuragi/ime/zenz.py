@@ -102,8 +102,8 @@ class ZenzModel:
     def reading_nll(self, readings: list[str]) -> list[float]:
         """NLL (nats) of each reading as zenz's input: the prompt without context.
 
-        zenz is trained on the whole sequence, so it also models the input:
-        a reading that is not Japanese (a wrong thumb side) costs more."""
+        zenz models its input too: a reading that is not Japanese (a wrong
+        thumb side, あとなおちゃ) costs several nats more than the right one."""
         todo = [r for r in dict.fromkeys(readings) if r not in self._readings]
         if todo:
             seqs = [self.tok.encode(prompt("", r), add_special_tokens=False) for r in todo]
@@ -115,9 +115,10 @@ class ZenzModel:
                     self.model(input_ids=self.torch.tensor(ids)).logits.float(), -1)
             for row, (r, s) in enumerate(zip(todo, seqs)):
                 self._readings[r] = -float(lp[row, range(len(s) - 1), s[1:]].sum())
-            while len(self._readings) > 4096:
-                del self._readings[next(iter(self._readings))]
-        return [self._readings[r] for r in readings]
+        result = [self._readings[r] for r in readings]
+        while len(self._readings) > 4096:
+            del self._readings[next(iter(self._readings))]
+        return result
 
     def review(self, context: str, reading: str, draft: str,
                accepted: bytes) -> tuple[bytes, bool] | None:
