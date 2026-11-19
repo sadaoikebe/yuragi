@@ -245,7 +245,8 @@ class Engine:
 
         def warm_conversion(converter):
             loaded = time.perf_counter()
-            conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, converter)
+            conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context,
+                             converter, left_id=warm.left_id)
             log(f"LM loaded on {converter.model.device} in {loaded - start:.1f} s; "
                 f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
 

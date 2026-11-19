@@ -141,7 +141,7 @@ class DeviceStartupTest(unittest.TestCase):
     def test_engine_tries_later_gpu_if_warmup_conversion_fails(self):
         conversions = []
 
-        def convert(parts, lex, learning, context, converter):
+        def convert(parts, lex, learning, context, converter, *, left_id):
             device = converter.model.device
             conversions.append(device)
             if device == "cuda:0":
@@ -149,7 +149,7 @@ class DeviceStartupTest(unittest.TestCase):
 
         engine = Engine(None, Namespace())
         engine.loaded = SimpleNamespace(_lex=object())
-        request = SimpleNamespace(parts=[], learning=None, lm_context="")
+        request = SimpleNamespace(parts=[], learning=None, lm_context="", left_id=0)
         args = server.argument_parser().parse_args([])
         with mock.patch.object(zenz, "conversion_picks", side_effect=convert):
             converter = engine.load_lm(server, args, request)

@@ -29,7 +29,9 @@ static void ReadingReplies() {
     // DESIGN「互換の規則」: missing fields default, unknown ones are ignored.
     Message sparse = Parse(R"({"seq":3,"new_field":{"x":[1]}})");
     assert(sparse.engine && sparse.composition.empty() && !sparse.has_timer);
-    assert(sparse.focus == -1 && sparse.candidates.empty() && !sparse.error);
+    assert(sparse.focus == -1 && sparse.candidates.empty() && !sparse.error && sparse.fsm_idle);
+    Message held = Parse(R"({"seq":4,"fsm":"S6","commit":"　"})");
+    assert(held.composition.empty() && !held.has_timer && !held.fsm_idle);
 
     Message notjson;
     assert(!ParseMessage("not json", notjson) && !ParseMessage("[1]", notjson));
@@ -194,6 +196,22 @@ static void Requests() {
     m.shift = m.alt = true;
     assert(KeyRequest(7, true, 74, 123, m) ==
            R"({"seq":7,"op":"down","vk":74,"t":123,"mods":["shift","alt"]})");
+    KeyContext context;
+    assert(KeyRequest(8, true, 65, 124, {}, &context) ==
+           R"({"seq":8,"op":"down","vk":65,"t":124,"mods":[],"left_context":null})");
+    context.disconnected = true;
+    context.text = "";
+    assert(KeyRequest(8, true, 65, 124, {}, &context) ==
+           R"({"seq":8,"op":"down","vk":65,"t":124,"mods":[],"left_context":"","after_commit_seq":null})");
+    context.disconnected = false;
+    context.text.reset();
+    context.after_commit_seq = 7;
+    assert(KeyRequest(8, true, 65, 124, {}, &context) ==
+           R"({"seq":8,"op":"down","vk":65,"t":124,"mods":[],"left_context":null,"after_commit_seq":7})");
+    context.text = "原稿の誤字を\"\n";
+    tip_json::Value key;
+    assert(tip_json::Parser(KeyRequest(8, true, 65, 124, {}, &context)).Parse(key));
+    assert(key.Get("left_context").text == *context.text);
     assert(OpRequest(8, "set_direct", "\"direct\":true") ==
            R"({"seq":8,"op":"set_direct","direct":true})");
     std::string hello = Hello("v0.2.0");
@@ -202,6 +220,21 @@ static void Requests() {
     tip_json::Value v;
     assert(tip_json::Parser(hello).Parse(v) && v.Get("op").text == "hello" &&
            v.Get("tag").text == "v0.2.0" && v.Get("passes").boolean);
+}
+
+static void LeftContextTail() {
+    std::wstring tail = {0xd842, 0xdfb7};  // U+20BB7
+    tail.append(199, L'あ');
+    assert(ContextTail(L"それより前" + tail, false) == tail);
+    assert(ContextTail(tail, false) == tail);
+    assert(ContextTail(L"", false) == L"");
+    auto cut = std::wstring(1, 0xdfb7) + tail;
+    assert(ContextTail(cut, true) == tail);
+    assert(!ContextTail(cut, false));
+    assert(!ContextTail(tail + std::wstring(1, 0xd842), true));
+    std::wstring astral;
+    for (size_t i = 0; i < CONTEXT_CHARS; ++i) astral += {0xd842, 0xdfb7};
+    assert(astral.size() == CONTEXT_UNITS && ContextTail(astral, true) == astral);
 }
 
 int main() {
@@ -214,6 +247,7 @@ int main() {
     ConnectingAndSpawning();
     CandidatePlacement();
     Requests();
+    LeftContextTail();
     std::puts("tip_logic_test: all passed");
     return 0;
 }

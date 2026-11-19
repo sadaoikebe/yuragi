@@ -219,7 +219,8 @@ class ZenzConverter:
 
 
 def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
-                     converter: ZenzConverter, cancelled=lambda: False) -> list[DecodeResult] | None:
+                     converter: ZenzConverter, cancelled=lambda: False, *,
+                     left_id: int = BOS_ID) -> list[DecodeResult] | None:
     """The LM part of ImeSession._refresh(rescore=True): one pick per kana run.
 
     The left context follows _refresh's loop exactly, so the synchronous and
@@ -227,7 +228,6 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
     """
     picks: list[DecodeResult] = []
     text = ""
-    left_id = BOS_ID
     for part in parts:
         if isinstance(part, str):  # literal
             text += part

@@ -13,11 +13,13 @@
 | `tests/tip_logic_test.cpp` `tests/tip_json_test.cpp` | 上の 2 つの単体試験（どの OS でも動く） |
 | `tests/mingw/ctffunc.h` | Linux で llvm-mingw を使って型検査するときだけの補い（製品のビルドでは使わない） |
 
-設定は `%USERPROFILE%\.yuragi-ime\tip.json`（任意。切り替えキー `toggle_vk` `toggle_mods`、
-ログ `log` `log_text`）:
+設定ファイルは `%USERPROFILE%\.yuragi-ime\tip.json`。各項目の既定値を示す。
 
 ```json
-{"toggle_vk":192,"toggle_mods":["alt"],"log":false,"log_text":false}
+{"toggle_vk":192,"toggle_mods":["alt"],"log":false,"log_text":false,"document_context":true}
 ```
+
+`document_context` を `false` にすると、文書の左文脈の読み取り、確定位置の監視、打鍵への文脈情報の付加を停止する。
+`log` を有効にすると、本文を含めずに文書取得とキー処理の経過時間を記録する。
 
 ビルドと試験は [DEVELOPMENT.md](../../docs/DEVELOPMENT.md)。

@@ -33,6 +33,7 @@ struct Value {
 
 class Parser {
     const std::string& s_;
+    bool allow_unpaired_values_;
     size_t p_ = 0;
     void Space() { while (p_ < s_.size() && (s_[p_] == ' ' || s_[p_] == '\r' ||
                        s_[p_] == '\n' || s_[p_] == '\t')) ++p_; }
@@ -63,7 +64,7 @@ class Parser {
             out += (char)(0x80 | ((cp >> 6) & 63)); out += (char)(0x80 | (cp & 63));
         }
     }
-    bool String(std::string& out) {
+    bool String(std::string& out, bool allow_unpaired = false) {
         if (!Take('"')) return false;
         out.clear();
         while (p_ < s_.size()) {
@@ -85,10 +86,16 @@ class Parser {
                     unsigned cp, low;
                     if (!Hex(cp)) return false;
                     if (cp >= 0xd800 && cp <= 0xdbff) {
-                        if (!Take('\\') || !Take('u') || !Hex(low) ||
-                            low < 0xdc00 || low > 0xdfff) return false;
-                        cp = 0x10000 + ((cp - 0xd800) << 10) + low - 0xdc00;
-                    } else if (cp >= 0xdc00 && cp <= 0xdfff) return false;
+                        size_t next = p_;
+                        if (Take('\\') && Take('u') && Hex(low) && low >= 0xdc00 && low <= 0xdfff)
+                            cp = 0x10000 + ((cp - 0xd800) << 10) + low - 0xdc00;
+                        else
+                            p_ = next;
+                    }
+                    if (cp >= 0xd800 && cp <= 0xdfff) {
+                        if (!allow_unpaired) return false;
+                        cp = 0xfffd;
+                    }
                     Utf8(out, cp);
                     break;
                 }
@@ -101,7 +108,7 @@ class Parser {
         if (depth > 64) return false;
         Space();
         if (p_ == s_.size()) return false;
-        if (s_[p_] == '"') { v.kind = Value::String; return String(v.text); }
+        if (s_[p_] == '"') { v.kind = Value::String; return String(v.text, allow_unpaired_values_); }
         if (Take('{')) {
             v.kind = Value::Object;
             Space();
@@ -158,7 +165,8 @@ class Parser {
         return true;
     }
 public:
-    explicit Parser(const std::string& s) : s_(s) {}
+    explicit Parser(const std::string& s, bool allow_unpaired_values = false)
+        : s_(s), allow_unpaired_values_(allow_unpaired_values) {}
     bool Parse(Value& v) {
         v = Value();
         if (!Read(v, 0)) return false;

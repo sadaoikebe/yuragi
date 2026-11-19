@@ -19,8 +19,8 @@ const char* StopName(Stop stop) {
 
 namespace {
 
-bool ParseObject(const std::string& line, Value& value) {
-    return tip_json::Parser(line).Parse(value) && value.kind == Value::Object;
+bool ParseObject(const std::string& line, Value& value, bool allow_unpaired_values = false) {
+    return tip_json::Parser(line, allow_unpaired_values).Parse(value) && value.kind == Value::Object;
 }
 
 // {"sid":N, ...the rest of the TIP's object...}
@@ -105,7 +105,8 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     if (it == clients_.end()) return;
     Client& client = it->second;
     Value msg;
-    if (!ParseObject(line, msg)) {
+    // Route the original bytes so the engine can ignore malformed optional fields.
+    if (!ParseObject(line, msg, /*allow_unpaired_values=*/true)) {
         Log("unreadable message from a TIP; ignored");
         return;
     }

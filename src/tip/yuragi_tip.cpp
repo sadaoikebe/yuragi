@@ -221,11 +221,12 @@ static bool ReadJsonFile(const std::wstring& path, tip_json::Value& value) {
 }
 
 // %USERPROFILE%\.yuragi-ime\tip.json (optional):
-//   {"toggle_vk":192,"toggle_mods":["alt"],"log":false,"log_text":false}
+//   {"toggle_vk":192,"toggle_mods":["alt"],"log":false,"log_text":false,"document_context":true}
 struct TipConfig {
     UINT toggle_vk = VK_OEM_3;
     unsigned toggle_mods = 4;  // shift=1, ctrl=2, alt=4, win=8
     bool log = false, log_text = false;
+    bool document_context = true;
     void Load() {
         wchar_t profile[MAX_PATH];
         DWORD n = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
@@ -249,6 +250,7 @@ struct TipConfig {
         }
         tip_logic::ReadBool(v, "log", log);
         tip_logic::ReadBool(v, "log_text", log_text);
+        tip_logic::ReadBool(v, "document_context", document_context);
     }
 };
 
@@ -643,26 +645,29 @@ public:
 
 // -- the input field's kind (DESIGN「パスワード欄」) -------------------------------------------------
 
-// Password fields are not ours. Only a field that says so counts: a context
-// with no selection or no input scope is not evidence of a password.
-static bool PasswordField(ITfContext* ctx, TfEditCookie ec) {
-    TF_SELECTION selection{};
-    ULONG fetched = 0;
-    if (FAILED(ctx->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &fetched)) || !fetched)
-        return false;
-    bool password = false;
+enum class InputScopeKind { Unknown, Allowed, Password };
+
+static InputScopeKind FieldScope(ITfContext* ctx, TfEditCookie ec, ITfRange* range) {
+    InputScopeKind kind = InputScopeKind::Unknown;
     ITfReadOnlyProperty* prop = nullptr;
-    if (SUCCEEDED(ctx->GetAppProperty(GUID_PROP_INPUTSCOPE, &prop)) && prop) {
+    HRESULT property_hr = ctx->GetAppProperty(GUID_PROP_INPUTSCOPE, &prop);
+    if (property_hr == S_FALSE) return InputScopeKind::Allowed;
+    if (property_hr == S_OK) {
         VARIANT v;
         VariantInit(&v);
-        if (SUCCEEDED(prop->GetValue(ec, selection.range, &v)) && v.vt == VT_UNKNOWN && v.punkVal) {
+        HRESULT hr = prop->GetValue(ec, range, &v);
+        if (SUCCEEDED(hr) && v.vt == VT_EMPTY) {
+            kind = InputScopeKind::Allowed;
+        } else if (SUCCEEDED(hr) && v.vt == VT_UNKNOWN && v.punkVal) {
             ITfInputScope* scope = nullptr;
             if (SUCCEEDED(v.punkVal->QueryInterface(IID_ITfInputScope, (void**)&scope))) {
                 InputScope* scopes = nullptr;
                 UINT count = 0;
                 if (SUCCEEDED(scope->GetInputScopes(&scopes, &count))) {
+                    kind = InputScopeKind::Allowed;
                     for (UINT i = 0; i < count; ++i)
-                        if (scopes[i] == IS_PASSWORD || scopes[i] == IS_NUMERIC_PASSWORD) password = true;
+                        if (scopes[i] == IS_PASSWORD || scopes[i] == IS_NUMERIC_PASSWORD)
+                            kind = InputScopeKind::Password;
                 }
                 CoTaskMemFree(scopes);
                 scope->Release();
@@ -671,6 +676,16 @@ static bool PasswordField(ITfContext* ctx, TfEditCookie ec) {
         VariantClear(&v);
         prop->Release();
     }
+    return kind;
+}
+
+// Key handling continues to accept fields whose input scope cannot be queried.
+static bool PasswordField(ITfContext* ctx, TfEditCookie ec) {
+    TF_SELECTION selection{};
+    ULONG fetched = 0;
+    if (FAILED(ctx->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &fetched)) || !fetched)
+        return false;
+    bool password = FieldScope(ctx, ec, selection.range) == InputScopeKind::Password;
     selection.range->Release();
     return password;
 }
@@ -680,12 +695,24 @@ static bool PasswordField(ITfContext* ctx, TfEditCookie ec) {
 struct CompositionState {
     ITfContext* ctx;
     ITfComposition* composition = nullptr;
+    ITfRange* commit_end = nullptr;
+    long long commit_seq = 0;
+    bool track_commit;
+    bool disconnected = false;
     bool active = true, ending = false, position_pending = false, show_candidates = false;
     std::vector<Message> pending;
-    explicit CompositionState(ITfContext* c) : ctx(c) { ctx->AddRef(); }
+    CompositionState(ITfContext* c, bool track)
+        : ctx(c), track_commit(track), disconnected(track) { ctx->AddRef(); }
     ~CompositionState() {
+        if (commit_end) commit_end->Release();
         if (composition) composition->Release();
         ctx->Release();
+    }
+    void BreakContinuity() {
+        if (commit_end) commit_end->Release();
+        commit_end = nullptr;
+        commit_seq = 0;
+        disconnected = true;
     }
 };
 
@@ -784,7 +811,10 @@ public:
         for (const auto& old : *retired_) {
             if (old->ctx == state_->ctx && old->composition) {
                 HRESULT hr = FinalizeState(ec, old);
-                if (FAILED(hr)) return hr;
+                if (FAILED(hr)) {
+                    state_->BreakContinuity();
+                    return hr;
+                }
             }
         }
         retired_->erase(std::remove_if(retired_->begin(), retired_->end(),
@@ -799,20 +829,24 @@ public:
             HRESULT hr = S_OK;
             if (!r.commit.empty()) hr = Write(ec, Utf8ToWide(r.commit), true, r);
             if (SUCCEEDED(hr)) hr = Write(ec, Utf8ToWide(r.composition), false, r);
-            if (FAILED(hr)) return hr;
+            if (FAILED(hr)) {
+                state_->BreakContinuity();
+                return hr;
+            }
         }
         return S_OK;
     }
 
 private:
-    void End(TfEditCookie ec, const std::shared_ptr<CompositionState>& state) {
-        if (!state->composition) return;
+    HRESULT End(TfEditCookie ec, const std::shared_ptr<CompositionState>& state) {
+        if (!state->composition) return S_OK;
         state->ending = true;
         ITfComposition* comp = state->composition;
         state->composition = nullptr;
-        comp->EndComposition(ec);
+        HRESULT hr = comp->EndComposition(ec);
         comp->Release();
         state->ending = false;
+        return hr;
     }
     // DESIGN「見えている文字の確定」: the text stays as shown; only the conversion ends.
     HRESULT FinalizeState(TfEditCookie ec, const std::shared_ptr<CompositionState>& state) {
@@ -827,8 +861,7 @@ private:
             }
             range->Release();
         }
-        End(ec, state);
-        return S_OK;
+        return End(ec, state);
     }
     void Attribute(TfEditCookie ec, ITfProperty* prop, ITfRange* range, TfGuidAtom atom) {
         if (atom == TF_INVALID_GUIDATOM) return;
@@ -836,6 +869,7 @@ private:
         prop->SetValue(ec, range, &v);
     }
     HRESULT Write(TfEditCookie ec, const std::wstring& text, bool commit, const Message& reply) {
+        if (commit) state_->BreakContinuity();
         ITfContext* ctx = state_->ctx;
         ITfRange* range = nullptr;
         HRESULT hr = S_OK;
@@ -865,7 +899,10 @@ private:
                 }
             }
         }
-        if (FAILED(hr) || !range) { if (range) range->Release(); return hr; }
+        if (FAILED(hr) || !range) {
+            if (range) range->Release();
+            return commit && SUCCEEDED(hr) ? E_FAIL : hr;
+        }
         ITfProperty* prop = nullptr;
         if (SUCCEEDED(ctx->GetProperty(GUID_PROP_ATTRIBUTE, &prop))) {
             prop->Clear(ec, range);
@@ -889,18 +926,34 @@ private:
             prop->Release();
         }
         ITfRange* caret = nullptr;
-        if (SUCCEEDED(range->Clone(&caret))) {
-            caret->Collapse(ec, TF_ANCHOR_END);
+        HRESULT caret_hr = range->Clone(&caret);
+        if (SUCCEEDED(caret_hr)) caret_hr = caret->Collapse(ec, TF_ANCHOR_END);
+        if (SUCCEEDED(caret_hr)) {
             TF_SELECTION selection{};
             selection.range = caret; selection.style.ase = TF_AE_NONE;
-            ctx->SetSelection(ec, 1, &selection);
+            caret_hr = ctx->SetSelection(ec, 1, &selection);
             if (candidate_ && *candidate_ && !commit && reply.converted && !reply.candidates.empty())
                 PlaceCandidates(ec, ctx, caret, *candidate_, g_log);
-            caret->Release();
         }
-        if (commit || text.empty()) End(ec, state_);
+        if (commit || text.empty()) hr = End(ec, state_);
+        if (FAILED(caret_hr)) {
+            state_->BreakContinuity();
+        } else if (commit && SUCCEEDED(hr) && state_->active) {
+            state_->disconnected = false;
+            if (state_->track_commit) {
+                // The next preedit can be inserted at this position in this same edit.
+                if (SUCCEEDED(caret->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD))) {
+                    state_->commit_end = caret;
+                    state_->commit_seq = reply.seq;
+                    caret = nullptr;
+                } else {
+                    state_->BreakContinuity();
+                }
+            }
+        }
+        if (caret) caret->Release();
         range->Release();
-        return S_OK;
+        return hr;
     }
 
     LONG refs_ = 1;
@@ -1013,7 +1066,7 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 
-class CaretSession;
+class ReadSession;
 
 class Tip final : public ITfTextInputProcessorEx,
             public ITfKeyEventSink,
@@ -1022,7 +1075,8 @@ class Tip final : public ITfTextInputProcessorEx,
             public ITfDisplayAttributeProvider,
             public ITfLangBarItemButton,
             public ITfSource,
-            public ITfTextLayoutSink {
+            public ITfTextLayoutSink,
+            public ITfTextEditSink {
 public:
     Tip() { InterlockedIncrement(&g_locks); }
     ~Tip() { InterlockedDecrement(&g_locks); }
@@ -1047,6 +1101,8 @@ public:
             *pp = static_cast<ITfSource*>(this);
         } else if (riid == IID_ITfTextLayoutSink) {
             *pp = static_cast<ITfTextLayoutSink*>(this);
+        } else if (riid == IID_ITfTextEditSink) {
+            *pp = static_cast<ITfTextEditSink*>(this);
         } else {
             *pp = nullptr;
             return E_NOINTERFACE;
@@ -1105,6 +1161,8 @@ public:
         FinishLocal();
         link_.Stop();
         UnadviseLayout();
+        UnadviseTextEdit();
+        ++focus_generation_;
         KillTimer(hwnd_, kTimerNotice);
         for (HWND* w : {&cand_hwnd_, &notice_hwnd_, &hwnd_}) {
             if (*w) DestroyWindow(*w);
@@ -1171,6 +1229,30 @@ public:
         return S_OK;
     }
 
+    HRESULT STDMETHODCALLTYPE OnEndEdit(ITfContext* ctx, TfEditCookie,
+                                        ITfEditRecord* record) override {
+        auto state = state_;
+        if (!state || !state->commit_end || ctx != state->ctx) return S_OK;
+        BOOL ours = FALSE;
+        if (SUCCEEDED(ctx->InWriteSession(client_, &ours)) && ours) return S_OK;
+        BOOL selection_changed = FALSE;
+        if (FAILED(record->GetSelectionStatus(&selection_changed)) || selection_changed) {
+            state->BreakContinuity();
+            return S_OK;
+        }
+        IEnumTfRanges* changes = nullptr;
+        HRESULT hr = record->GetTextAndPropertyUpdates(TF_GTP_INCL_TEXT, nullptr, 0, &changes);
+        if (SUCCEEDED(hr)) {
+            ITfRange* changed = nullptr;
+            ULONG fetched = 0;
+            hr = changes->Next(1, &changed, &fetched);
+            if (changed) changed->Release();
+            changes->Release();
+        }
+        if (hr != S_FALSE) state->BreakContinuity();
+        return S_OK;
+    }
+
     // -- keys (DESIGN「打鍵の処理」) ----------------------------------------------------------------------
     HRESULT STDMETHODCALLTYPE OnTestKeyDown(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
         if (!e) return E_INVALIDARG;
@@ -1185,7 +1267,7 @@ public:
                             (!direct_ && down_eaten_[vk])) ? TRUE : FALSE;
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
+    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext* ctx, WPARAM w, LPARAM, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
         UINT vk = VkOf(w);
@@ -1207,7 +1289,9 @@ public:
             ShowNotice(Notice::Stopped);
         }
         if (!CanEat(vk)) return S_OK;
-        bool eaten = SendKey(true, vk);
+        ULONGLONG start = NowMs();
+        bool eaten = SendKey(true, vk, start, ctx);
+        Log(L"keydown return t=%llu elapsed=%llu eaten=%d", start, NowMs() - start, eaten);
         if (eaten) {
             down_mods_[vk] = HeldMods();
             down_eaten_[vk] = true;
@@ -1230,7 +1314,7 @@ public:
         if (!promised || direct_ || !link_.Connected()) return S_OK;
         // The release carries the consumed down's modifiers, so a Ctrl pressed
         // meanwhile cannot hide it from the FSM.
-        *e = SendKey(false, vk) ? TRUE : FALSE;
+        *e = SendKey(false, vk, NowMs()) ? TRUE : FALSE;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnPreservedKey(ITfContext*, REFGUID guid, BOOL* e) override {
@@ -1383,8 +1467,8 @@ public:
     }
 
     // Called by the scope and caret edit sessions.
-    void ScopeChecked(ITfContext* ctx, bool password) {
-        if (ctx != scope_ctx_) return;  // the focus moved on meanwhile
+    void ScopeChecked(ITfContext* ctx, uint64_t generation, bool password) {
+        if (ctx != scope_ctx_ || generation != focus_generation_) return;
         scope_ = password ? Scope::Password : Scope::Allowed;
     }
     void PlaceNotice(TfEditCookie ec, ITfContext* ctx, ITfRange* caret) {
@@ -1393,6 +1477,7 @@ public:
     std::shared_ptr<CompositionState> State() { return state_; }
 
 private:
+    friend class ReadSession;
     enum class Scope { Unknown, Allowed, Password };
     static const UINT kLinkMessage = WM_APP + 1;
     static const UINT_PTR kTimerNotice = 3;
@@ -1515,8 +1600,10 @@ private:
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
             return false;
         }
-        if (!in_flight_.Answer(m.seq)) return false;  // a request we gave up or never sent
-        if (m.seq <= stale_upto_) return false;
+        if (!in_flight_.Answer(m.seq) || m.seq <= stale_upto_) {
+            if (state_ && !m.commit.empty()) state_->BreakContinuity();
+            return false;
+        }
         if (m.engine && FocusChanged()) {
             FocusMoved();
             return false;
@@ -1553,20 +1640,40 @@ private:
     // In time, it is applied at once and decides the key. Late, the key is
     // eaten as OnTestKeyDown said, nothing on screen changes, the connection
     // stays, and the reply is applied when it arrives (DESIGN「打鍵の処理」).
-    bool SendKey(bool down, UINT vk) {
+    bool SendKey(bool down, UINT vk, ULONGLONG start, ITfContext* ctx = nullptr) {
         tip_logic::Local before = LocalState();
         bool before_timer = timer_pending_;
         int before_tokens = n_tokens_;
         tip_logic::Mods mods = down ? HeldMods() : down_mods_[vk];
-        ULONGLONG start = NowMs();
+        ULONGLONG deadline = start + tip_logic::KEY_BUDGET_MS;
+        std::optional<tip_logic::KeyContext> context;
+        bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
+        if (settings_.document_context && down && !mods.Shortcut()
+                && (tip_logic::CharacterVk(vk) || vk == VK_SPACE)
+                && ((!composing_ && fsm_idle_) || awaiting)) {
+            context.emplace();
+            // An outstanding reply may commit text before this key starts input.
+            context->disconnected = !awaiting && state_ && state_->disconnected;
+            if (CanReadContext(ctx)) {
+                uint64_t generation = focus_generation_;
+                *context = ReadContext(ctx);
+                if (generation != focus_generation_) return false;
+                if (FocusChanged()) {
+                    FocusMoved();
+                    return false;
+                }
+            }
+        }
         long long seq = in_flight_.Next(start);
-        if (!link_.Write(tip_logic::KeyRequest(seq, down, vk, start, mods), tip_logic::KEY_BUDGET_MS)) {
+        auto request = tip_logic::KeyRequest(seq, down, vk, start, mods, context ? &*context : nullptr);
+        ULONGLONG now = NowMs();
+        DWORD budget = now < deadline ? (DWORD)(deadline - now) : 0;
+        if (!link_.Write(request, budget)) {
             in_flight_.Answer(seq);
             return false;  // not sent: the key goes to the application
         }
         Log(L"key sent client=%p seq=%lld t=%llu space=%d down=%d",
             static_cast<void*>(this), seq, start, vk == VK_SPACE, down);
-        ULONGLONG deadline = start + tip_logic::KEY_BUDGET_MS;
         Message r;
         for (;;) {
             if (Drain(true, seq, &r)) break;
@@ -1615,8 +1722,12 @@ private:
     void NoteReply(const Message& r) {
         bool mode_changed = direct_ != r.direct;
         direct_ = r.direct;
-        if (mode_changed) UpdateLangBar();
+        if (mode_changed) {
+            if (state_) state_->BreakContinuity();
+            UpdateLangBar();
+        }
         pending_ = r.pending;
+        fsm_idle_ = r.fsm_idle;
         n_tokens_ = r.n_tokens;
         composing_ = !r.composition.empty() || r.n_tokens > 0 || r.has_timer;
         converted_ = r.converted || r.pending;
@@ -1639,16 +1750,22 @@ private:
     }
 
     void ApplyReply(const Message& r, bool sync) {
-        if (r.seq <= stale_upto_) return;
+        if (r.seq <= stale_upto_) {
+            if (state_ && !r.commit.empty()) state_->BreakContinuity();
+            return;
+        }
         ITfContext* ctx = FocusContext();
-        if (!ctx) return;
+        if (!ctx) {
+            if (state_) state_->BreakContinuity();
+            return;
+        }
         if (ctx != scope_ctx_ || (state_ && state_->ctx != ctx)) {
             ctx->Release();
             FocusMoved();
             return;
         }
         if (!state_) {
-            state_ = std::make_shared<CompositionState>(ctx);
+            state_ = std::make_shared<CompositionState>(ctx, edit_cookie_ != TF_INVALID_COOKIE);
             AdviseLayout(ctx);
         }
         state_->show_candidates = !r.direct && r.converted && !r.candidates.empty();
@@ -1669,7 +1786,10 @@ private:
         // The application may refuse an edit (a read-only field): nothing more
         // is done about it; the connection is the broker's business, not the app's.
         if (FAILED(hr) || FAILED(result)) {
-            state->pending.clear();
+            if (kind == EditSession::Apply) {
+                state->pending.clear();
+                state->BreakContinuity();
+            }
             Log(L"edit refused hr=%08lx result=%08lx", hr, result);
         }
         es->Release();
@@ -1693,6 +1813,7 @@ private:
         if (old) {
             old->active = false;
             old->pending.clear();
+            old->BreakContinuity();
         }
         UnadviseLayout();
         if (old) {
@@ -1702,6 +1823,7 @@ private:
         retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
             [](const std::shared_ptr<CompositionState>& o) { return !o->composition; }), retired_.end());
         composing_ = converted_ = pending_ = timer_pending_ = false;
+        fsm_idle_ = true;
         n_tokens_ = 0;
         for (bool& eaten : down_eaten_) eaten = false;
         toggle_down_ = toggle_eaten_ = false;
@@ -1734,6 +1856,25 @@ private:
     }
 
     void CheckScope();
+    tip_logic::KeyContext ReadContext(ITfContext* ctx);
+    bool CanReadContext(ITfContext* ctx) {
+        return ctx && ctx == scope_ctx_ && scope_ == Scope::Allowed && Eligible() && !direct_
+            && !composing_ && fsm_idle_ && !pending_ && !timer_pending_ && !in_flight_.Waiting()
+            && (!state_ || (!state_->composition && state_->pending.empty()))
+            && std::none_of(retired_.begin(), retired_.end(), [ctx](const auto& old) {
+                return old->ctx == ctx && old->composition;
+            });
+    }
+
+    void UnadviseTextEdit() {
+        if (edit_cookie_ == TF_INVALID_COOKIE) return;
+        ITfSource* src = nullptr;
+        if (SUCCEEDED(scope_ctx_->QueryInterface(IID_ITfSource, (void**)&src))) {
+            src->UnadviseSink(edit_cookie_);
+            src->Release();
+        }
+        edit_cookie_ = TF_INVALID_COOKIE;
+    }
 
     // -- eating ------------------------------------------------------------------------------
     bool Eligible() { return tm_ && !KeyboardDisabled(tm_) && !KeyboardClosed(tm_); }
@@ -1931,12 +2072,15 @@ private:
     HWND hwnd_ = nullptr, cand_hwnd_ = nullptr, notice_hwnd_ = nullptr;
     Scope scope_ = Scope::Unknown;
     ITfContext* scope_ctx_ = nullptr;
+    uint64_t focus_generation_ = 0;
+    DWORD edit_cookie_ = TF_INVALID_COOKIE;
     ITfContext* layout_ctx_ = nullptr;
     DWORD layout_cookie_ = TF_INVALID_COOKIE;
     Notice notice_ = Notice::None;
     bool stopped_told_ = false;
     bool direct_ = false;
     bool composing_ = false, converted_ = false, pending_ = false, timer_pending_ = false;
+    bool fsm_idle_ = true;
     int n_tokens_ = 0;
     std::vector<std::wstring> cands_;
     int cand_index_ = 0;
@@ -1950,11 +2094,12 @@ private:
     ITfLangBarItemSink* lb_sink_ = nullptr;
 };
 
-// Read-only sessions: the field's kind (DESIGN「パスワード欄」) and the caret for the notice (DESIGN「小さな表示」).
+// Read-only sessions for the input scope, notices, and the input's left context.
 class ReadSession final : public ITfEditSession {
 public:
-    enum Kind { Scope, Caret };
-    ReadSession(Kind kind, Tip* tip, ITfContext* ctx) : kind_(kind), tip_(tip), ctx_(ctx) {
+    enum Kind { Scope, Caret, Document };
+    ReadSession(Kind kind, Tip* tip, ITfContext* ctx)
+        : kind_(kind), tip_(tip), ctx_(ctx), generation_(tip->focus_generation_) {
         tip_->AddRef();
         ctx_->AddRef();
     }
@@ -1974,7 +2119,11 @@ public:
     }
     HRESULT STDMETHODCALLTYPE DoEditSession(TfEditCookie ec) override {
         if (kind_ == Scope) {
-            tip_->ScopeChecked(ctx_, PasswordField(ctx_, ec));
+            tip_->ScopeChecked(ctx_, generation_, PasswordField(ctx_, ec));
+            return S_OK;
+        }
+        if (kind_ == Document) {
+            ReadDocument(ec);
             return S_OK;
         }
         ITfRange* caret = nullptr;
@@ -1995,26 +2144,121 @@ public:
         return S_OK;
     }
 
+    tip_logic::KeyContext context;
+    bool called_get_text = false;
+
 private:
+    void ReadDocument(TfEditCookie ec) {
+        if (generation_ != tip_->focus_generation_ || !tip_->CanReadContext(ctx_) ||
+            tip_->FocusChanged()) return;
+
+        TF_SELECTION selection{};
+        ULONG fetched = 0;
+        if (FAILED(ctx_->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &fetched)) ||
+            !fetched) return;
+        auto release = [](ITfRange* range) { range->Release(); };
+        std::unique_ptr<ITfRange, decltype(release)> selected(selection.range, release);
+        ITfRange* clone = nullptr;
+        if (FAILED(selected->Clone(&clone))) return;
+        std::unique_ptr<ITfRange, decltype(release)> left(clone, release);
+        if (FAILED(left->Collapse(ec, TF_ANCHOR_START)) ||
+            FieldScope(ctx_, ec, left.get()) != InputScopeKind::Allowed ||
+            generation_ != tip_->focus_generation_ || !tip_->CanReadContext(ctx_)) return;
+
+        auto state = tip_->State();
+        BOOL empty = FALSE;
+        if (SUCCEEDED(selected->IsEmpty(ec, &empty))) {
+            if (!empty) {
+                if (state) state->BreakContinuity();
+                context.disconnected = true;
+            } else if (state && state->commit_end) {
+                LONG order;
+                if (SUCCEEDED(left->CompareStart(ec, state->commit_end, TF_ANCHOR_START, &order))) {
+                    if (order == 0) context.after_commit_seq = state->commit_seq;
+                    else state->BreakContinuity();
+                }
+            }
+        }
+        constexpr LONG limit = (LONG)tip_logic::CONTEXT_UNITS;
+        LONG shifted;
+        if (FAILED(left->ShiftStart(ec, -limit, &shifted, nullptr)) ||
+            generation_ != tip_->focus_generation_ || tip_->FocusChanged()) return;
+        wchar_t buffer[limit + 1];
+        ULONG count = 0;
+        called_get_text = true;
+        // ShiftStart measured the length of this range in UTF-16 units.
+        if (FAILED(left->GetText(ec, 0, buffer, limit, &count)) || count != (ULONG)-shifted)
+            return;
+        buffer[count] = L'\0';
+        bool clipped = shifted == -limit;
+        if (clipped && buffer[0] >= 0xdc00 && buffer[0] <= 0xdfff) {
+            // A lone low surrogate at the very start is malformed text.
+            ITfRange* start = nullptr;
+            if (FAILED(ctx_->GetStart(ec, &start))) return;
+            LONG order;
+            HRESULT hr = left->CompareStart(ec, start, TF_ANCHOR_START, &order);
+            start->Release();
+            if (FAILED(hr)) return;
+            clipped = order > 0;
+        }
+        auto tail = tip_logic::ContextTail(std::wstring_view(buffer, count), clipped);
+        if (!tail) return;
+        if (tail->empty()) {
+            context.text = "";
+            return;
+        }
+        char utf8[3 * limit];  // At most three UTF-8 bytes per UTF-16 unit.
+        int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, tail->data(), (int)tail->size(),
+                                       utf8, sizeof(utf8), nullptr, nullptr);
+        if (size != 0) context.text.emplace(utf8, size);
+    }
+
     LONG refs_ = 1;
     Kind kind_;
     Tip* tip_;
     ITfContext* ctx_;
+    uint64_t generation_;
 };
 
 // DESIGN「パスワード欄」: once per focus. Until the answer is known the field is "being looked
 // at" and keys pass through.
 void Tip::CheckScope() {
+    ++focus_generation_;
+    UnadviseTextEdit();
     if (scope_ctx_) scope_ctx_->Release();
     scope_ctx_ = FocusContext();
     scope_ = Scope::Unknown;
     if (!scope_ctx_ || client_ == TF_CLIENTID_NULL) return;
+    if (settings_.document_context) {
+        ITfSource* src = nullptr;
+        if (SUCCEEDED(scope_ctx_->QueryInterface(IID_ITfSource, (void**)&src))) {
+            DWORD cookie = TF_INVALID_COOKIE;
+            if (SUCCEEDED(src->AdviseSink(IID_ITfTextEditSink, (ITfTextEditSink*)this, &cookie)))
+                edit_cookie_ = cookie;
+            src->Release();
+        }
+    }
     auto* es = new ReadSession(ReadSession::Scope, this, scope_ctx_);
     HRESULT result = S_OK;
     HRESULT hr = scope_ctx_->RequestEditSession(client_, es, TF_ES_SYNC | TF_ES_READ, &result);
     if (hr == TF_E_SYNCHRONOUS || result == TF_E_SYNCHRONOUS)
         scope_ctx_->RequestEditSession(client_, es, TF_ES_ASYNC | TF_ES_READ, &result);
     es->Release();
+}
+
+tip_logic::KeyContext Tip::ReadContext(ITfContext* ctx) {
+    auto* es = new ReadSession(ReadSession::Document, this, ctx);
+    ULONGLONG start = NowMs();
+    HRESULT result = E_FAIL;
+    HRESULT hr = ctx->RequestEditSession(client_, es, TF_ES_SYNC | TF_ES_READ, &result);
+    tip_logic::KeyContext data;
+    if (hr == S_OK && result == S_OK) data = std::move(es->context);
+    if (state_ ? state_->disconnected : edit_cookie_ != TF_INVALID_COOKIE)
+        data.disconnected = true;
+    Log(L"document context t=%llu elapsed=%llu get_text=%d acquired=%d hr=%08lx result=%08lx",
+        start, NowMs() - start, es->called_get_text, data.text.has_value(), hr, result);
+    es->Release();
+    return data;
 }
 
 void Tip::ShowNotice(Notice n) {

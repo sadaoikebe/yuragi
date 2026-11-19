@@ -1,6 +1,6 @@
 """IME session: chord FSM + Mozc lattice decode + composition.
 
-Literal characters split the lattice into independent BOS/EOS-delimited runs.
+Literal characters split the lattice into kana runs and set the next run's left POS.
 The FSM's timing and chord decisions are unchanged. The digit row and the
 symbol keys are chord keys too: their plain and thumb faces are literals,
 and Shift gives the full-width upper engraving.
@@ -144,8 +144,21 @@ class ConversionRequest:
     """Everything the LM worker needs for one conversion, captured at ThumbTap."""
     parts: list  # ImeSession._parts()
     lm_context: str
+    left_id: int
     learning: object | None  # LearningStore.snapshot()
-    key: tuple  # (repr(parts), lm_context, learning revision, personal revision)
+    key: tuple  # (repr(parts), lm_context, left_id, learning revision, personal revision)
+
+
+@dataclass
+class CommitContext:
+    tail: str
+    right_id: int
+    seq: int | None = None  # assigned when the reply carrying the commit is built
+
+
+def _append_context(context: str, text: str) -> str:
+    context += text
+    return context[-CONTEXT_CHARS:] if len(context) > 4 * CONTEXT_CHARS else context
 
 
 @dataclass
@@ -169,7 +182,10 @@ class ImeSession:
     lm_deferred: bool = False
     _await: ConversionRequest | None = None  # conversion waiting for the worker
     _continuation: Callable[[], str | None] | None = None  # rest of that key event
-    _lm_context: str = ""  # text committed on this connection since the last reset
+    _committed_context: str = ""  # only text committed by this connection
+    _lm_context: str = ""  # left text for the current input
+    _left_id: int = BOS_ID
+    _last_commit: CommitContext | None = None
     _table: dict = field(default_factory=dict)
     _lex: MozcLex | None = None
     _symbols: dict[str, tuple[str, ...]] | None = None  # reading → symbols, shared
@@ -199,21 +215,51 @@ class ImeSession:
 
     def reset(self) -> None:
         """Discard composition and input state after focus loss/termination."""
-        self.tokens.clear()
+        self._reset_input()
+        self._clear_context()
+
+    def _reset_input(self) -> None:
+        self._clear_input()
         self.fsm.reset()
         self.fsm.pressed_at.clear()
         self._modifiers.clear()
         self._press_alias.clear()
         self._carry.clear()
-        self._lm_context = ""
-        self.composition = ""
-        self.segments.clear()
-        self.focus = -1
-        self.converted = False
-        self.predicting = False
-        self._clear_cands()
         self._await = None
         self._continuation = None
+
+    def _clear_context(self) -> None:
+        self._committed_context = self._lm_context = ""
+        self._left_id = BOS_ID
+        self._last_commit = None
+
+    def starts_input(self, vk: int, mods: list[str] | None) -> bool:
+        return (not self.direct and not self.tokens and self._await is None
+                and self.fsm.state == "S1" and classify(vk)[0] in ("M", "O")
+                and not self._shortcut(mods))
+
+    def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
+        last = self._last_commit
+        if after is not None:
+            if last is not None and after == last.seq:
+                if text is None or (text and
+                        (text.endswith(last.tail) or last.tail.endswith(text))):
+                    self._lm_context = self._committed_context if text is None else text
+                    self._left_id = last.right_id
+                    return
+            disconnected = True
+        if disconnected or text == "":
+            self._clear_context()
+        self._lm_context = self._committed_context if text is None else text
+        self._left_id = BOS_ID
+
+    def bind_commit(self, seq: int | None) -> None:
+        if self._last_commit is not None:
+            self._last_commit.seq = seq
+
+    def _shortcut(self, mods: list[str] | None) -> bool:
+        return (bool(set(mods) & {"ctrl", "alt", "win"}) if mods is not None
+                else bool(self._modifiers & SHORTCUT_VKS))
 
     def set_direct(self, direct: bool) -> None:
         """Change input mode, discarding unfinished input on a transition."""
@@ -239,8 +285,7 @@ class ImeSession:
                 self._modifiers.discard(vk)
             return None
         shift = "shift" in mods if mods is not None else bool(self._modifiers & SHIFT_VKS)
-        shortcut = (bool(set(mods) & {"ctrl", "alt", "win"}) if mods is not None
-                    else bool(self._modifiers & SHORTCUT_VKS))
+        shortcut = self._shortcut(mods)
         ctrl_only = (set(mods) == {"ctrl"} if mods is not None
                      else bool(self._modifiers & CTRL_VKS)
                      and not self._modifiers & (SHORTCUT_VKS - CTRL_VKS) and not shift)
@@ -253,13 +298,13 @@ class ImeSession:
             def commit_prefix() -> str | None:
                 if not self.tokens or self.predicting:
                     if not self.tokens:
-                        self._lm_context = ""  # as the shortcut below
+                        self._clear_context()  # as the shortcut below
                     return None
                 return self._commit_prefix()
             return self._then(pending, commit_prefix)
         if shortcut:
             if down and not self.tokens:
-                self._lm_context = ""  # Ctrl/Alt/Win may move the caret or edit text.
+                self._clear_context()  # Ctrl/Alt/Win may move the caret or edit text.
             return None
         if down and (vk in SCRIPT_VKS and not shift or vk == VK_F6 and shift):
             pending = self._finish_pending()
@@ -314,7 +359,7 @@ class ImeSession:
             return self._then(pending, lambda: self._ingest([Literal(literal)]))
         if kind not in ("M", "O"):
             if down and not self.tokens:
-                self._lm_context = ""  # Arrows/Home/Tab etc.: the caret may have moved.
+                self._clear_context()  # Arrows/Home/Tab etc.: the caret may have moved.
             return None
         assert key is not None
         due = self.flush_timeout(now_ms)
@@ -356,8 +401,9 @@ class ImeSession:
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
         return ConversionRequest(
-            parts, self._lm_context, learning,
-            (repr(parts), self._lm_context, learning.revision if learning is not None else None,
+            parts, self._lm_context, self._left_id, learning,
+            (repr(parts), self._lm_context, self._left_id,
+             learning.revision if learning is not None else None,
              self.personal.revision if self.personal is not None else None))
 
     def finish_conversion(self, picks) -> str:
@@ -578,7 +624,10 @@ class ImeSession:
                 self.tokens.pop()
                 self._refresh()
             else:
-                self._lm_context = self._lm_context[:-1]
+                self._committed_context = self._committed_context[:-1]
+                self._lm_context = self._committed_context
+                self._left_id = BOS_ID
+                self._last_commit = None
             return None
         if vk == VK_ESCAPE:
             if self.converted:
@@ -639,7 +688,7 @@ class ImeSession:
                     for text in number_spellings(digits)]))
                 segment.index = segment.choices.find(segment.selected)
             return
-        left = (BOS_ID if before is None
+        left = (self._left_id if before is None
                 else left_id_after(before.selected.reading, self._lex) if before.literal
                 else before.selected.rid)
         right = (self.segments[index + 1].selected.lid
@@ -878,11 +927,12 @@ class ImeSession:
         parts = self._parts()
         if rescore and self.lm is not None and picks is None:
             self.lm.last = {}
-            picks = conversion_picks(parts, self._lex, learning, self._lm_context, self.lm)
+            picks = conversion_picks(parts, self._lex, learning, self._lm_context, self.lm,
+                                     left_id=self._left_id)
         if picks is not None and len(picks) != sum(isinstance(p, list) for p in parts):
             picks = None
         kana_runs = 0
-        left_id = BOS_ID
+        left_id = self._left_id
         self._word_starts = set()
         for part in parts:
             if isinstance(part, str):
@@ -923,13 +973,12 @@ class ImeSession:
         text = self.composition
         if self._learning is not None and self._lex is not None:
             self._learning.confirm([s.selected for s in self.segments], self._lex)
+        if text:
+            self._note_commit(text, self.segments[-1])
         if reset_input:
-            context = self._lm_context
-            self.reset()
-            self._lm_context = context  # an Enter commit keeps the document context
+            self._reset_input()
         else:
             self._clear_input()
-        self._note_commit(text)
         return text
 
     def _clear_input(self) -> None:
@@ -956,10 +1005,10 @@ class ImeSession:
         text = head.selected.surface
         if self._learning is not None and self._lex is not None:
             self._learning.confirm([head.selected], self._lex)
+        self._note_commit(text, head)
         if len(self.segments) == 1:
             # Nothing remains: as an ordinary commit by the next character.
             self._clear_input()
-            self._note_commit(text)
             return text
         # The directions the committed reading gives each press (the thumbs
         # of one press alternate); the remaining chords of a press keep it.
@@ -978,18 +1027,24 @@ class ImeSession:
             segment.start -= end
             segment.end -= end
         self._word_starts = {b - end for b in self._word_starts if b >= end}
-        self._note_commit(text)
         self.composition = "".join(s.selected.surface for s in self.segments)
         self.focus = _first_stop(self.segments)
         if self.converted:
             self._open_cands()
         return text
 
-    def _note_commit(self, text: str) -> None:
-        """Remember committed text as LM left context (app-independent)."""
-        self._lm_context += text
-        if len(self._lm_context) > 4 * CONTEXT_CHARS:
-            self._lm_context = self._lm_context[-CONTEXT_CHARS:]
+    def _note_commit(self, text: str, last: Segment | None = None) -> None:
+        """Advance the current input and remember what this connection committed."""
+        right_id = BOS_ID
+        if self._lex is not None and last is not None:
+            if last.literal:
+                right_id = left_id_after(last.selected.reading, self._lex)
+            elif 0 <= last.selected.rid < self._lex.pos_size + len(self._lex.numeral_pos):
+                right_id = last.selected.rid
+        self._committed_context = _append_context(self._committed_context, text)
+        self._lm_context = _append_context(self._lm_context, text)
+        self._left_id = right_id
+        self._last_commit = CommitContext(text[-CONTEXT_CHARS:], right_id)
 
 
 def _first_stop(segments: list[Segment]) -> int:

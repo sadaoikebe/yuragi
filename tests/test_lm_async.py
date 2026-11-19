@@ -97,7 +97,7 @@ class ManualWorker:
             r = job.request
             job.picks = conversion_picks(r.parts, self.lex, r.learning, r.lm_context,
                                          replace(self.template, last={}),
-                                         cancelled=lambda: job.cancelled)
+                                         cancelled=lambda: job.cancelled, left_id=r.left_id)
         job.completed_at = self.clock()
         job.done.set()
 
@@ -368,7 +368,7 @@ class DeadlineTest(unittest.TestCase):
         self.assertTrue(worker.wait_until_loaded())
 
         pipeline = ConnectionPipeline(self.session(), worker, clock=lambda: deadline + 0.001)
-        request = ConversionRequest([], "", None, ())
+        request = ConversionRequest([], "", 0, None, ())
         job = pipeline.job = Job(pipeline, request, wanted=True, deadline=deadline)
         lock = job.completion_lock
 

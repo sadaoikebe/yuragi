@@ -5,7 +5,9 @@
 
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "tip_json.h"
@@ -19,6 +21,27 @@ constexpr uint32_t BROKER_WAIT_MS = 10000;
 constexpr uint32_t BROKER_POLL_MS = 100;
 constexpr uint32_t NOTICE_SHOW_MS = 4000;  // DESIGN「小さな表示」: the notices that go by themselves
 constexpr int PROTO = 1;
+constexpr size_t CONTEXT_CHARS = 200;
+constexpr size_t CONTEXT_UNITS = 2 * CONTEXT_CHARS;
+
+// The input uses UTF-16 units even on the platforms that only run these tests.
+inline std::optional<std::wstring_view> ContextTail(std::wstring_view text, bool clipped) {
+    auto low = [](wchar_t c) { return c >= 0xdc00 && c <= 0xdfff; };
+    if (clipped && !text.empty() && low(text.front())) text.remove_prefix(1);
+    size_t end = text.size(), count = 0, start = 0;
+    while (end) {
+        if (count++ == CONTEXT_CHARS) start = end;
+        wchar_t c = text[--end];
+        if (low(c)) {
+            if (!end || text[end - 1] < 0xd800 || text[end - 1] > 0xdbff)
+                return std::nullopt;
+            --end;
+        } else if (c >= 0xd800 && c <= 0xdbff) {
+            return std::nullopt;
+        }
+    }
+    return text.substr(start);
+}
 
 // Win32 virtual keys used here (no windows.h in this header).
 enum : uint32_t {
@@ -48,6 +71,7 @@ struct Message {
     std::string composition, commit;  // UTF-8
     bool direct = false, pass_through = false, converted = false, pending = false;
     bool predicting = false, error = false, has_next_page = false;
+    bool fsm_idle = true;
     int n_tokens = 0, focus = -1, page = 0, cand_index = 0;
     bool has_timer = false;
     uint64_t timer = 0;
@@ -92,6 +116,8 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadBool(v, "predicting", m.predicting);
     ReadBool(v, "error", m.error);
     ReadBool(v, "has_next_page", m.has_next_page);
+    const auto& fsm = v.Get("fsm");
+    if (fsm.kind == tip_json::Value::String) m.fsm_idle = fsm.text == "S1";
     ReadInt(v, "n_tokens", m.n_tokens);
     ReadInt(v, "focus", m.focus);
     ReadInt(v, "candidate_page", m.page);
@@ -333,10 +359,26 @@ inline std::string ModsJson(Mods m) {
     if (m.win) add("win");
     return out + ']';
 }
-inline std::string KeyRequest(long long seq, bool down, uint32_t vk, uint64_t t, Mods mods) {
-    return "{\"seq\":" + std::to_string(seq) + ",\"op\":\"" + (down ? "down" : "up") +
+struct KeyContext {
+    std::optional<std::string> text;
+    std::optional<long long> after_commit_seq;
+    bool disconnected = false;
+};
+
+inline std::string KeyRequest(long long seq, bool down, uint32_t vk, uint64_t t, Mods mods,
+                              const KeyContext* context = nullptr) {
+    std::string request = "{\"seq\":" + std::to_string(seq) + ",\"op\":\"" + (down ? "down" : "up") +
            "\",\"vk\":" + std::to_string(vk) + ",\"t\":" + std::to_string(t) +
-           ",\"mods\":" + ModsJson(mods) + "}";
+           ",\"mods\":" + ModsJson(mods);
+    if (context) {
+        request += ",\"left_context\":" +
+                   (context->text ? tip_json::Quote(*context->text) : "null");
+        if (context->after_commit_seq)
+            request += ",\"after_commit_seq\":" + std::to_string(*context->after_commit_seq);
+        else if (context->disconnected)
+            request += ",\"after_commit_seq\":null";
+    }
+    return request + "}";
 }
 inline std::string OpRequest(long long seq, const std::string& op, const std::string& extra = "") {
     return "{\"seq\":" + std::to_string(seq) + ",\"op\":\"" + op + "\"" +
