@@ -67,7 +67,8 @@ def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) 
     # A kana run has no literals: ImeSession._refresh() makes their segments.
     groups: list[list[Piece]] = []
     for piece in pieces:
-        if not groups or piece.learned or content(piece.lid):
+        lid = piece.lid if lex is None else lex.base_pos(piece.lid)
+        if not groups or piece.learned or content(lid):
             groups.append([])
         groups[-1].append(piece)
     return [Segment(offset + g[0].start, offset + g[-1].end,

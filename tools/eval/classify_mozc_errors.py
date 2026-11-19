@@ -116,6 +116,7 @@ def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
         finally:
             mozc_dict.DICT_DIR = original
         lex = MozcLex(by_reading, prefixes, connect, size)
+    mozc_dict.apply_numeral_context(lex)
     apply_numerals(lex)
     changed = set()
     if user is not None:
@@ -127,6 +128,7 @@ def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
         changed = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])} - before
     names = {int(i): name for line in (dictionary_dir / "id.def").read_text(
         encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
+    names.update({i: names[base] for i, (_, base) in enumerate(lex.numeral_pos, lex.pos_size)})
     return lex, changed, names
 
 

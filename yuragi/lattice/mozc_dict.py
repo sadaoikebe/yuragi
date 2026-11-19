@@ -6,9 +6,11 @@ import hashlib
 import json
 import os
 import pickle
+import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[2]
 DICT_DIR = ROOT / "third_party" / "mozc_oss_dict"
@@ -46,10 +48,23 @@ DEFAULT_NOUN_ID = 1851  # 名詞,一般 in Mozc id.def
 
 BOS_ID = 0
 NUMBER_ID = 2044  # 名詞,数,アラビア数字
+COUNTER_IDS = range(2011, 2019)  # 名詞,接尾,助数詞 (including 月)
+NUMBER_UNIT_IDS = range(2047, 2056)  # 名詞,数,漢数字 for units like 千 and 百
+MONTH_COUNTER_ID = 2016
+PARTICLE_IDS = range(268, 434)  # 助詞
+RANGE_PARTICLE_IDS = (314, 368)  # まで and から
+ARITHMETIC_OPERATORS = frozenset(("プラス", "マイナス"))
+# An unqualified numeral gets a larger penalty at the end of a run. Keep the
+# smaller penalty inside a run so more compound candidates stay in range.
+DIGIT_PENALTY = 2500
+UNQUALIFIED_NUMERAL_PENALTY = 3500
 UNK_LID = 1  # その他,間投
 UNK_COST = 12000
 MAX_WORD_MORA = 16
 POS_KEEP = 12  # surviving (rid, score) per token position
+
+NumeralPos = tuple[Literal["digit", "day", "month", "after_month", "operator",
+                          "after_operator"], int]
 
 
 @dataclass(slots=True)
@@ -67,9 +82,30 @@ class MozcLex:
     prefixes: set[str]
     connect: list[int]
     pos_size: int
+    numeral_pos: tuple[NumeralPos, ...] = ()  # IDs after the raw Mozc matrix
+
+    def base_pos(self, pos: int) -> int:
+        return self.numeral_pos[pos - self.pos_size][1] if pos >= self.pos_size else pos
 
     def transition(self, rid: int, lid: int) -> int:
-        return self.connect[rid * self.pos_size + lid]
+        size = self.pos_size
+        if rid < size and lid < size:
+            return self.connect[rid * size + lid]
+        prev_kind, rid = self.numeral_pos[rid - size] if rid >= size else (None, rid)
+        next_kind, lid = self.numeral_pos[lid - size] if lid >= size else (None, lid)
+        cost = self.connect[rid * size + lid]
+        if (prev_kind == "digit" and next_kind != "operator" and lid not in COUNTER_IDS
+                and lid not in NUMBER_UNIT_IDS and lid not in RANGE_PARTICLE_IDS):
+            cost += UNQUALIFIED_NUMERAL_PENALTY if lid == BOS_ID else DIGIT_PENALTY
+        if prev_kind == "day" and lid not in PARTICLE_IDS:
+            cost += UNQUALIFIED_NUMERAL_PENALTY
+        # The alternate arcs have the same word cost and bypass the outgoing
+        # penalty in these contexts. Otherwise the regular arc stays cheaper.
+        if next_kind == "after_month" and prev_kind != "month" and rid != MONTH_COUNTER_ID:
+            cost += UNQUALIFIED_NUMERAL_PENALTY + 1
+        if next_kind == "after_operator" and prev_kind != "operator":
+            cost += UNQUALIFIED_NUMERAL_PENALTY + 1
+        return cost
 
 
 def left_id_after(literal: str, lex: MozcLex) -> int:
@@ -187,6 +223,49 @@ _HUNDREDS = ["", "ひゃく", "にひゃく", "さんびゃく", "よんひゃ�
              "ななひゃく", "はっぴゃく", "きゅうひゃく"]
 _THOUSANDS = ["", "せん", "にせん", "さんぜん", "よんせん", "ごせん", "ろくせん",
               "ななせん", "はっせん", "きゅうせん"]
+_DAY = re.compile(r"[1-9一二三四五六七八九]日")
+_MONTH = re.compile(r"(?:[1-9]|1[0-2]|[一二三四五六七八九]|十[一二]?)月")
+
+
+def apply_numeral_context(lex: MozcLex) -> None:
+    """Use Mozc's connections, with a penalty for ambiguous digits and days.
+
+    Use the original cost when adjacent words indicate a number or date.
+    Assign private IDs only to the connection sides that need the distinction.
+    """
+    # Raw caches written before this field was added have no value for it.
+    if getattr(lex, "numeral_pos", ()):
+        return
+
+    left: list[tuple[Entry, NumeralPos]] = []
+    right: list[tuple[Entry, NumeralPos]] = []
+    for bucket in lex.by_reading.values():
+        alternatives = []
+        for entry in bucket:
+            surface = entry.surface
+            if entry.rid == NUMBER_ID and len(surface) == 1 and "0" <= surface <= "9":
+                right.append((entry, ("digit", entry.rid)))
+                alternate = replace(entry)
+                left.append((alternate, ("after_operator", entry.lid)))
+                alternatives.append(alternate)
+            elif surface.endswith("日") and _DAY.fullmatch(surface):
+                right.append((entry, ("day", entry.rid)))
+                alternate = replace(entry)
+                left.append((alternate, ("after_month", entry.lid)))
+                alternatives.append(alternate)
+            elif surface.endswith("月") and _MONTH.fullmatch(surface):
+                right.append((entry, ("month", entry.rid)))
+            elif surface in ARITHMETIC_OPERATORS:
+                left.append((entry, ("operator", entry.lid)))
+                right.append((entry, ("operator", entry.rid)))
+        bucket.extend(alternatives)
+
+    lex.numeral_pos = tuple(sorted({pos for _, pos in left + right}))
+    ids = {pos: i for i, pos in enumerate(lex.numeral_pos, lex.pos_size)}
+    for entry, pos in left:
+        entry.lid = ids[pos]
+    for entry, pos in right:
+        entry.rid = ids[pos]
 
 
 def numeral_reading(n: int) -> str:
@@ -270,6 +349,7 @@ def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:
             f"pos={pos_size} cache={CACHE}",
             file=sys.stderr,
         )
+    apply_numeral_context(lex)
     apply_numerals(lex)
     n = apply_user_lex(lex) if user_lexicon else 0
     if n:

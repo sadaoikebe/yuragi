@@ -227,7 +227,7 @@ class LearningStore:
         for c in selections:
             if c.kind == "symbol" and c.reading:
                 rows.append(Confirmation(c.reading, c.surface, now,
-                                         0, c.lid, c.rid, symbol=True))
+                                         0, lex.base_pos(c.lid), lex.base_pos(c.rid), symbol=True))
                 continue
             if c.kind in ("literal", "number", "date", "alnum") or not c.reading:
                 continue
@@ -244,8 +244,9 @@ class LearningStore:
                     user_word = True
                     cost, lid, rid = USER_WORD_COST, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID
             if cost is not None:
+                # Numeral connection IDs are local to the loaded lexicon.
                 rows.append(Confirmation(c.reading, c.surface, now,
-                                         cost, lid, rid, user_word))
+                                         cost, lex.base_pos(lid), lex.base_pos(rid), user_word))
         self._append(rows)
 
     def suppress(self, reading: str, surface: str) -> bool:

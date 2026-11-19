@@ -95,6 +95,17 @@ class LearningTest(unittest.TestCase):
         self.assertEqual([g.selected.reading for g in s.segments], ["きょう", "は"])
         self.assertEqual(s.composition, "今日は")
 
+    def test_penalized_numeral_can_be_chosen_and_learned(self):
+        for reading, first, surface in (("いち", "市", "1"), ("ようか", "ようか", "8日")):
+            with self.subTest(reading=reading):
+                s = self.session()
+                self.assertEqual(self.choose(s, reading, reading, surface), first)
+                row = LearningStore(self.path).snapshot().head(reading)
+                self.assertEqual(row.surface, surface)
+                self.assertLess(max(row.lid, row.rid), self.lex.pos_size)
+                reopened = self.session()
+                self.assertEqual(self.convert(reopened, reading).selected.surface, surface)
+
     def test_shift_f6_forgets_the_choice(self):
         s = self.session()
         chosen = self.choose_second(s, "こうせい")
