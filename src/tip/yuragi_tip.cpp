@@ -1206,7 +1206,7 @@ public:
         if (!CanEat(vk)) return S_OK;
         bool eaten = SendKey(true, vk);
         if (eaten) {
-            if (!down_eaten_[vk]) down_mods_[vk] = HeldMods();
+            down_mods_[vk] = HeldMods();
             down_eaten_[vk] = true;
         }
         *e = eaten ? TRUE : FALSE;
