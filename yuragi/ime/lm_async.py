@@ -23,6 +23,7 @@ from .session import ConversionRequest, ImeSession
 
 GRACE_MS = 30
 DEADLINE_MS = 400
+REQUIRED_LM_DEADLINE_MS = 10_000
 POLL_MS = 10
 PREFETCH_DELAY_MS = 30
 
@@ -63,6 +64,11 @@ class LmWorker:
     # -- connection side ----------------------------------------------------
     def available(self) -> bool:
         with self._cond:
+            return self.state == "ready"
+
+    def wait_until_loaded(self) -> bool:
+        with self._cond:
+            self._cond.wait_for(lambda: self.state != "loading")
             return self.state == "ready"
 
     def submit(self, job: Job) -> None:
@@ -134,10 +140,11 @@ class LmWorker:
             template = self.loader()
             template.warm_up()  # before "ready"
         except Exception as exc:
-            print(f"LM unavailable ({type(exc).__name__}); continuing without it",
+            print(f"LM unavailable ({type(exc).__name__})",
                   file=sys.stderr, flush=True)
             with self._cond:
                 self.state = "disabled"
+                self._cond.notify_all()
             if self.on_disabled is not None:
                 self.on_disabled()
             return
@@ -145,6 +152,7 @@ class LmWorker:
         with self._cond:
             self.template = template
             self.state = "ready"
+            self._cond.notify_all()
         while True:
             job = self._next()
             if job is None:  # stopped
@@ -197,12 +205,14 @@ class ConnectionPipeline:
     def __init__(self, sess: ImeSession, worker, *,
                  grace_ms: float = GRACE_MS, deadline_ms: float = DEADLINE_MS,
                  poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | off
-                 prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic):
+                 prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic,
+                 require_lm: bool = False):
         self.sess = sess
         self.worker = worker
         self.grace_ms = grace_ms
         self.deadline_ms = deadline_ms
         self.poll_ms = poll_ms
+        self.require_lm = require_lm
         self.prefetch = prefetch
         self.prefetch_delay_ms = prefetch_delay_ms
         self.clock = clock
@@ -279,9 +289,15 @@ class ConnectionPipeline:
         if wait:
             job.done.wait(self.grace_ms / 1000)
         if job.done.is_set():
-            return None if job.error or job.picks is None else job.picks
+            if job.error:
+                if self.require_lm:
+                    raise RuntimeError("LM conversion failed")
+                return None
+            return job.picks
         if self.clock() >= job.deadline:
             job.cancelled = True
+            if self.require_lm:
+                raise TimeoutError("LM conversion timed out")
             return None
         return PENDING
 

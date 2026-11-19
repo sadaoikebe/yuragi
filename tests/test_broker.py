@@ -255,6 +255,13 @@ class SelfTestTest(BrokerCase):
         data.mkdir()
         (data / "config.json").write_text('{"lm_rescore": false}', encoding="utf-8")
         self.write_engine_json(["-m", "yuragi.engine", "--data-dir", str(data)], app=ROOT)
+        self.assert_selftest_converts()
+
+    def test_conversion_completes_after_a_timer(self):
+        self.plan("pending_conversion")
+        self.assert_selftest_converts()
+
+    def assert_selftest_converts(self):
         result = subprocess.run([str(broker_binary()), "--data-dir", str(self.data),
                                  "--selftest", str(self.engine_json)],
                                 capture_output=True, text=True, timeout=600)

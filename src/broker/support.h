@@ -108,7 +108,8 @@ private:
     void Done(int code, const std::string& why);
     SelfTestPlatform& platform_;
     enum { Starting, Converting, Ending, Finished } phase_ = Starting;
-    int64_t deadline_ = 0;
+    int64_t deadline_ = 0, poll_at_ = NEVER;
+    int poll_key_time_ = 0;
     int sent_ = 0, answered_ = 0;
     bool converted_ = false;
     int result_ = SELFTEST_OK;

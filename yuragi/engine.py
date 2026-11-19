@@ -112,6 +112,8 @@ def argument_parser() -> argparse.ArgumentParser:
                         help="where the dictionary cache is kept (default data/cache)")
     parser.add_argument("--lm-model", default=None,
                         help="the installed LM model directory (engine.json)")
+    parser.add_argument("--require-lm", action="store_true",
+                        help="enable the LM and finish its warm-up before reporting ready")
     return parser
 
 
@@ -225,13 +227,13 @@ class Engine:
         settings.lm_model = args.lm_model
         for key, value in config.load(args.data_dir / config.CONFIG_NAME).items():
             setattr(settings, key, value)
+        settings.require_lm = args.require_lm
+        if settings.require_lm:
+            settings.lm_rescore = True
         return settings
 
     def load_lm(self, server, settings, warm):
-        """On the LM worker: the model is read after ready; conversions use the
-        Viterbi 1-best until it is there. Before that, the warm-up input is
-        converted once (DESIGN「暖機」), so the user's first LM conversion is not
-        the slow one."""
+        """Load and run a sample conversion on the LM worker (DESIGN「暖機」)."""
         from yuragi.ime.zenz import conversion_picks
         start = time.perf_counter()
         converter = server.build_converter(settings)
@@ -282,10 +284,11 @@ class Engine:
     def new_pipeline(self, sess):
         if self.worker is None:
             return None
-        from yuragi.ime.lm_async import ConnectionPipeline
+        from yuragi.ime.lm_async import ConnectionPipeline, REQUIRED_LM_DEADLINE_MS
         s = self.settings
+        deadline = REQUIRED_LM_DEADLINE_MS if s.require_lm else s.lm_deadline_ms
         return ConnectionPipeline(sess, self.worker, grace_ms=s.lm_grace_ms,
-                                  deadline_ms=s.lm_deadline_ms, prefetch=s.lm_prefetch,
+                                  deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
                                   prefetch_delay_ms=s.lm_prefetch_delay_ms)
 
     # -- serving -----------------------------------------------------------------
@@ -338,6 +341,9 @@ def main(argv=None) -> int:
     engine = Engine(channel, args)
     engine.load(args)
     engine.warm_up()
+    if args.require_lm and not engine.worker.wait_until_loaded():
+        engine.worker.thread.join()
+        fatal("lm-unavailable")
     gc.freeze()  # the dictionary must not be traversed by full collections while typing
     channel.ready()
     log(f"ready in {time.perf_counter() - started:.2f} s")

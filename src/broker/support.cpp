@@ -1,5 +1,6 @@
 #include "support.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -100,7 +101,7 @@ bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& e
 // -- self-test -----------------------------------------------------------------
 
 namespace {
-constexpr int64_t SELFTEST_REPLY_MS = ENGINE_HANG_MS;
+constexpr int64_t SELFTEST_REPLY_MS = 15000;  // required-LM conversion can wait up to 10 s
 constexpr int64_t SELFTEST_START_MS = 600000;  // a first start builds the dictionary cache
 constexpr int64_t SELFTEST_EXIT_MS = 10000;
 // かいはつ on the NICOLA-A plain layer, then Space: one conversion.
@@ -142,10 +143,19 @@ void SelfTest::OnEngineLine(const std::string& line) {
         return;
     }
     if (phase_ != Converting || v.Get("seq").kind == tip_json::Value::Null) return;
+    if (v.Get("error").boolean) {
+        Done(SELFTEST_NOT_CONVERTED, "the conversion request failed");
+        return;
+    }
     ++answered_;
-    deadline_ = platform_.Now() + SELFTEST_REPLY_MS;
     if (v.Get("converted").boolean) converted_ = true;
     if (answered_ < sent_) return;
+    long long timer = 0;
+    if (v.Get("pending").boolean && v.Get("timer").Int(timer)) {
+        poll_key_time_ = static_cast<int>(timer);
+        poll_at_ = platform_.Now() + 10;
+        return;
+    }
     if (converted_) Done(SELFTEST_OK, "converted");
     else Done(SELFTEST_NOT_CONVERTED, "the conversion did not convert");
 }
@@ -174,6 +184,10 @@ void SelfTest::OnEngineExit(int code) {
 }
 
 void SelfTest::OnTimer() {
+    if (phase_ == Converting && platform_.Now() >= poll_at_) {
+        poll_at_ = NEVER;
+        Send("timeout", 0, poll_key_time_);
+    }
     if (platform_.Now() < deadline_ || phase_ == Finished) return;
     if (phase_ == Ending) {
         platform_.Log("selftest: the engine did not exit; ending it");
@@ -189,6 +203,6 @@ void SelfTest::OnTimer() {
     platform_.KillEngine();
 }
 
-int64_t SelfTest::NextDeadline() const { return phase_ == Finished ? NEVER : deadline_; }
+int64_t SelfTest::NextDeadline() const { return phase_ == Finished ? NEVER : std::min(deadline_, poll_at_); }
 
 }  // namespace broker

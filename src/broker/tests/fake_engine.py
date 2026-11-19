@@ -4,6 +4,7 @@
 
 STATE_DIR/plan.json lists what each start does, in order (the last entry repeats):
   "normal"                 ready, then one reply per request
+  "pending_conversion"     Space is settled by a timer, as with an async LM
 Each start appends "pid birth" to STATE_DIR/starts.
 """
 import json
@@ -44,13 +45,18 @@ def main() -> int:
     out = sys.stdout
     out.write(json.dumps({"ready": True, "proto": 1, "warnings": []}) + "\n")
     out.flush()
+    pending = False
     for line in sys.stdin:
         msg = json.loads(line)
         if msg.get("op") in ("open", "close"):
             continue
+        op = msg["op"]
+        converted = pending and op == "timeout"
+        pending = mode == "pending_conversion" and op == "up" and msg.get("vk") == 0x20
         out.write(json.dumps({"sid": msg["sid"], "seq": msg["seq"], "direct": False,
-                              "composition": f"{msg.get('op')}:{msg.get('vk')}",
-                              "commit": "", "converted": False, "pending": False}) + "\n")
+                              "composition": f"{op}:{msg.get('vk')}", "commit": "",
+                              "converted": converted, "pending": pending,
+                              "timer": msg["t"] + 10 if pending else None}) + "\n")
         out.flush()
     return 0
 
