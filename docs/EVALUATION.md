@@ -91,7 +91,7 @@ python3 -m tools.replay_stage1 tests/fixtures/stage1_synthetic.jsonl --json   # 
 - **トークン正解率** = `max(0, 1 - (S + D + I) / N)`（N = 期待トークン数、S/D/I = 置換・欠落・余分、各 1）。
   全完了文の N と誤り数を合算して計算する（文ごとの率の平均ではない）。一致数も別に出す。
 - `ThumbTap`（Space 単独）は採点から外す（`raw_tokens` と `thumb_taps` には残す）。Backspace・Enter・Esc は
-  回数だけ数え、過去のトークンを消さない。キーの自動リピートは重複トークンにしない。
+  回数だけ数え、過去のトークンを消さない。
 - 失敗は編集 1 件ごとに次の型に分ける（**推定であり、物理的な原因の断定ではない**）:
 
 | キー | 条件 |

@@ -198,15 +198,10 @@ class ImeSession:
             self._symbols = load_symbols()
 
     def reset(self) -> None:
-        """Discard composition and all input state after focus loss/termination.
-
-        ChordFsm.reset() intentionally preserves physical down_keys during normal
-        chord processing. A session reset must also forget these physical keys.
-        """
+        """Discard composition and input state after focus loss/termination."""
         self.tokens.clear()
         self.fsm.reset()
-        self.fsm.down_keys.clear()
-        self.fsm.last = None
+        self.fsm.pressed_at.clear()
         self._modifiers.clear()
         self._press_alias.clear()
         self._carry.clear()
@@ -291,8 +286,7 @@ class ImeSession:
             pending = self._finish_pending()
             self._resize(1 if vk == VK_RIGHT else -1)
             return pending
-        # Candidate shortcuts precede the digit keys' faces (a repeat acts
-        # again, as a new press); Shift+digits still enter their symbols.
+        # Candidate shortcuts precede the digit keys' faces; Shift+digits enter symbols.
         if down and not shift and self.converted:
             if vk in (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT) or (
                     self.candidates and ord("1") <= vk <= ord("9")):
@@ -306,8 +300,7 @@ class ImeSession:
                 and self._predict_key()):
             return None
         if down and kind in ("M", "O") and self._alnum_continues():
-            # 英数の続き: no chord FSM; keys type their engravings, Space converts
-            # (a repeat acts again, as any key outside the FSM).
+            # 英数の続き: no chord FSM; keys type their engravings, Space converts.
             pending = self._finish_pending()
             if kind == "O":
                 return self._then(pending, lambda: self._ingest([ThumbTap()]))
