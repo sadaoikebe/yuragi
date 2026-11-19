@@ -244,6 +244,63 @@ class DeadlineTest(unittest.TestCase):
         self.assertTrue(reply["commit"])
         self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
 
+    def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        keys = Typist().kana("きしゃ").space()
+        keys.tap(VK_RETURN).kana("かいせい").space()
+        keys.tap(0x28).tap(VK_RETURN).kana("う")
+        for event in keys.events:
+            reply = pipe.handle(event)
+            self.assertEqual(reply["commit"], "")
+
+        first = pipe.job
+        self.assertIsNotNone(first)
+        worker.complete(first)
+        reply = pipe.handle(TERMINAL)
+        self.assertTrue(reply["pending"])
+        first_commit = reply["commit"]
+        self.assertTrue(first_commit)
+
+        second = pipe.job
+        self.assertIsNotNone(second)
+        self.assertIsNot(second, first)
+        self.assertTrue(pipe.queue)
+        reply = pipe.handle(TERMINAL)
+        self.assertTrue(reply["pending"])
+        self.assertEqual(reply["commit"], "")
+
+        worker.complete(second)
+        reply = pipe.handle(TERMINAL)
+        self.assertFalse(reply["pending"])
+        self.assertTrue(reply["commit"])
+        self.assertFalse(pipe.queue)
+        self.assertEqual((first_commit + reply["commit"], final_state(reply)),
+                         run_reference(self.session, keys.events, PickyModel()))
+        self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
+
+    def test_disconnect_drops_pending_enter_before_and_after_completion(self):
+        for completed in (False, True):
+            with self.subTest(completed=completed):
+                pipe, worker, clock = self.pipeline()
+                for event in Typist().kana("きしゃ").space().events:
+                    reply = pipe.handle(event)
+                self.assertTrue(reply["pending"])
+                old = pipe.job
+                self.assertTrue(pipe.handle({"op": "down", "vk": VK_RETURN, "t": 1000})["pending"])
+                if completed:
+                    worker.complete(old)
+                pipe.close()
+                self.assertIsNone(pipe.job)
+                self.assertFalse(pipe.queue)
+                if not completed:
+                    self.assertTrue(old.cancelled)
+                    worker.complete(old)
+
+                replacement = ConnectionPipeline(self.session(), worker, clock=clock)
+                reply = replacement.handle(TERMINAL)
+                self.assertEqual((reply["commit"], reply["composition"], reply["pending"]),
+                                 ("", "", False))
+
     def test_result_deadline_uses_completion_time(self):
         for offset in (-0.001, 0, 0.001):
             with self.subTest(offset=offset):
@@ -262,19 +319,27 @@ class DeadlineTest(unittest.TestCase):
 
     def test_reset_and_direct_switch_drop_pending_enter(self):
         for boundary in ({"op": "reset"}, {"op": "set_direct", "direct": True}):
-            with self.subTest(boundary=boundary):
-                pipe, worker, _ = self.pipeline()
-                for event in Typist().kana("きしゃ").space().events:
-                    pipe.handle(event)
-                old = pipe.job
-                self.assertIsNotNone(old)
-                self.assertTrue(pipe.handle({"op": "down", "vk": VK_RETURN, "t": 1000})["pending"])
+            for completed in (False, True):
+                self.assert_boundary_drops_pending_enter(boundary, completed)
+
+    def assert_boundary_drops_pending_enter(self, boundary, completed):
+        with self.subTest(boundary=boundary, completed=completed):
+            pipe, worker, _ = self.pipeline()
+            for event in Typist().kana("きしゃ").space().events:
+                pipe.handle(event)
+            old = pipe.job
+            self.assertIsNotNone(old)
+            self.assertTrue(pipe.handle({"op": "down", "vk": VK_RETURN, "t": 1000})["pending"])
+            if completed:
                 worker.complete(old)
-                reply = pipe.handle(boundary)
-                self.assertEqual(reply["commit"], "")
-                self.assertFalse(reply["pending"])
-                self.assertIsNone(pipe.spec)
-                self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
+            reply = pipe.handle(boundary)
+            self.assertEqual(reply["commit"], "")
+            self.assertFalse(reply["pending"])
+            self.assertIsNone(pipe.spec)
+            if not completed:
+                self.assertTrue(old.cancelled)
+                worker.complete(old)
+            self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
 
     def test_deadline_falls_back_to_viterbi(self):
         typist = Typist().kana("きしゃ").space()

@@ -152,6 +152,13 @@ static void OrderOfReplies() {
     assert(!f.Answer(1));  // already answered
     assert(f.Answer(2) && f.Answer(3));
     assert(!f.Waiting() && f.Last() == 3);
+
+    const auto old = f.Next(1200);
+    f.Clear();  // retiring the context drops outstanding requests
+    const auto current = f.Next(1300);
+    assert(current > old);
+    assert(!f.Answer(old) && f.Waiting(current));
+    assert(f.Answer(current));
 }
 
 static void ConnectingAndSpawning() {
