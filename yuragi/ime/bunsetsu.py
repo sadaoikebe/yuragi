@@ -10,7 +10,8 @@ from typing import Iterator
 
 from yuragi.lattice.alternation import Plan, admits, after
 from yuragi.lattice.decode import Piece
-from yuragi.lattice.mozc_dict import BOS_ID, DICT_DIR, UNK_COST, MozcLex, require_dict_files
+from yuragi.lattice import mozc_dict
+from yuragi.lattice.mozc_dict import BOS_ID, UNK_COST, MozcLex, require_dict_files
 from yuragi.lattice.token_viterbi import BOUNDARY_RID, end_cost, spans_from, word_cost
 
 from .dates import date_spellings
@@ -28,8 +29,9 @@ SYMBOL_HEAD = 6
 
 @lru_cache(maxsize=1)
 def _pos_names() -> dict[int, str]:
-    require_dict_files(["id.def"], DICT_DIR)
-    return {int(i): name.strip() for line in (DICT_DIR / "id.def").read_text(
+    directory = mozc_dict.DICT_DIR  # read at call time so --dict-dir overrides apply
+    require_dict_files(["id.def"], directory)
+    return {int(i): name.strip() for line in (directory / "id.def").read_text(
         encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
 
 
