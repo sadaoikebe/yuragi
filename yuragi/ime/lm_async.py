@@ -44,6 +44,10 @@ class Job:
     not_before: float = 0.0  # time.monotonic(); delays a prefetch
     deadline: float = 0.0  # when wanted: a fault; log and use the Viterbi 1-best
     cancelled: bool = False
+    submitted_at: float = 0.0
+    wanted_at: float | None = None
+    started_at: float | None = None
+    completed_at: float | None = None
     done: threading.Event = field(default_factory=threading.Event)
     picks: list | None = None
     error: bool = False
@@ -52,12 +56,13 @@ class Job:
 class LmWorker:
     """One daemon thread; the only user of the model."""
 
-    def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None):
+    def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None, timing=False):
         """on_disabled(): told once when the LM could not be loaded. Called on
         the worker thread."""
         self.loader = loader
         self.on_disabled = on_disabled
         self.lex = lex
+        self.timing = timing
         self.clock = clock
         self.state = "loading"
         self.template = None
@@ -81,6 +86,7 @@ class LmWorker:
 
     def submit(self, job: Job) -> None:
         with self._cond:
+            job.submitted_at = self.clock()
             if job.wanted:
                 self._wanted.append(job)
             else:
@@ -103,6 +109,7 @@ class LmWorker:
             slot = id(job.owner)
             if self._slots.get(slot) is job:
                 del self._slots[slot]
+                job.not_before = min(job.not_before, job.wanted_at)
                 self._wanted.appendleft(job)
                 self._cond.notify()
 
@@ -183,9 +190,11 @@ class LmWorker:
                         waits = [j.not_before - now for j in self._slots.values()]
                         self._cond.wait(min(waits) if waits else None)
                         continue
-                if job.cancelled:
+                now = self.clock()
+                if job.cancelled or (job.wanted and now >= job.deadline):
                     job.done.set()
                     continue
+                job.started_at = now
                 self._running = job
                 return job
 
@@ -200,8 +209,14 @@ class LmWorker:
             job.error = True
             print(f"LM job failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         with self._cond:
+            job.completed_at = self.clock()
             self._running = None
             job.done.set()
+        if self.timing:
+            print(f"LM worker job={id(job)} submitted={job.submitted_at:.6f} "
+                  f"eligible={max(job.submitted_at, job.not_before):.6f} "
+                  f"started={job.started_at:.6f} completed={job.completed_at:.6f} "
+                  f"cancelled={job.cancelled} error={job.error}", file=sys.stderr, flush=True)
 
 
 PENDING = object()
@@ -214,13 +229,14 @@ class ConnectionPipeline:
                  grace_ms: float = GRACE_MS, deadline_ms: float = DEADLINE_MS,
                  poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | off
                  prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic,
-                 require_lm: bool = False):
+                 require_lm: bool = False, timing: bool = False):
         self.sess = sess
         self.worker = worker
         self.grace_ms = grace_ms
         self.deadline_ms = deadline_ms
         self.poll_ms = poll_ms
         self.require_lm = require_lm
+        self.timing = timing
         self.prefetch = prefetch
         self.prefetch_delay_ms = prefetch_delay_ms
         self.clock = clock
@@ -234,7 +250,7 @@ class ConnectionPipeline:
         op = msg.get("op")
         if "t" in msg:
             self.last_t = int(msg["t"])
-        if self.sess._await is not None and op in ("reset", "set_direct"):
+        if op == "reset" or (op == "set_direct" and msg["direct"] != self.sess.direct):
             self._abandon()
         if (self.sess._await is not None and op == "timeout"
                 and self.queue and self.queue[-1].get("op") == "timeout"):
@@ -270,46 +286,61 @@ class ConnectionPipeline:
 
     def close(self) -> None:
         """Connection ended: nothing of this connection may run any more."""
-        self.worker.cancel_owner(self)
+        self._abandon()
 
     def _abandon(self) -> None:
         self.worker.cancel_owner(self)
         self.queue.clear()
         self.sess._await = None
         self.sess._continuation = None
-        self.job = None
+        self.job = self.spec = None
+        self.spec_key = None
 
     def _submit_convert(self) -> None:
         request = self.sess._await
-        deadline = self.clock() + self.deadline_ms / 1000
+        wanted_at = self.clock()
+        deadline = wanted_at + self.deadline_ms / 1000
         spec = self.spec
         if (spec is not None and not spec.cancelled and not spec.error
                 and spec.request.key == request.key):
+            spec.wanted_at = wanted_at
             self.worker.promote(spec, deadline)
             self.job = spec
+            self.spec = None
+            self.spec_key = None
         else:
             self.worker.cancel_owner(self)
-            self.job = Job(self, request, wanted=True, deadline=deadline)
+            self.job = Job(self, request, wanted=True, deadline=deadline, wanted_at=wanted_at)
             self.worker.submit(self.job)
 
     def _outcome(self, *, wait: bool):
         job = self.job
-        if wait:
+        if wait and self.grace_ms > 0:
             job.done.wait(self.grace_ms / 1000)
-        if job.done.is_set():
+        now = self.clock()
+        completed = job.completed_at
+        if completed is not None and completed <= job.deadline:
+            self._trace_resolution(job, now, "error" if job.error else "lm")
             if job.error:
                 if self.require_lm:
                     raise RuntimeError("LM conversion failed")
                 return None
             return job.picks
-        if self.clock() >= job.deadline:
-            job.cancelled = True
+        if now >= job.deadline:
+            self.worker.cancel_owner(self)
+            self._trace_resolution(job, now, "deadline")
             if self.require_lm:
                 raise TimeoutError("LM conversion timed out")
             print(f"LM conversion not done after {self.deadline_ms:.0f} ms (fault); "
                   "dictionary 1-best used", file=sys.stderr, flush=True)
             return None
         return PENDING
+
+    def _trace_resolution(self, job: Job, now: float, outcome: str) -> None:
+        if self.timing:
+            print(f"LM resolve job={id(job)} submitted={job.submitted_at:.6f} "
+                  f"wanted={job.wanted_at:.6f} resolved={now:.6f} "
+                  f"started={job.started_at} outcome={outcome}", file=sys.stderr, flush=True)
 
     def _prefetch(self) -> None:
         sess = self.sess

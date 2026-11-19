@@ -112,6 +112,10 @@ def argument_parser() -> argparse.ArgumentParser:
                         help="where the dictionary cache is kept (default data/cache)")
     parser.add_argument("--lm-model", default=None,
                         help="the installed LM model directory (engine.json)")
+    parser.add_argument("--lm-grace-ms", type=float, default=None,
+                        help="override the LM wait for latency comparisons")
+    parser.add_argument("--lm-timing", action="store_true",
+                        help="log LM job and resolution timestamps")
     parser.add_argument("--require-lm", action="store_true",
                         help="enable the LM and finish its warm-up before reporting ready")
     return parser
@@ -225,6 +229,8 @@ class Engine:
         settings.learning_file = args.data_dir / "learning.jsonl"
         settings.personal_file = args.data_dir / "personal_lexicon.jsonl"
         settings.lm_model = args.lm_model
+        settings.lm_grace_ms = args.lm_grace_ms
+        settings.lm_timing = args.lm_timing
         for key, value in config.load(args.data_dir / config.CONFIG_NAME).items():
             setattr(settings, key, value)
         settings.require_lm = args.require_lm
@@ -270,7 +276,8 @@ class Engine:
         if self.settings.lm_rescore:
             settings = self.settings
             self.worker = LmWorker(loader=lambda: self.load_lm(server, settings, warm),
-                                   lex=self.loaded._lex, on_disabled=self.lm_disabled)
+                                   lex=self.loaded._lex, on_disabled=self.lm_disabled,
+                                   timing=settings.lm_timing)
 
     # -- sessions ----------------------------------------------------------------
     def new_session(self):
@@ -294,7 +301,7 @@ class Engine:
         grace = GRACE_MS if s.lm_grace_ms is None else s.lm_grace_ms
         return ConnectionPipeline(sess, self.worker, grace_ms=grace,
                                   deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
-                                  prefetch_delay_ms=s.lm_prefetch_delay_ms)
+                                  prefetch_delay_ms=s.lm_prefetch_delay_ms, timing=s.lm_timing)
 
     # -- serving -----------------------------------------------------------------
     def serve(self, stream) -> None:

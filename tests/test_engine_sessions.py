@@ -22,7 +22,7 @@ from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 
 SETTINGS = Namespace(lm_grace_ms=30, lm_deadline_ms=None, lm_prefetch="thumb",
-                     lm_prefetch_delay_ms=30, require_lm=False)
+                     lm_prefetch_delay_ms=30, require_lm=False, lm_timing=False)
 
 
 def loaded_session():

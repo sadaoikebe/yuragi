@@ -709,7 +709,8 @@ static int Px(HWND h, int pixels_at_96) {
 
 // Below the caret, or above if it would cross the work area's bottom.
 // Screen coordinates; hidden when the text is not laid out.
-static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND window) {
+static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND window,
+                            bool log_candidates = false) {
     if (!window) return;
     ITfContextView* view = nullptr;
     bool positioned = false;
@@ -726,9 +727,11 @@ static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, H
             GetMonitorInfoW(MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST), &monitor);
             int y = tip_logic::CandidateTop(rect.top, rect.bottom, bounds.bottom - bounds.top,
                                             Px(window, 4), monitor.rcWork.bottom);
-            SetWindowPos(window, HWND_TOPMOST, rect.left, y, 0, 0,
-                         SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            positioned = true;
+            bool first_show = log_candidates && !IsWindowVisible(window);
+            positioned = SetWindowPos(window, HWND_TOPMOST, rect.left, y, 0, 0,
+                                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+            if (positioned && first_show)
+                Log(L"candidate shown window=%p t=%llu", static_cast<void*>(window), NowMs());
         }
         view->Release();
     }
@@ -769,7 +772,7 @@ public:
             ITfRange* caret = nullptr;
             if (SUCCEEDED(state_->composition->GetRange(&caret))) {
                 caret->Collapse(ec, TF_ANCHOR_END);
-                PlaceCandidates(ec, state_->ctx, caret, *candidate_);
+                PlaceCandidates(ec, state_->ctx, caret, *candidate_, g_log);
                 caret->Release();
             }
             return S_OK;
@@ -892,7 +895,7 @@ private:
             selection.range = caret; selection.style.ase = TF_AE_NONE;
             ctx->SetSelection(ec, 1, &selection);
             if (candidate_ && *candidate_ && !commit && reply.converted && !reply.candidates.empty())
-                PlaceCandidates(ec, ctx, caret, *candidate_);
+                PlaceCandidates(ec, ctx, caret, *candidate_, g_log);
             caret->Release();
         }
         if (commit || text.empty()) End(ec, state_);
@@ -1102,7 +1105,7 @@ public:
         FinishLocal();
         link_.Stop();
         UnadviseLayout();
-        for (UINT id : {kTimerReply, kTimerNotice}) KillTimer(hwnd_, id);
+        KillTimer(hwnd_, kTimerNotice);
         for (HWND* w : {&cand_hwnd_, &notice_hwnd_, &hwnd_}) {
             if (*w) DestroyWindow(*w);
             *w = nullptr;
@@ -1392,7 +1395,7 @@ public:
 private:
     enum class Scope { Unknown, Allowed, Password };
     static const UINT kLinkMessage = WM_APP + 1;
-    static const UINT_PTR kTimerReply = 1, kTimerNotice = 3;
+    static const UINT_PTR kTimerNotice = 3;
     static const DWORD kLangBarCookie = 0x6f79;
 
     // -- the TIP's window: link messages and its one-shot timers ---------------------------
@@ -1423,7 +1426,12 @@ private:
     }
 
     void OnTimer(UINT_PTR id) {
-        if (id == kTimerReply) {
+        if (id != 0 && id == reply_timer_) {
+            reply_timer_ = 0;
+            if (FocusChanged()) {
+                FocusMoved();
+                return;
+            }
             // DESIGN「タイマー」: the FSM's chord deadline, or the LM's next look.
             if (!direct_) SendRequest("timeout", "\"t\":" + std::to_string(NowMs()));
         } else if (id == kTimerNotice) {
@@ -1434,6 +1442,11 @@ private:
     void ArmTimer(UINT_PTR id, ULONGLONG at) {
         ULONGLONG now = NowMs();
         SetTimer(hwnd_, id, at > now ? (UINT)(std::min<ULONGLONG>)(at - now, 0x7fffffff) : 0, nullptr);
+    }
+
+    void CancelReplyTimer() {
+        if (hwnd_ && reply_timer_) KillTimer(hwnd_, reply_timer_);
+        reply_timer_ = 0;
     }
 
     // -- connection -------------------------------------------------------------------------
@@ -1498,17 +1511,24 @@ private:
         if (m.hello || m.event == "state" || (m.has_seq && !m.engine)) broker_state_ = m.state;
         // DESIGN「使えない間の打鍵」: a ready engine has opened a new session, in kana input.
         if (!was_ready && broker_state_ == "ready" && direct_) SendRequest("set_direct", "\"direct\":true");
-        if (tip_logic::CommitsVisibleText(m)) FinishLocal();
-        if (!m.has_seq) return false;
+        if (!m.has_seq) {
+            if (tip_logic::CommitsVisibleText(m)) FinishLocal();
+            return false;
+        }
         if (!in_flight_.Answer(m.seq)) return false;  // a request we gave up or never sent
-        if (!m.engine) return false;  // {"seq","state"}: not processed; handled above
-        // Sent for the field the focus has left: its text was committed there;
-        // writing this reply now would put it into the new field.
         if (m.seq <= stale_upto_) return false;
+        if (m.engine && FocusChanged()) {
+            FocusMoved();
+            return false;
+        }
+        if (tip_logic::CommitsVisibleText(m)) FinishLocal(!m.engine);
+        if (!m.engine) return false;  // {"seq","state"}: not processed; handled above
         if (m.error) {
             NoteReply(m);  // the engine started a clean session; the text stays (DESIGN「見えている文字の確定」)
             return false;
         }
+        Log(L"reply client=%p seq=%lld t=%llu pending=%d",
+            static_cast<void*>(this), m.seq, NowMs(), m.pending);
         if (m.seq == wanted) return true;
         NoteReply(m);
         ApplyReply(m, sync);
@@ -1544,6 +1564,8 @@ private:
             in_flight_.Answer(seq);
             return false;  // not sent: the key goes to the application
         }
+        Log(L"key sent client=%p seq=%lld t=%llu space=%d down=%d",
+            static_cast<void*>(this), seq, start, vk == VK_SPACE, down);
         ULONGLONG deadline = start + tip_logic::KEY_BUDGET_MS;
         Message r;
         for (;;) {
@@ -1556,6 +1578,7 @@ private:
             if (now >= deadline) return true;
             WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
         }
+        if (r.seq <= stale_upto_) return true;
         bool eat = tip_logic::EatAfterReply(down, vk, mods, before, before_timer, before_tokens, r);
         NoteReply(r);
         if (settings_.log_text)
@@ -1603,14 +1626,23 @@ private:
         cand_index_ = r.cand_index;
         if (!r.direct && r.converted && !r.candidates.empty()) ShowCands();
         else HideCands();
-        if (timer_pending_) ArmTimer(kTimerReply, r.timer);
-        else KillTimer(hwnd_, kTimerReply);
+        CancelReplyTimer();
+        if (r.converted && cand_hwnd_ && !r.candidates.empty())
+            Log(L"candidate reply client=%p seq=%lld window=%p",
+                static_cast<void*>(this), r.seq, static_cast<void*>(cand_hwnd_));
+        if (timer_pending_) {
+            // A queued WM_TIMER survives KillTimer. A fresh ID prevents an old
+            // notification from polling a conversion in the new input context.
+            reply_timer_ = ++next_reply_timer_;
+            ArmTimer(reply_timer_, r.timer);
+        }
     }
 
     void ApplyReply(const Message& r, bool sync) {
+        if (r.seq <= stale_upto_) return;
         ITfContext* ctx = FocusContext();
         if (!ctx) return;
-        if (state_ && state_->ctx != ctx) {
+        if (ctx != scope_ctx_ || (state_ && state_->ctx != ctx)) {
             ctx->Release();
             FocusMoved();
             return;
@@ -1650,13 +1682,20 @@ private:
     }
 
     // DESIGN「見えている文字の確定」: the conversion ends with its text on screen; local state starts over.
-    void FinishLocal() {
+    void FinishLocal(bool invalidate_replies = true) {
+        if (invalidate_replies) {
+            stale_upto_ = in_flight_.Last();
+            in_flight_.Clear();
+        }
+        CancelReplyTimer();
         auto old = state_;
         state_.reset();
-        UnadviseLayout();
         if (old) {
             old->active = false;
             old->pending.clear();
+        }
+        UnadviseLayout();
+        if (old) {
             retired_.push_back(old);
             if (old->composition && client_ != TF_CLIENTID_NULL) RequestEdit(EditSession::Finalize, old, true);
         }
@@ -1666,7 +1705,6 @@ private:
         n_tokens_ = 0;
         for (bool& eaten : down_eaten_) eaten = false;
         toggle_down_ = toggle_eaten_ = false;
-        if (hwnd_) KillTimer(hwnd_, kTimerReply);
         HideCands();
     }
 
@@ -1674,7 +1712,6 @@ private:
     // forgets it, and the field's kind is looked up once (DESIGN「パスワード欄」).
     void FocusMoved() {
         FinishLocal();
-        stale_upto_ = in_flight_.Last();
         SendRequest("reset");
         stopped_told_ = false;
         HideNotice();
@@ -1888,7 +1925,8 @@ private:
     Link link_state_ = Link::Connecting;
     std::string broker_state_;
     tip_logic::InFlight in_flight_;
-    long long stale_upto_ = 0;  // replies up to this number belong to a field left behind
+    long long stale_upto_ = 0;  // last sequence issued before local composition was retired
+    UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerNotice;
     tip_logic::ConnectGate connect_gate_;
     HWND hwnd_ = nullptr, cand_hwnd_ = nullptr, notice_hwnd_ = nullptr;
     Scope scope_ = Scope::Unknown;

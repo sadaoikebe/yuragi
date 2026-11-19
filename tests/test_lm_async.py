@@ -50,6 +50,7 @@ class ManualWorker:
         self.jobs: list[Job] = []
         self.countdown: dict[int, int] = {}
         self.conversions = 0
+        self.clock = Clock()
         self.draining = False  # complete_all(): later conversions complete at once too
 
     def available(self):
@@ -88,6 +89,7 @@ class ManualWorker:
             job.picks = conversion_picks(r.parts, self.lex, r.learning, r.lm_context,
                                          replace(self.template, last={}),
                                          cancelled=lambda: job.cancelled)
+        job.completed_at = self.clock()
         job.done.set()
 
     def tick(self):
@@ -179,7 +181,7 @@ class DeadlineTest(unittest.TestCase):
     def pipeline(self, **kwargs):
         sess = self.session()
         worker = ManualWorker(self.lex, PickyModel(), delay=lambda i: 10 ** 6)
-        clock = Clock()
+        clock = worker.clock
         return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
 
     def test_deadline_is_a_fault_detector_above_normal_conversions(self):
@@ -216,6 +218,63 @@ class DeadlineTest(unittest.TestCase):
         self.assertEqual(log.getvalue(), "")
         self.assertEqual((commits, final_state(reply)),
                          run_reference(self.session, head + tail.events, PickyModel()))
+
+    def test_completed_prefetch_opens_candidates_in_the_space_reply(self):
+        pipe, worker, _ = self.pipeline()
+        worker.eager_prefetch = True
+        for event in Typist().kana("きしゃ").space().events:
+            reply = pipe.handle(event)
+        self.assertEqual(len(worker.jobs), 1)
+        self.assertFalse(reply["pending"])
+        self.assertTrue(reply["converted"])
+        self.assertTrue(reply["candidates"])
+
+    def test_pending_navigation_enter_and_next_character_replay_in_order(self):
+        pipe, worker, _ = self.pipeline()
+        keys = Typist().kana("きしゃ").space()
+        keys.tap(0x28, gap=5).tap(VK_RETURN, gap=5).kana("う", gap=5)
+        for event in keys.events:
+            reply = pipe.handle(event)
+        self.assertTrue(reply["pending"])
+        self.assertEqual(reply["commit"], "")
+        worker.complete_all()
+        reply = pipe.handle(TERMINAL)
+        self.assertEqual((reply["commit"], final_state(reply)),
+                         run_reference(self.session, keys.events, PickyModel()))
+        self.assertTrue(reply["commit"])
+        self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
+
+    def test_result_deadline_uses_completion_time(self):
+        for offset in (-0.001, 0, 0.001):
+            with self.subTest(offset=offset):
+                pipe, worker, clock = self.pipeline(prefetch="off")
+                for event in Typist().kana("きしゃ").space().events:
+                    reply = pipe.handle(event)
+                self.assertTrue(reply["pending"])
+                job = pipe.job
+                clock.now = job.deadline + offset
+                worker.complete(job)
+                clock.now = job.deadline + 0.010
+                with redirect_stderr(io.StringIO()) as log:
+                    reply = pipe.handle(TERMINAL)
+                self.assertFalse(reply["pending"])
+                self.assertEqual("fault" in log.getvalue(), offset > 0)
+
+    def test_reset_and_direct_switch_drop_pending_enter(self):
+        for boundary in ({"op": "reset"}, {"op": "set_direct", "direct": True}):
+            with self.subTest(boundary=boundary):
+                pipe, worker, _ = self.pipeline()
+                for event in Typist().kana("きしゃ").space().events:
+                    pipe.handle(event)
+                old = pipe.job
+                self.assertIsNotNone(old)
+                self.assertTrue(pipe.handle({"op": "down", "vk": VK_RETURN, "t": 1000})["pending"])
+                worker.complete(old)
+                reply = pipe.handle(boundary)
+                self.assertEqual(reply["commit"], "")
+                self.assertFalse(reply["pending"])
+                self.assertIsNone(pipe.spec)
+                self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
 
     def test_deadline_falls_back_to_viterbi(self):
         typist = Typist().kana("きしゃ").space()
