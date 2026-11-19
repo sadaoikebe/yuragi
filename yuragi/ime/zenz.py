@@ -76,24 +76,19 @@ class Reviewer(Protocol):
     def reading_nll(self, readings: list[str]) -> list[float]: ...
 
 
-def pick_device(torch) -> str:
-    """"cuda" when a CUDA GPU really runs torch's kernels, else "cpu".
+def cuda_devices() -> tuple[str, ...]:
+    """Enumerate the CUDA devices visible to this process in PyTorch's order."""
+    import torch
 
-    A CUDA build of torch can see a GPU it has no kernels for (an old
-    architecture) or lose the driver; then the model runs on the CPU."""
     try:
-        if torch.cuda.is_available():
-            probe = torch.ones(2, device="cuda")
-            if float((probe + probe).sum().item()) == 4.0:
-                return "cuda"
-    except Exception:
-        pass
-    return "cpu"
+        return tuple(f"cuda:{index}" for index in range(torch.cuda.device_count()))
+    except (RuntimeError, OSError):
+        return ()
 
 
 class ZenzModel:
     def __init__(self, model: str = DEFAULT_MODEL, *, threads: int | None = DEFAULT_THREADS,
-                 device: str | None = None) -> None:
+                 device: str = "cpu") -> None:
         import torch
         from transformers import AutoModelForCausalLM, GPT2Tokenizer
 
@@ -101,7 +96,7 @@ class ZenzModel:
             torch.set_num_threads(threads)
         self.torch = torch
         # float32 on either device: the GPU changes the speed, not the picks.
-        self.device = device or pick_device(torch)
+        self.device = device
         # local_files_only: the IME never goes to the network (DESIGN「エンジン」);
         # the model is fetched at install (packaging/fetch_model.py).
         self.tok = GPT2Tokenizer.from_pretrained(model, local_files_only=True)

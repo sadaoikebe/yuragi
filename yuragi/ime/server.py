@@ -114,7 +114,7 @@ def argument_parser() -> argparse.ArgumentParser:
                     help="zenz reviews per kana run (default 1)")
     lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads (default 4)")
     lm.add_argument("--lm-device", choices=("cuda", "cpu"), default=None,
-                    help="where zenz runs (default: a CUDA GPU if torch can use one, else the CPU)")
+                    help="force a device (default: try CUDA devices, then the CPU)")
     lm.add_argument("--lm-timing", action="store_true",
                     help="log the LM's time per conversion to stderr (no text)")
     lm.add_argument("--lm-prefetch", choices=("thumb", "off"), default="thumb",
@@ -131,19 +131,36 @@ def argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_converter(args):
-    """Import, construct and warm up the zenz converter (raises without torch etc.)."""
+def build_converter(args, *, warm_conversion=None):
+    """Return the first converter that completes placement and warm-up."""
     from yuragi.ime.zenz import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL, DEFAULT_STEPS,
-                                 DEFAULT_THREADS, ZenzConverter, ZenzModel)
-    converter = ZenzConverter(
-        ZenzModel(args.lm_model or DEFAULT_MODEL,
-                  threads=DEFAULT_THREADS if args.lm_threads is None else args.lm_threads,
-                  device=getattr(args, "lm_device", None)),
-        alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
-        k=DEFAULT_K if args.lm_k is None else args.lm_k,
-        steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps)
-    converter.warm_up()  # before "ready"
-    return converter
+                                DEFAULT_THREADS, ZenzConverter, ZenzModel, cuda_devices)
+
+    def prepare(device):
+        converter = ZenzConverter(
+            ZenzModel(args.lm_model or DEFAULT_MODEL,
+                      threads=DEFAULT_THREADS if args.lm_threads is None else args.lm_threads,
+                      device=device),
+            alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
+            k=DEFAULT_K if args.lm_k is None else args.lm_k,
+            steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps)
+        converter.warm_up()
+        if warm_conversion is not None:
+            warm_conversion(converter)
+        return converter
+
+    device = getattr(args, "lm_device", None)
+    if device is not None:
+        return prepare(device)
+    for device in cuda_devices():
+        try:
+            return prepare(device)
+        except Exception as exc:
+            print(f"LM startup failed on {device} ({type(exc).__name__})",
+                  file=sys.stderr, flush=True)
+        # Collect cycles from the failed model before trying a fresh one.
+        gc.collect()
+    return prepare("cpu")
 
 
 def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:

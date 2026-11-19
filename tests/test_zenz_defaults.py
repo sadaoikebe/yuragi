@@ -6,6 +6,9 @@ model and torch are stand-ins.
 from __future__ import annotations
 
 from argparse import Namespace
+import io
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -26,13 +29,15 @@ class DefaultsTest(unittest.TestCase):
                 return None
 
         args = server.argument_parser().parse_args([])
-        with mock.patch.object(zenz, "ZenzModel", FakeModel):
+        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
+              mock.patch.object(zenz, "cuda_devices", return_value=())):
             converter = server.build_converter(args)
-        self.assertEqual(made, dict(model=zenz.DEFAULT_MODEL, threads=4, device=None))
+        self.assertEqual(made, dict(model=zenz.DEFAULT_MODEL, threads=4, device="cpu"))
         self.assertEqual((converter.k, converter.steps, converter.alpha), (4, 1, 1.0))
         args = server.argument_parser().parse_args(
             ["--lm-threads", "2", "--lm-k", "8", "--lm-steps", "2", "--lm-device", "cpu"])
-        with mock.patch.object(zenz, "ZenzModel", FakeModel):
+        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
+              mock.patch.object(zenz, "cuda_devices", return_value=())):
             converter = server.build_converter(args)
         self.assertEqual((made["threads"], made["device"]), (2, "cpu"))
         self.assertEqual((converter.k, converter.steps), (8, 2))
@@ -48,10 +53,11 @@ class DefaultsTest(unittest.TestCase):
             def review(self, *args):
                 return None
 
-        with mock.patch.object(zenz, "ZenzModel", FakeModel):
+        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
+              mock.patch.object(zenz, "cuda_devices", return_value=())):
             server.build_converter(Namespace(lm_model=None, lm_threads=None, lm_alpha=None,
                                              lm_k=None, lm_steps=None))
-        self.assertEqual(made, dict(threads=4, device=None))
+        self.assertEqual(made, dict(threads=4, device="cpu"))
 
     def test_engine_pipeline_deadline(self):
         settings = server.argument_parser().parse_args([])
@@ -65,112 +71,98 @@ class DefaultsTest(unittest.TestCase):
         self.assertEqual(engine.new_pipeline(sess=None).deadline_ms, 250.0)
 
 
-class FakeCuda:
-    def __init__(self, available, works=True):
-        self.available, self.works = available, works
+class DeviceStartupTest(unittest.TestCase):
+    def setUp(self):
+        self.devices = 2
+        self.placement_failures = set()
+        self.warmup_failures = set()
+        self.placed = []
+        self.warmed = []
+        self.model_loads = []
+        self.set_threads = mock.Mock()
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(device_count=lambda: self.devices),
+            set_num_threads=self.set_threads,
+            tensor=lambda rows, *, device: (rows, device),
+        )
 
-    def is_available(self):
-        return self.available
+        def place(device):
+            self.placed.append(device)
+            if device in self.placement_failures:
+                raise RuntimeError("model placement failed")
+            return SimpleNamespace(eval=lambda: None)
 
+        def load_model(name, **options):
+            self.model_loads.append(options)
+            return SimpleNamespace(to=place)
 
-class FakeTensor:
-    def __init__(self, value):
-        self.value = value
+        tokenizer = SimpleNamespace(
+            eos_token_id=1, byte_decoder={"a": 97}, get_vocab=lambda: {"a": 0},
+        )
+        transformers = SimpleNamespace(
+            AutoModelForCausalLM=SimpleNamespace(from_pretrained=load_model),
+            GPT2Tokenizer=SimpleNamespace(from_pretrained=lambda *a, **kw: tokenizer),
+        )
+        self.enterContext(mock.patch.dict(sys.modules, {"torch": torch, "transformers": transformers}))
+        self.enterContext(mock.patch.object(zenz.ZenzModel, "review", autospec=True,
+                                            side_effect=self.warm_up))
+        self.enterContext(mock.patch("sys.stderr", new_callable=io.StringIO))
 
-    def __add__(self, other):
-        return FakeTensor(self.value + other.value)
+    def warm_up(self, model, *_):
+        self.warmed.append(model.device)
+        if model.device in self.warmup_failures:
+            raise RuntimeError("model inference failed")
 
-    def sum(self):
-        return self
+    def build(self, *argv):
+        return server.build_converter(server.argument_parser().parse_args(argv))
 
-    def item(self):
-        return self.value
+    def test_uses_the_first_gpu_that_warms_up(self):
+        model = self.build().model
+        self.assertEqual(self.placed, ["cuda:0"])
+        self.assertEqual(self.warmed, ["cuda:0"])
+        self.assertEqual(model._ids([[0]]), ([[0]], "cuda:0"))
+        self.set_threads.assert_called_once_with(4)
+        self.assertTrue(self.model_loads[0]["local_files_only"])
 
+    def test_uses_cpu_without_cuda_devices(self):
+        self.devices = 0
+        self.assertEqual(self.build().model.device, "cpu")
+        self.assertEqual(self.warmed, ["cpu"])
 
-class FakeTorch:
-    def __init__(self, available, works=True):
-        self.cuda = FakeCuda(available)
-        self.works = works
-
-    def ones(self, n, device):
-        if not self.works:
-            raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
-        return FakeTensor(float(n))
-
-
-class DeviceTest(unittest.TestCase):
-    def test_gpu_when_torch_can_use_it(self):
-        self.assertEqual(zenz.pick_device(FakeTorch(True)), "cuda")
-
-    def test_cpu_without_a_gpu(self):
-        self.assertEqual(zenz.pick_device(FakeTorch(False)), "cpu")
-
-    def test_cpu_when_the_gpu_cannot_run_torch(self):
-        self.assertEqual(zenz.pick_device(FakeTorch(True, works=False)), "cpu")
-
-
-class ModelPlacementTest(unittest.TestCase):
-    """ZenzModel puts the model and every input on the device pick_device chose."""
-
-    def load(self, torch_module, **kwargs):
-        import sys
-        import types
-        calls = {}
-
-        class Model:
-            def to(self, device):
-                calls["to"] = device
-                return self
-
-            def eval(self):
-                return self
-
-        class Auto:
-            @staticmethod
-            def from_pretrained(name, **kw):
-                calls["model"] = (name, kw)
-                return Model()
-
-        class Tok:
-            eos_token_id = 1
-            byte_decoder = {"a": 97}
-
-            @staticmethod
-            def from_pretrained(name, **kw):
-                return Tok()
-
-            def get_vocab(self):
-                return {"a": 0}
-
-        transformers = types.SimpleNamespace(AutoModelForCausalLM=Auto, GPT2Tokenizer=Tok)
-        with mock.patch.dict(sys.modules, {"torch": torch_module, "transformers": transformers}):
-            model = zenz.ZenzModel("m", **kwargs)
-        return model, calls
-
-    def torch(self, available, works=True):
-        fake = FakeTorch(available, works)
-        fake.threads = []
-        fake.set_num_threads = fake.threads.append
-        fake.tensors = []
-        fake.tensor = lambda rows, device: fake.tensors.append(device) or (rows, device)
-        return fake
-
-    def test_gpu(self):
-        torch = self.torch(True)
-        model, calls = self.load(torch)
-        self.assertEqual((model.device, calls["to"], torch.threads), ("cuda", "cuda", [4]))
-        self.assertEqual(model._ids([[0]]), ([[0]], "cuda"))
-        self.assertTrue(calls["model"][1]["local_files_only"])
-
-    def test_cpu(self):
-        torch = self.torch(False)
-        model, calls = self.load(torch)
-        self.assertEqual((model.device, calls["to"], torch.threads), ("cpu", "cpu", [4]))
+    def test_reloads_on_cpu_after_cuda_placement_fails(self):
+        self.devices = 1
+        self.placement_failures.add("cuda:0")
+        model = self.build().model
+        self.assertEqual(self.placed, ["cuda:0", "cpu"])
+        self.assertEqual(len(self.model_loads), 2)
+        self.assertEqual(self.warmed, ["cpu"])
         self.assertEqual(model._ids([[0]]), ([[0]], "cpu"))
 
-    def test_device_override(self):
-        model, calls = self.load(self.torch(True), device="cpu", threads=2)
-        self.assertEqual((model.device, calls["to"]), ("cpu", "cpu"))
+    def test_engine_tries_later_gpu_if_warmup_conversion_fails(self):
+        conversions = []
+
+        def convert(parts, lex, learning, context, converter):
+            device = converter.model.device
+            conversions.append(device)
+            if device == "cuda:0":
+                raise RuntimeError("warm-up conversion failed")
+
+        engine = Engine(None, Namespace())
+        engine.loaded = SimpleNamespace(_lex=object())
+        request = SimpleNamespace(parts=[], learning=None, lm_context="")
+        args = server.argument_parser().parse_args([])
+        with mock.patch.object(zenz, "conversion_picks", side_effect=convert):
+            converter = engine.load_lm(server, args, request)
+        self.assertEqual(converter.model.device, "cuda:1")
+        self.assertEqual(self.warmed, ["cuda:0", "cuda:1"])
+        self.assertEqual(conversions, ["cuda:0", "cuda:1"])
+
+    def test_explicit_device_failure_is_reported(self):
+        self.warmup_failures.add("cuda")
+        with self.assertRaisesRegex(RuntimeError, "model inference failed"):
+            self.build("--lm-device", "cuda")
+        self.assertEqual(self.placed, ["cuda"])
+        self.assertEqual(self.warmed, ["cuda"])
 
 
 if __name__ == "__main__":

@@ -71,6 +71,7 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
 
 タグ `v*` を push すると `.github/workflows/release.yml` が作ります
 （ビルド・試験・依存の検証のあと、プレリリースとして公開し、まっさらな Windows で入れて消す）。
+インストール試験では、配置済みの Python・辞書・固定モデルを使い、`--require-lm` 付きの自己試験で zenz の変換を確認する。
 リリースに置く `setup.ps1` と `uninstall.ps1` の元は `packaging/setup.ps1` と
 `packaging/uninstall-entry.ps1` です（手順は DESIGN「インストール・更新・アンインストール」）。
 実機で確かめたら `gh release edit <tag> --prerelease=false --latest` で正式リリースにします

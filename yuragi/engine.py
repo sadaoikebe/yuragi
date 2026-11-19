@@ -242,12 +242,14 @@ class Engine:
         """Load and run a sample conversion on the LM worker (DESIGN「暖機」)."""
         from yuragi.ime.zenz import conversion_picks
         start = time.perf_counter()
-        converter = server.build_converter(settings)
-        loaded = time.perf_counter()
-        conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, converter)
-        log(f"LM loaded on {getattr(converter.model, 'device', '?')} in {loaded - start:.1f} s; "
-            f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
-        return converter
+
+        def warm_conversion(converter):
+            loaded = time.perf_counter()
+            conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, converter)
+            log(f"LM loaded on {converter.model.device} in {loaded - start:.1f} s; "
+                f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
+
+        return server.build_converter(settings, warm_conversion=warm_conversion)
 
     def lm_disabled(self) -> None:
         log("LM not used (it could not be loaded)")

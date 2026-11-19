@@ -110,6 +110,7 @@ class PowerShellTest(unittest.TestCase):
             (header.format("12.8"), ["NVIDIA GeForce RTX 4060 Laptop GPU, 8.9"], "cu128"),
             (header.format("13.0"), ["NVIDIA GeForce RTX 5070, 12.0"], "cu128"),
             (header.format("12.6"), ["NVIDIA GeForce RTX 3060, 8.6"], "cu126"),
+            (header.format("12.6"), ["NVIDIA GeForce RTX 5070, 12.0", "NVIDIA RTX A2000, 8.6"], "cu126"),
             (header.format("12.8"), ["NVIDIA GeForce GTX 1060, 6.1"], "cu126"),  # cu128 has no Pascal
             (header.format("12.4"), ["NVIDIA GeForce RTX 3060, 8.6"], "cpu"),  # old driver
             (header.format("12.8"), ["NVIDIA GeForce GTX 750 Ti, 5.0"], "cpu"),

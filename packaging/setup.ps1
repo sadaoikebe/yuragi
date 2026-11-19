@@ -67,15 +67,15 @@ function Invoke-Checked([string]$name, [scriptblock]$body) {
 function Select-TorchVariant([string]$SmiHeader, [string[]]$SmiGpus) {
     if ($SmiHeader -notmatch "CUDA Version:\s*(\d+)\.(\d+)") { return "cpu" }
     $cuda = [int]$Matches[1] * 100 + [int]$Matches[2]
-    $cap = -1
+    $variant = "cpu"
     foreach ($line in $SmiGpus) {
         if ($line -match ",\s*(\d+)\.(\d+)\s*$") {
-            $cap = [Math]::Max($cap, [int]$Matches[1] * 10 + [int]$Matches[2])
+            $cap = [int]$Matches[1] * 10 + [int]$Matches[2]
+            if ($cap -ge 75 -and $cuda -ge 1208) { return "cu128" }
+            if ($cap -ge 60 -and $cap -lt 100 -and $cuda -ge 1206) { $variant = "cu126" }
         }
     }
-    if ($cap -ge 75 -and $cuda -ge 1208) { return "cu128" }
-    if ($cap -ge 60 -and $cap -lt 100 -and $cuda -ge 1206) { return "cu126" }
-    return "cpu"
+    return $variant
 }
 
 # この PC の NVIDIA GPU を nvidia-smi (NVIDIA のドライバに付属) で調べる。無ければ CPU 版。
@@ -237,8 +237,8 @@ New-Shared $Runtime {
         & $py -c "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
     }
     if ($TorchVariant -ne "cpu") {
-        # 情報だけ: GPU で計算できなければ、エンジンは CPU で動く (yuragi/ime/zenz.py pick_device)。
-        & $py -c "import torch; print('  GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not usable; the engine will use the CPU')"
+        # 情報だけ。モデルを暖機できるデバイスはエンジンが判定する。
+        & $py -c "import torch; print('  CUDA devices visible to torch:', torch.cuda.device_count())"
     }
 }
 $script:Python = Join-Path $Runtime "python.exe"

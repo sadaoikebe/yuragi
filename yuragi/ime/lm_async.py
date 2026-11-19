@@ -58,8 +58,8 @@ class LmWorker:
     """One daemon thread; the only user of the model."""
 
     def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None, timing=False):
-        """on_disabled(): told once when the LM could not be loaded. Called on
-        the worker thread."""
+        """The loader returns a warmed converter. on_disabled() is called once
+        on the worker thread if startup fails."""
         self.loader = loader
         self.on_disabled = on_disabled
         self.lex = lex
@@ -154,7 +154,6 @@ class LmWorker:
     def _run(self) -> None:
         try:
             template = self.loader()
-            template.warm_up()  # before "ready"
         except Exception as exc:
             print(f"LM unavailable ({type(exc).__name__})",
                   file=sys.stderr, flush=True)

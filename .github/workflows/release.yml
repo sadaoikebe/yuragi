@@ -114,7 +114,7 @@ jobs:
             python-3.13.7-tkinter-amd64.zip.sha256
 
   # 公開したプレリリースの setup.ps1 で、まっさらなランナーに実際に入れる (経路は 1 本)。
-  # インストール → 動作 (ブローカーが ready、同梱ランタイムで tkinter が動くか)
+  # インストール → 動作 (ブローカーが ready、同梱ランタイムで tkinter と zenz の変換が動くか)
   # → 同じ版の入れ直し (学習データが残るか)
   # → リリースの uninstall.ps1 でアンインストール (プログラムは全部消え、利用者のデータは残るか)
   # → もう一度 uninstall.ps1 (入っていないと伝えて、何もせずに終わるか)。
@@ -182,6 +182,24 @@ jobs:
           $engine = Get-Content (Join-Path $local "versions\$env:TAG\engine.json") -Raw | ConvertFrom-Json
           & $engine.python -c "import tkinter; r = tkinter.Tk(); r.withdraw(); print('tkinter OK: Tk', r.tk.call('info', 'patchlevel')); r.destroy()"
           if ($LASTEXITCODE -ne 0) { throw "tkinter does not load in the bundled runtime ($($engine.python))" }
+
+          # Exercise the installed runtime, dictionary and model with LM required.
+          if ("--lm-model" -notin $engine.args) { throw "installed engine.json does not specify its model" }
+          $lmTest = Join-Path $env:RUNNER_TEMP "yuragi-lm-selftest"
+          New-Item -ItemType Directory -Path $lmTest | Out-Null
+          $lmEngine = Join-Path $lmTest "engine.json"
+          $engine.args = @($engine.args) + @("--require-lm", "--data-dir", $lmTest)
+          [IO.File]::WriteAllText($lmEngine, ($engine | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+          $lmOutput = Join-Path $lmTest "selftest.txt"
+          $lmProcess = Start-Process -FilePath (Join-Path $program "yuragi-broker.exe") `
+              -ArgumentList @("--selftest", "`"$lmEngine`"", "--data-dir", "`"$lmTest`"") `
+              -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $lmOutput
+          Get-Content -LiteralPath $lmOutput
+          if ($lmProcess.ExitCode -ne 0) {
+            $lmLog = Join-Path $lmTest "logs\broker.log"
+            if (Test-Path -LiteralPath $lmLog) { Get-Content -LiteralPath $lmLog }
+            throw "installed zenz selftest failed with exit code $($lmProcess.ExitCode)"
+          }
 
           $learning = Join-Path $userData "learning.jsonl"
           $marker = '{"ci":"learning survives a reinstall"}'
