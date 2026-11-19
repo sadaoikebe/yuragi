@@ -14,8 +14,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-REPO_ID = "rinna/japanese-gpt2-small"
-REVISION = "f7fdefe2941d9629a7b2894564435e0e035df6a6"
+REPO_ID = "Miwa-Keita/zenz-v2.5-medium"
+REVISION = "623bc8edf5417129b8269b628223d08245e9c68e"
 
 
 def main() -> int:

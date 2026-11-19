@@ -35,13 +35,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "torch pin failed" }
           .\.venv-verify\Scripts\python -m pip install -r packaging/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "requirements pins failed" }
-          .\.venv-verify\Scripts\python -c "import torch, transformers, sentencepiece, huggingface_hub; print('pins OK')"
+          .\.venv-verify\Scripts\python -c "import torch, transformers, huggingface_hub; print('pins OK')"
 
       - name: モデルの固定リビジョンの存在確認
         shell: pwsh
         run: |
           $rev = (Select-String -Path packaging/fetch_model.py -Pattern '^REVISION = "([0-9a-f]+)"').Matches[0].Groups[1].Value
-          $resp = Invoke-WebRequest -UseBasicParsing "https://huggingface.co/api/models/rinna/japanese-gpt2-small/revision/$rev"
+          $repo = (Select-String -Path packaging/fetch_model.py -Pattern '^REPO_ID = "([^"]+)"').Matches[0].Groups[1].Value
+          $resp = Invoke-WebRequest -UseBasicParsing "https://huggingface.co/api/models/$repo/revision/$rev"
           if ($resp.StatusCode -ne 200) { throw "model revision not found: $rev" }
           Write-Host "model revision OK: $rev"
 

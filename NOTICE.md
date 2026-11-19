@@ -181,7 +181,6 @@ below. Each package keeps the license files its own wheel carries, in
 | pip | latest at install time (not pinned) | MIT | https://bootstrap.pypa.io/get-pip.py, which installs pip from PyPI |
 | PyTorch (`torch`, CPU build) | 2.9.1 | BSD-3-Clause; the third-party components it bundles are listed with their licenses in its `LICENSE` and `NOTICE` | https://download.pytorch.org/whl/cpu |
 | transformers | 4.57.1 | Apache-2.0 | PyPI |
-| sentencepiece | 0.2.1 | Apache-2.0 (the `LICENSE` of https://github.com/google/sentencepiece; the wheel's metadata does not state it) | PyPI |
 
 The Python embeddable package carries its own `LICENSE.txt` (the PSF
 License Agreement and the licenses of the software incorporated into
@@ -225,22 +224,27 @@ declare:
 | filelock, urllib3, charset-normalizer, PyYAML, setuptools | MIT |
 | typing_extensions | PSF-2.0 |
 
-The `sentencepiece` and `tokenizers` wheels carry no license file.
+The `tokenizers` wheel carries no license file.
 
-## Language model rinna/japanese-gpt2-small (fetched at install time)
+## Language model zenz-v2.5 (fetched at install time)
 
 Location when installed: `%LOCALAPPDATA%\yuragi-ime\shared\model\<revision>\`.
 
 | | |
 | --- | --- |
-| Model | `rinna/japanese-gpt2-small` (rinna Co., Ltd.) |
-| Revision | `f7fdefe2941d9629a7b2894564435e0e035df6a6` (pinned in `packaging/fetch_model.py`) |
-| License | MIT (`license: mit` in the model card) |
-| Source | https://huggingface.co/rinna/japanese-gpt2-small |
+| Model | `Miwa-Keita/zenz-v2.5-medium` by Keita Miwa |
+| Revision | `623bc8edf5417129b8269b628223d08245e9c68e` (pinned in `packaging/fetch_model.py`) |
+| License | Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/ (`license: cc-by-sa-4.0` in the model card) |
+| Source | https://huggingface.co/Miwa-Keita/zenz-v2.5-medium |
+| Base model | `ku-nlp/gpt2-medium-japanese-char` (Kyoto University, CC BY-SA 4.0), https://huggingface.co/ku-nlp/gpt2-medium-japanese-char, as stated in the model card |
 
-`packaging/fetch_model.py` downloads the whole repository at that revision,
-so the model card (`README.md`, with its license statement) is kept next
-to the model files.
+The installer downloads the repository unmodified at that revision, so the
+model card (`README.md`, with its license statement) is kept next to the
+model files. yuragi does not modify, convert or redistribute the model; it
+only runs it to convert text. The model is provided by its
+author "as is", without warranties (CC BY-SA 4.0, Section 5). The license
+covers the model files only; it does not apply to the IME source (MIT) or
+to text converted with it.
 
 ## Product icon (hand-drawn)
 

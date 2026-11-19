@@ -84,9 +84,9 @@ Say "次のものをダウンロードします (取得済みのものは省略)
 Say "  ゆらぎ本体・TIP・ブローカー・tkinter (GitHub Releases、約 35MB)"
 Say "  Python $EmbedPythonVersion (python.org、約 30MB)"
 Say "  PyTorch $TorchVersion CPU 版 (download.pytorch.org、約 200MB)"
-Say "  transformers・sentencepiece・huggingface_hub ほか (PyPI)"
+Say "  transformers・huggingface_hub ほか (PyPI)"
 Say "  Mozc 辞書 (github.com/google/mozc、約 93MB)"
-Say "  言語モデル rinna/japanese-gpt2-small (huggingface.co、約 500MB)"
+Say "  言語モデル zenz-v2.5-medium (huggingface.co、約 620 MB)"
 if (-not (Ask "続行しますか?")) { Fail "キャンセルしました。" }
 
 function Get-Verified([string]$url, [string]$dest) {
@@ -179,7 +179,7 @@ New-Shared $Runtime {
         & $py -m pip install --no-warn-script-location -r $requirements
     }
     Invoke-Checked "インポートの確認" {
-        & $py -c "import torch, transformers, sentencepiece, huggingface_hub, tkinter; tkinter.Tcl()"
+        & $py -c "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
     }
 }
 $script:Python = Join-Path $Runtime "python.exe"
@@ -199,7 +199,7 @@ $revision = (Select-String -LiteralPath (Join-Path $StageApp "packaging\fetch_mo
 $script:Model = Join-Path $Shared "model\$revision"
 New-Shared $script:Model {
     param($dir)
-    Invoke-Checked "言語モデルのダウンロード (rinna/japanese-gpt2-small)" {
+    Invoke-Checked "言語モデルのダウンロード (Miwa-Keita/zenz-v2.5-medium)" {
         & $script:Python (Join-Path $StageApp "packaging\fetch_model.py") $dir
     }
 }
