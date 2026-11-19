@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "description": "変換中の 0（1〜9 は候補の選択）・Shift+英字・句読点は、表示中の変換を確定して次の入力になる。",
+  "lexicon": [],
+  "steps": [
+    {"event": {"op": "down", "t": 100, "vk": 87}},
+    {"event": {"op": "up", "t": 130, "vk": 87}},
+    {"event": {"op": "down", "t": 230, "vk": 32}},
+    {"event": {"op": "up", "t": 260, "vk": 32}},
+    {"event": {"op": "down", "t": 360, "vk": 48}},
+    {"event": {"op": "up", "t": 390, "vk": 48}},
+    {"event": {"op": "down", "t": 490, "vk": 32}},
+    {"event": {"op": "up", "t": 520, "vk": 32}},
+    {"event": {"op": "down", "t": 620, "vk": 66, "mods": ["shift"]}},
+    {"event": {"op": "up", "t": 650, "vk": 66, "mods": ["shift"]}},
+    {"event": {"op": "down", "t": 750, "vk": 32}},
+    {"event": {"op": "up", "t": 780, "vk": 32}},
+    {"event": {"op": "down", "t": 880, "vk": 219}},
+    {"event": {"op": "up", "t": 910, "vk": 219}},
+    {"event": {"op": "down", "t": 1010, "vk": 13}},
+    {"event": {"op": "up", "t": 1040, "vk": 13}}
+  ],
+  "committed": "か０B、",
+  "composition": ""
+}

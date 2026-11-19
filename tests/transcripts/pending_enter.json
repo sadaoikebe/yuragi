@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "description": "Enter は、まだ離していないかなも含めて確定する。",
+  "lexicon": [],
+  "steps": [
+    {"event": {"op": "down", "t": 100, "vk": 87}},
+    {"event": {"op": "down", "t": 110, "vk": 13}},
+    {"event": {"op": "up", "t": 120, "vk": 13}},
+    {"event": {"op": "up", "t": 130, "vk": 87}},
+    {"event": {"op": "timeout", "t": 230}}
+  ],
+  "committed": "か",
+  "composition": ""
+}

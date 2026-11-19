@@ -1,0 +1,16 @@
+data/cache/
+data/learning.jsonl
+data/personal_lexicon.jsonl
+data/recordings/
+# Mozc dictionary (incl. id.def/suffix.txt/READMEs): fetched from upstream
+# by tools/eval/fetch_mozc_dict and verified against the manifest hashes.
+third_party/mozc_oss_dict/
+__pycache__/
+*.pyc
+src/tip/build/
+dist/
+*.pdb
+*.exp
+*.lib
+*.obj
+/build/

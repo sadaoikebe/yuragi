@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "description": "Backspace は、変換中なら変換の取り消し、入力中なら最後の1打を消す。リテラルも1文字。",
+  "lexicon": [
+    {"reading": "きどく", "surface": "既読", "cost": 100},
+    {"reading": "きおく", "surface": "記憶", "cost": 200}
+  ],
+  "steps": [
+    {"event": {"op": "down", "t": 100, "vk": 75}},
+    {"event": {"op": "up", "t": 130, "vk": 75}},
+    {"event": {"op": "down", "t": 230, "vk": 32}},
+    {"event": {"op": "down", "t": 260, "vk": 74}},
+    {"event": {"op": "up", "t": 300, "vk": 32}},
+    {"event": {"op": "up", "t": 330, "vk": 74}},
+    {"event": {"op": "down", "t": 430, "vk": 73}},
+    {"event": {"op": "up", "t": 460, "vk": 73}},
+    {"event": {"op": "down", "t": 560, "vk": 55}},
+    {"event": {"op": "up", "t": 590, "vk": 55}},
+    {"event": {"op": "down", "t": 690, "vk": 32}},
+    {"event": {"op": "up", "t": 720, "vk": 32}},
+    {"event": {"op": "down", "t": 820, "vk": 40}},
+    {"event": {"op": "up", "t": 850, "vk": 40}},
+    {"event": {"op": "down", "t": 950, "vk": 8}},
+    {"event": {"op": "up", "t": 980, "vk": 8}},
+    {"event": {"op": "down", "t": 1080, "vk": 8}},
+    {"event": {"op": "up", "t": 1110, "vk": 8}},
+    {"event": {"op": "down", "t": 1210, "vk": 8}},
+    {"event": {"op": "up", "t": 1240, "vk": 8}},
+    {"event": {"op": "down", "t": 1340, "vk": 13}},
+    {"event": {"op": "up", "t": 1370, "vk": 13}}
+  ],
+  "committed": "きど",
+  "composition": ""
+}

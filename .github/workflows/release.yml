@@ -1,0 +1,224 @@
+# リリース作成 (DESIGN「インストール・更新・アンインストール」): タグ v* を push すると、Windows ランナーで
+# TIP とブローカーをタグ入りの Release でビルド・試験し、依存ピン留めを実地検証し、setup が
+# 取得するアセット (DLL・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
+# と、アンインストールの入口 uninstall.ps1 を公開する。検証が1つでも失敗すればリリースは出ない。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: TIP とブローカーのビルドと試験 (Release、タグを埋め込む。登録はしない)
+        shell: pwsh
+        run: ./src/tip/dev-build.ps1 -Tag "${{ github.ref_name }}"
+
+      # setup.ps1 の同梱ランタイムと同じ版 ($EmbedPythonVersion)。依存の検証に使い、
+      # 埋め込み版に無い tkinter 一式もこの通常版から取る。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.7"
+
+      - name: 依存ピン留めの実地検証 (torch CPU + requirements + import)
+        shell: pwsh
+        run: |
+          python -m venv .venv-verify
+          .\.venv-verify\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1
+          if ($LASTEXITCODE -ne 0) { throw "torch pin failed" }
+          .\.venv-verify\Scripts\python -m pip install -r packaging/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "requirements pins failed" }
+          .\.venv-verify\Scripts\python -c "import torch, transformers, huggingface_hub; print('pins OK')"
+
+      - name: モデルの固定リビジョンの存在確認
+        shell: pwsh
+        run: |
+          $rev = (Select-String -Path packaging/fetch_model.py -Pattern '^REVISION = "([0-9a-f]+)"').Matches[0].Groups[1].Value
+          $repo = (Select-String -Path packaging/fetch_model.py -Pattern '^REPO_ID = "([^"]+)"').Matches[0].Groups[1].Value
+          $resp = Invoke-WebRequest -UseBasicParsing "https://huggingface.co/api/models/$repo/revision/$rev"
+          if ($resp.StatusCode -ne 200) { throw "model revision not found: $rev" }
+          Write-Host "model revision OK: $rev"
+
+      - name: アセットの組み立て
+        shell: pwsh
+        run: |
+          git archive --format=zip -o yuragi-source.zip HEAD
+          Copy-Item dist/yuragi_tip.dll .
+          Copy-Item dist/yuragi-broker.exe .
+          $pyVersion = (Select-String -Path packaging/setup.ps1 -Pattern '^\$EmbedPythonVersion = "([0-9.]+)"').Matches[0].Groups[1].Value
+          # 設定ウィンドウ用の tkinter 一式。埋め込み版には無いので、同じ版の通常版
+          # (setup-python が入れたもの) から取り、setup.ps1 がランタイムの直下に展開する。
+          $base = @(python -c "import sys, platform; print(platform.python_version()); print(platform.architecture()[0]); print(sys.base_prefix)")
+          if ($base[0] -ne $pyVersion -or $base[1] -ne "64bit") { throw "setup-python gave $($base[0]) $($base[1]), not $pyVersion 64bit" }
+          $tkDir = Join-Path $env:RUNNER_TEMP "tkinter"
+          New-Item -ItemType Directory (Join-Path $tkDir "Lib") | Out-Null
+          Get-ChildItem (Join-Path $base[2] "DLLs") -File | Where-Object { $_.Name -match '^(_tkinter\.pyd|tcl.*\.dll|tk.*\.dll|zlib.*\.dll)$' } |
+            Copy-Item -Destination $tkDir
+          Copy-Item (Join-Path $base[2] "tcl") (Join-Path $tkDir "tcl") -Recurse
+          Copy-Item (Join-Path $base[2] "Lib\tkinter") (Join-Path $tkDir "Lib\tkinter") -Recurse
+          Get-ChildItem $tkDir -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          Get-ChildItem $tkDir -File | ForEach-Object { Write-Host "tkinter asset: $($_.Name)" }
+          $tkName = "python-$pyVersion-tkinter-amd64.zip"
+          Compress-Archive -Path (Join-Path $tkDir "*") -DestinationPath $tkName
+          foreach ($name in @("yuragi_tip.dll", "yuragi-broker.exe", "yuragi-source.zip", $tkName)) {
+            (Get-FileHash $name -Algorithm SHA256).Hash.ToLower() | Set-Content "$name.sha256" -Encoding ASCII -NoNewline
+          }
+          # setup.ps1 にタグと、同梱 Python の公式ハッシュを刻む。
+          $embedName = "python-$pyVersion-embed-amd64.zip"
+          Invoke-WebRequest -UseBasicParsing "https://www.python.org/ftp/python/$pyVersion/$embedName" -OutFile $embedName
+          $embedHash = (Get-FileHash $embedName -Algorithm SHA256).Hash.ToLower()
+          $setup = Get-Content packaging/setup.ps1 -Raw
+          $setup = $setup -replace "__TAG__", $env:GITHUB_REF_NAME -replace "__EMBED_SHA256__", $embedHash
+          # 利用者が実行するのは Windows PowerShell 5.1。BOM が無いと ANSI として読まれる。
+          $setup | Set-Content setup.ps1 -Encoding utf8BOM
+          # アンインストールの入口 (入っている版を見つけて、その版の本体を呼ぶ)。
+          Copy-Item packaging/uninstall-entry.ps1 uninstall.ps1
+
+      - name: スクリプトの構文チェック (刻印後の実物も、利用者と同じ Windows PowerShell 5.1 で)
+        shell: powershell
+        run: |
+          foreach ($f in @("packaging/setup.ps1", "packaging/uninstall.ps1", "packaging/uninstall-entry.ps1", "packaging/elevated.ps1", "setup.ps1", "uninstall.ps1")) {
+            $head = [IO.File]::ReadAllBytes((Resolve-Path $f)) | Select-Object -First 3
+            if (($head -join ",") -ne "239,187,191") { throw "$f : missing UTF-8 BOM (Windows PowerShell 5.1 would read it as ANSI)" }
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors)
+            if ($errors -and $errors.Count) { throw "$f : $($errors[0].Message)" }
+            Write-Host "parse OK: $f"
+          }
+
+      # プレリリースとして公開する。README の latest URL はプレリリースを
+      # 指さないので、実機でインストールを確かめてから正式にする
+      # (gh release edit <tag> --prerelease=false --latest)。
+      - name: リリースへ公開 (プレリリース)
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          body: "インストール・更新・アンインストールは README を参照してください。"
+          files: |
+            setup.ps1
+            uninstall.ps1
+            yuragi_tip.dll
+            yuragi_tip.dll.sha256
+            yuragi-broker.exe
+            yuragi-broker.exe.sha256
+            yuragi-source.zip
+            yuragi-source.zip.sha256
+            python-3.13.7-tkinter-amd64.zip
+            python-3.13.7-tkinter-amd64.zip.sha256
+
+  # 公開したプレリリースの setup.ps1 で、まっさらなランナーに実際に入れる (経路は 1 本)。
+  # インストール → 動作 (ブローカーが ready、同梱ランタイムで tkinter と zenz の変換が動くか)
+  # → 同じ版の入れ直し (学習データが残るか)
+  # → リリースの uninstall.ps1 でアンインストール (プログラムは全部消え、利用者のデータは残るか)
+  # → もう一度 uninstall.ps1 (入っていないと伝えて、何もせずに終わるか)。
+  install-test:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: install, reinstall, uninstall
+        shell: powershell
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          # ASCII only: this step runs in Windows PowerShell 5.1.
+          $ErrorActionPreference = "Stop"
+          $setup = Join-Path $env:RUNNER_TEMP "yuragi-setup.ps1"
+          Invoke-WebRequest -UseBasicParsing "https://github.com/$env:REPO/releases/download/$env:TAG/setup.ps1" -OutFile $setup
+          $uninstall = Join-Path $env:RUNNER_TEMP "yuragi-uninstall.ps1"
+          Invoke-WebRequest -UseBasicParsing "https://github.com/$env:REPO/releases/download/$env:TAG/uninstall.ps1" -OutFile $uninstall
+          $program = Join-Path $env:ProgramFiles "yuragi-ime\$env:TAG"
+          $local = Join-Path $env:LOCALAPPDATA "yuragi-ime"
+          $userData = Join-Path $env:USERPROFILE ".yuragi-ime"
+          $inproc = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}\InprocServer32"
+
+          function Invoke-Logged([string]$label, [string[]]$argv) {
+            Write-Host "::group::$label"
+            $ErrorActionPreference = "Continue"
+            $out = & powershell @argv 2>&1 | ForEach-Object { "$_" }
+            $code = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+            $out | ForEach-Object { Write-Host $_ }
+            Write-Host "::endgroup::"
+            if ($code -ne 0) { throw "$label failed with exit code $code" }
+          }
+          function Get-BrokerState {
+            $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $session = (Get-Process -Id $PID).SessionId
+            $pipe = New-Object System.IO.Pipes.NamedPipeClientStream(".", "yuragi-ime-$sid-$session", [IO.Pipes.PipeDirection]::InOut)
+            $pipe.Connect(5000)
+            $writer = New-Object IO.StreamWriter($pipe); $writer.AutoFlush = $true; $writer.NewLine = "`n"
+            $reader = New-Object IO.StreamReader($pipe)
+            $writer.WriteLine('{"op":"hello","proto":1,"tag":"ci","bits":64}')
+            $state = ($reader.ReadLine() | ConvertFrom-Json).state
+            $pipe.Dispose()
+            return $state
+          }
+          function Assert-Installed {
+            foreach ($f in @("yuragi_tip.dll", "yuragi-broker.exe", "elevated.ps1")) {
+              if (-not (Test-Path (Join-Path $program $f))) { throw "missing $f in Program Files" }
+            }
+            if ((Get-ItemProperty $inproc).'(default)' -ne (Join-Path $program "yuragi_tip.dll")) { throw "TIP is not registered to Program Files" }
+            if ((Get-ItemProperty "HKCU:\Software\yuragi-ime").Tag -ne $env:TAG) { throw "HKCU Tag is not $env:TAG" }
+            if (-not (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run")."yuragi-ime") { throw "no Run key" }
+            if (-not (Test-Path (Join-Path $local "versions\$env:TAG\engine.json"))) { throw "no engine.json" }
+            $state = Get-BrokerState
+            if ($state -ne "ready") { throw "broker state is $state, not ready" }
+          }
+
+          $setupArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setup, "-Yes")
+          Invoke-Logged "install" $setupArgs
+          Assert-Installed
+          Write-Host "install OK"
+
+          # The settings window (admin_args in engine.json) needs tkinter in the bundled runtime.
+          $engine = Get-Content (Join-Path $local "versions\$env:TAG\engine.json") -Raw | ConvertFrom-Json
+          & $engine.python -c "import tkinter; r = tkinter.Tk(); r.withdraw(); print('tkinter OK: Tk', r.tk.call('info', 'patchlevel')); r.destroy()"
+          if ($LASTEXITCODE -ne 0) { throw "tkinter does not load in the bundled runtime ($($engine.python))" }
+
+          # Exercise the installed runtime, dictionary and model with LM required.
+          if ("--lm-model" -notin $engine.args) { throw "installed engine.json does not specify its model" }
+          $lmTest = Join-Path $env:RUNNER_TEMP "yuragi-lm-selftest"
+          New-Item -ItemType Directory -Path $lmTest | Out-Null
+          $lmEngine = Join-Path $lmTest "engine.json"
+          $engine.args = @($engine.args) + @("--require-lm", "--data-dir", $lmTest)
+          [IO.File]::WriteAllText($lmEngine, ($engine | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+          $lmOutput = Join-Path $lmTest "selftest.txt"
+          $lmProcess = Start-Process -FilePath (Join-Path $program "yuragi-broker.exe") `
+              -ArgumentList @("--selftest", "`"$lmEngine`"", "--data-dir", "`"$lmTest`"") `
+              -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $lmOutput
+          Get-Content -LiteralPath $lmOutput
+          if ($lmProcess.ExitCode -ne 0) {
+            $lmLog = Join-Path $lmTest "logs\broker.log"
+            if (Test-Path -LiteralPath $lmLog) { Get-Content -LiteralPath $lmLog }
+            throw "installed zenz selftest failed with exit code $($lmProcess.ExitCode)"
+          }
+
+          $learning = Join-Path $userData "learning.jsonl"
+          $marker = '{"ci":"learning survives a reinstall"}'
+          Set-Content $learning $marker -Encoding ASCII
+          Invoke-Logged "reinstall (same tag)" $setupArgs
+          Assert-Installed
+          if ((Get-Content $learning -Raw).Trim() -ne $marker) { throw "learning data changed during the reinstall" }
+          Write-Host "reinstall OK (learning data kept)"
+
+          $uninstallArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $uninstall, "-Yes")
+          Invoke-Logged "uninstall" $uninstallArgs
+          if (Test-Path $inproc) { throw "TIP registration remains after uninstall" }
+          if (Test-Path $local) { throw "$local remains after uninstall" }
+          if (Test-Path (Join-Path $env:ProgramFiles "yuragi-ime")) { throw "Program Files\yuragi-ime remains (nothing had the DLL loaded)" }
+          if ((Get-ItemProperty "HKCU:\Software\yuragi-ime" -ErrorAction SilentlyContinue).Tag) { throw "HKCU Tag remains" }
+          if (Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue) { throw "a broker is still running" }
+          if (-not (Test-Path $learning)) { throw "uninstall removed the learning history (user data must stay)" }
+          Write-Host "uninstall OK (user data kept)"
+
+          Invoke-Logged "uninstall again (nothing installed)" $uninstallArgs
+          if (-not (Test-Path $learning)) { throw "the second uninstall removed the learning history" }
+          Write-Host "uninstall again OK (nothing to do)"
