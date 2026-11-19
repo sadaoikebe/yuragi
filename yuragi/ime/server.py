@@ -33,14 +33,23 @@ from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
 from yuragi.ime.config import DEFAULTS, SETTINGS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
+from yuragi.ime.zenz import CONTEXT_CHARS
 
 
 def dispatch(sess: ImeSession, msg: dict) -> dict:
     """Shared protocol path for the engine, the stdio host and transcript tests."""
     commit = apply_op(sess, msg)
     reply = snapshot(sess, msg.get("op"))
-    reply["commit"] = commit
+    set_reply_commit(sess, msg, reply, commit)
+    if "seq" in msg:
+        reply["seq"] = msg["seq"]
     return reply
+
+
+def set_reply_commit(sess: ImeSession, msg: dict, reply: dict, commit: str) -> None:
+    reply["commit"] = commit
+    if commit:
+        sess.bind_commit(msg.get("seq"))
 
 
 def apply_op(sess: ImeSession, msg: dict) -> str:
@@ -49,9 +58,22 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
     commit = ""
     t = int(msg.get("t", 0))
     if op in ("down", "up"):
-        args = (op == "down", int(msg["vk"]), t)
-        commit = (sess.on_key(*args, mods=msg["mods"]) if "mods" in msg
-                  else sess.on_key(*args)) or ""
+        down, vk, mods = op == "down", int(msg["vk"]), msg.get("mods")
+        if down and sess.starts_input(vk, mods):
+            text = msg.get("left_context")
+            if isinstance(text, str):
+                try:
+                    text.encode("utf-8")  # json.loads also accepts lone surrogates
+                except UnicodeEncodeError:
+                    text = None
+                else:
+                    text = text[-CONTEXT_CHARS:]
+            else:
+                text = None
+            after = msg.get("after_commit_seq")
+            sess.start_input(text, after if type(after) is int else None,
+                             disconnected=after is None and "after_commit_seq" in msg)
+        commit = sess.on_key(down, vk, t, mods=mods) or ""
     elif op == "timeout":
         commit = sess.on_timeout(t) or ""
     elif op == "reset":

@@ -108,14 +108,14 @@ class MozcLex:
         return cost
 
 
-def left_id_after(literal: str, lex: MozcLex) -> int:
+def left_id_after(literal: str, lex: MozcLex | None) -> int:
     """POS context for a kana run after a literal: a digit reads as a numeral.
 
     Any other literal (punctuation, Latin) is a sentence boundary.
     Small test lexicons have no Mozc numeral POS and keep the boundary.
     """
     digit = literal and ("0" <= literal[-1] <= "9" or "０" <= literal[-1] <= "９")
-    return NUMBER_ID if digit and NUMBER_ID < lex.pos_size else BOS_ID
+    return NUMBER_ID if digit and lex is not None and NUMBER_ID < lex.pos_size else BOS_ID
 
 
 # What load_lex parses to build the cache. A missing one must stop the build:

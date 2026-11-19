@@ -23,7 +23,7 @@ import threading
 import time
 
 from .zenz import conversion_picks
-from .server import apply_op, snapshot
+from .server import apply_op, set_reply_commit, snapshot
 from .session import ConversionRequest, ImeSession
 
 GRACE_MS = 0
@@ -203,7 +203,8 @@ class LmWorker:
             request = job.request
             job.picks = conversion_picks(
                 request.parts, self.lex, request.learning, request.lm_context,
-                replace(self.template, last={}), cancelled=lambda: job.cancelled)
+                replace(self.template, last={}), cancelled=lambda: job.cancelled,
+                left_id=request.left_id)
         except Exception as exc:
             # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True
@@ -278,7 +279,7 @@ class ConnectionPipeline:
                 grace = True
         self._prefetch()
         reply = snapshot(self.sess, op)
-        reply["commit"] = commit
+        set_reply_commit(self.sess, msg, reply, commit)
         reply["pending"] = self.sess._await is not None
         if reply["pending"]:
             poll = self.last_t + self.poll_ms

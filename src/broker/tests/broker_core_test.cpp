@@ -81,10 +81,14 @@ void KeysPassWhileStartingThenGoToTheEngine() {
     Ready(b);
     assert(f.to_engine.back() == R"({"op":"open","sid":1})");
     assert(f.Client(1).back() == R"({"event":"state","state":"ready"})");
-    b.OnClientLine(1, R"({"seq":2,"op":"down","vk":74,"t":0,"mods":[]})");
-    assert(f.to_engine.back() == R"({"sid":1,"seq":2,"op":"down","vk":74,"t":0,"mods":[]})");
+    b.OnClientLine(1, R"({"seq":2,"op":"down","vk":74,"t":0,"mods":[],"left_context":"document","after_commit_seq":null})");
+    assert(f.to_engine.back() ==
+           R"({"sid":1,"seq":2,"op":"down","vk":74,"t":0,"mods":[],"left_context":"document","after_commit_seq":null})");
     b.OnEngineLine(R"({"sid":1,"seq":2,"composition":"x"})");
     assert(f.Client(1).back() == R"({"sid":1,"seq":2,"composition":"x"})");
+    b.OnClientLine(1, R"({"seq":3,"op":"down","vk":65,"t":100,"left_context":"\ud800\u0041\udc00"})");
+    assert(f.to_engine.back() ==
+           R"({"sid":1,"seq":3,"op":"down","vk":65,"t":100,"left_context":"\ud800\u0041\udc00"})");
     b.OnClientClosed(1);
     assert(f.to_engine.back() == R"({"op":"close","sid":1})");
 }
