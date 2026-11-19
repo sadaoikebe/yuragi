@@ -1,15 +1,18 @@
 """Resident LM pipeline: the IME never hangs on a slow LM. A fake model, no torch.
 
-The deadline (400 ms) falls back to the dictionary-only conversion, the same
-as converting without the LM.
+A conversion waits for the LM's picks. The deadline (DEADLINE_MS) only detects
+a fault: it is logged and falls back to the dictionary-only conversion, the
+same as converting without the LM.
 """
 from __future__ import annotations
 
+from contextlib import redirect_stderr
 from dataclasses import replace
+import io
 import unittest
 
 from yuragi.chord.keys import VK_TO_M
-from yuragi.ime.lm_async import ConnectionPipeline, Job
+from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job
 from yuragi.ime.zenz import ZenzConverter, conversion_picks
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
@@ -179,6 +182,41 @@ class DeadlineTest(unittest.TestCase):
         clock = Clock()
         return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
 
+    def test_deadline_is_a_fault_detector_above_normal_conversions(self):
+        # Windows, zenz medium, CPU, k 4, 1 review: median ~340 ms, 95th percentile 369 ms.
+        self.assertGreaterEqual(DEADLINE_MS, 369)
+        self.assertLessEqual(abs(DEADLINE_MS / 340 - 1.8), 0.1)
+
+    def test_slow_normal_conversion_waits_for_the_lm(self):
+        """A conversion slower than the old 400 ms cut (the measured CPU median is
+        ~340 ms, so the slow half came close to it) still shows the LM's picks."""
+        typist = Typist().kana("きしゃ").space()
+        head = list(typist.events)
+        tail = Typist()
+        tail.t = typist.t
+        tail.kana("かいせい", gap=20).tap(VK_RETURN)
+        pipe, worker, clock = self.pipeline()
+        commits = ""
+        for event in head:
+            commits += pipe.handle(dict(event))["commit"]
+        job = pipe.job
+        for event in tail.events[:3]:
+            self.assertTrue(pipe.handle(dict(event))["pending"])
+        clock.now += 0.5
+        log = io.StringIO()
+        with redirect_stderr(log):
+            reply = pipe.handle(dict(tail.events[3]))
+            self.assertTrue(reply["pending"])  # still waiting, not cut
+            commits += reply["commit"]
+            worker.complete_all()
+            for event in tail.events[4:] + [TERMINAL]:
+                reply = pipe.handle(dict(event))
+                commits += reply["commit"]
+        self.assertFalse(job.cancelled)
+        self.assertEqual(log.getvalue(), "")
+        self.assertEqual((commits, final_state(reply)),
+                         run_reference(self.session, head + tail.events, PickyModel()))
+
     def test_deadline_falls_back_to_viterbi(self):
         typist = Typist().kana("きしゃ").space()
         head = list(typist.events)
@@ -195,11 +233,14 @@ class DeadlineTest(unittest.TestCase):
             reply = pipe.handle(dict(event))
             self.assertTrue(reply["pending"])
             self.assertEqual(reply["timer"], min(reply["timer"], event["t"] + 10))
-        clock.now += 0.4
-        for event in tail.events[3:] + [TERMINAL]:
-            reply = pipe.handle(dict(event))
-            commits += reply["commit"]
+        clock.now += DEADLINE_MS / 1000
+        log = io.StringIO()
+        with redirect_stderr(log):
+            for event in tail.events[3:] + [TERMINAL]:
+                reply = pipe.handle(dict(event))
+                commits += reply["commit"]
         self.assertTrue(job.cancelled)
+        self.assertIn("fault", log.getvalue())  # detected, not silent
         worker.complete_all()  # a late result changes nothing
         self.assertFalse(pipe.handle({"op": "timeout", "t": 0})["pending"])
         expected = run_reference(self.session, head + tail.events, None)

@@ -179,7 +179,7 @@ below. Each package keeps the license files its own wheel carries, in
 | --- | --- | --- | --- |
 | Python (Windows embeddable package) | 3.13.7 | PSF License Agreement (Python Software Foundation License Version 2), together with the licenses of the components Python bundles | https://www.python.org/ftp/python/3.13.7/ |
 | pip | latest at install time (not pinned) | MIT | https://bootstrap.pypa.io/get-pip.py, which installs pip from PyPI |
-| PyTorch (`torch`, CPU build) | 2.9.1 | BSD-3-Clause; the third-party components it bundles are listed with their licenses in its `LICENSE` and `NOTICE` | https://download.pytorch.org/whl/cpu |
+| PyTorch (`torch`, CPU build, or on a PC with a CUDA-capable NVIDIA GPU the CUDA 12.8 / 12.6 build) | 2.9.1 | BSD-3-Clause; the third-party components it bundles are listed with their licenses in its `LICENSE` and `NOTICE`. The CUDA builds also bundle NVIDIA CUDA runtime libraries (cuBLAS, cuDNN and others), redistributed by PyTorch under NVIDIA's license terms for them | https://download.pytorch.org/whl/cpu, https://download.pytorch.org/whl/cu128, https://download.pytorch.org/whl/cu126 |
 | transformers | 4.57.1 | Apache-2.0 | PyPI |
 
 The Python embeddable package carries its own `LICENSE.txt` (the PSF

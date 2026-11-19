@@ -59,6 +59,45 @@ function Invoke-Checked([string]$name, [scriptblock]$body) {
     if ($LASTEXITCODE -ne 0) { Fail "$name が失敗しました (終了コード $LASTEXITCODE)。" }
 }
 
+# PyTorch の版の選び方 (torch 2.9.1 の CUDA 版の配布物に合わせる)。nvidia-smi の出力から決める。
+#   $SmiHeader: nvidia-smi の通常の出力 ("CUDA Version: 12.8" = ドライバが扱える CUDA の上限)
+#   $SmiGpus:   nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader の行
+# cu128 は Volta より前の GPU を含まないので Turing (7.5) 以降に限る。cu126 は Pascal (6.0) から。
+# 判定できないものは CPU 版。CUDA 版でも、エンジンは GPU で計算できなければ CPU で動く。
+function Select-TorchVariant([string]$SmiHeader, [string[]]$SmiGpus) {
+    if ($SmiHeader -notmatch "CUDA Version:\s*(\d+)\.(\d+)") { return "cpu" }
+    $cuda = [int]$Matches[1] * 100 + [int]$Matches[2]
+    $cap = -1
+    foreach ($line in $SmiGpus) {
+        if ($line -match ",\s*(\d+)\.(\d+)\s*$") {
+            $cap = [Math]::Max($cap, [int]$Matches[1] * 10 + [int]$Matches[2])
+        }
+    }
+    if ($cap -ge 75 -and $cuda -ge 1208) { return "cu128" }
+    if ($cap -ge 60 -and $cap -lt 100 -and $cuda -ge 1206) { return "cu126" }
+    return "cpu"
+}
+
+# この PC の NVIDIA GPU を nvidia-smi (NVIDIA のドライバに付属) で調べる。無ければ CPU 版。
+function Get-TorchVariant {
+    $smi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+    if (-not $smi) {
+        $smi = @((Join-Path $env:SystemRoot "System32\nvidia-smi.exe"),
+                 (Join-Path $env:ProgramFiles "NVIDIA Corporation\NVSMI\nvidia-smi.exe")) |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+    if (-not $smi) { return "cpu" }
+    # nvidia-smi の stderr を Windows PowerShell 5.1 が止める誤りにしないように。
+    $ErrorActionPreference = "Continue"
+    try {
+        $header = (& $smi 2>$null) -join "`n"
+        if ($LASTEXITCODE -ne 0) { return "cpu" }
+        $gpus = @(& $smi "--query-gpu=name,compute_cap" "--format=csv,noheader" 2>$null)
+        if ($LASTEXITCODE -ne 0) { return "cpu" }
+    } catch { return "cpu" }
+    return (Select-TorchVariant $header $gpus)
+}
+
 # ---------------------------------------------------------------- 1 保守中の印
 if ($Tag -like "__*" -or $EmbedPythonSha256 -like "__*") {
     Fail "この setup.ps1 はリリース版ではありません。リリースページの setup.ps1 を使ってください。"
@@ -79,11 +118,25 @@ if ($os.Major -lt 10) { Fail "Windows 10 以降が必要です (この PC: $os)�
 $free = (Get-PSDrive ($env:LOCALAPPDATA.Substring(0, 1))).Free
 if ($free -lt 3GB) { Fail "ディスクの空きが不足しています (必要: 3GB、空き: $([math]::Round($free / 1GB, 1))GB)。" }
 Say "  Windows $($os.Major).$($os.Minor) 64bit、ディスク空き $([math]::Round($free / 1GB, 1))GB  OK"
+$TorchVariant = Get-TorchVariant
+if ($TorchVariant -ne "cpu" -and $free -lt 10GB) {
+    Say "  CUDA 対応の GPU がありますが、GPU 版 PyTorch にはディスクの空きが 10GB 要るため CPU 版を使います"
+    $TorchVariant = "cpu"
+} elseif ($TorchVariant -ne "cpu") {
+    Say "  CUDA 対応の GPU があります: GPU 版 PyTorch ($TorchVariant) を使います"
+} else {
+    Say "  CUDA 対応の GPU はありません: CPU 版 PyTorch を使います"
+}
+$TorchIndex = "https://download.pytorch.org/whl/$TorchVariant"
 Say ""
 Say "次のものをダウンロードします (取得済みのものは省略):"
 Say "  ゆらぎ本体・TIP・ブローカー・tkinter (GitHub Releases、約 35MB)"
 Say "  Python $EmbedPythonVersion (python.org、約 30MB)"
-Say "  PyTorch $TorchVersion CPU 版 (download.pytorch.org、約 200MB)"
+if ($TorchVariant -eq "cpu") {
+    Say "  PyTorch $TorchVersion CPU 版 (download.pytorch.org、約 200MB)"
+} else {
+    Say "  PyTorch $TorchVersion GPU 版 $TorchVariant (download.pytorch.org、約 3GB。展開後 約 5GB)"
+}
 Say "  transformers・huggingface_hub ほか (PyPI)"
 Say "  Mozc 辞書 (github.com/google/mozc、約 93MB)"
 Say "  言語モデル zenz-v2.5-medium (huggingface.co、約 620 MB)"
@@ -150,7 +203,9 @@ Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
 # 「tk」は tkinter 一式 (リリースのアセット。同じ版の通常版 Python から取ったもの) 入りの印。
 $requirements = Join-Path $StageApp "packaging\requirements.txt"
 $reqHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash.Substring(0, 12).ToLower()
-$runtimeId = "py$EmbedPythonVersion-tk-torch$TorchVersion-$reqHash"
+# CPU 版は従来の名前のまま (既存のランタイムを使い続ける)。GPU 版は名前に印を付けて別に作る。
+$torchId = if ($TorchVariant -eq "cpu") { "torch$TorchVersion" } else { "torch$TorchVersion-$TorchVariant" }
+$runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"
 $Runtime = Join-Path $Shared "runtime\$runtimeId"
 New-Shared $Runtime {
     param($dir)
@@ -172,14 +227,18 @@ New-Shared $Runtime {
     $getPip = Join-Path $Download "get-pip.py"
     Invoke-WebRequest -UseBasicParsing "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
     Invoke-Checked "pip のインストール" { & $py $getPip --no-warn-script-location }
-    Invoke-Checked "PyTorch $TorchVersion CPU 版のインストール" {
-        & $py -m pip install --no-warn-script-location --index-url https://download.pytorch.org/whl/cpu "torch==$TorchVersion"
+    Invoke-Checked "PyTorch $TorchVersion ($TorchVariant) のインストール" {
+        & $py -m pip install --no-warn-script-location --no-cache-dir --index-url $TorchIndex "torch==$TorchVersion"
     }
     Invoke-Checked "依存パッケージのインストール" {
         & $py -m pip install --no-warn-script-location -r $requirements
     }
     Invoke-Checked "インポートの確認" {
         & $py -c "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
+    }
+    if ($TorchVariant -ne "cpu") {
+        # 情報だけ: GPU で計算できなければ、エンジンは CPU で動く (yuragi/ime/zenz.py pick_device)。
+        & $py -c "import torch; print('  GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not usable; the engine will use the CPU')"
     }
 }
 $script:Python = Join-Path $Runtime "python.exe"

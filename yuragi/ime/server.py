@@ -109,16 +109,20 @@ def argument_parser() -> argparse.ArgumentParser:
     lm.add_argument("--lm-alpha", type=float, default=None,
                     help="weight of zenz's reading NLL (default 1)")
     lm.add_argument("--lm-k", type=int, default=None,
-                    help="k-best surfaces whose readings are compared (default 8)")
+                    help="k-best surfaces whose readings are compared (default 4)")
     lm.add_argument("--lm-steps", type=int, default=None,
-                    help="zenz reviews per kana run (default 2)")
-    lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads")
+                    help="zenz reviews per kana run (default 1)")
+    lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads (default 4)")
+    lm.add_argument("--lm-device", choices=("cuda", "cpu"), default=None,
+                    help="where zenz runs (default: a CUDA GPU if torch can use one, else the CPU)")
     lm.add_argument("--lm-timing", action="store_true",
                     help="log the LM's time per conversion to stderr (no text)")
     lm.add_argument("--lm-prefetch", choices=("thumb", "off"), default="thumb",
                     help="engine: start the LM early on thumb press (default), or never")
-    lm.add_argument("--lm-deadline-ms", type=float, default=400,
-                    help="engine: fall back to the Viterbi 1-best after this wait")
+    lm.add_argument("--lm-deadline-ms", type=float, default=None,
+                    help="engine: a conversion still waiting for the LM after this long is "
+                         "taken as a fault: logged, and the Viterbi 1-best is used "
+                         "(default lm_async.DEADLINE_MS)")
     lm.add_argument("--lm-grace-ms", type=float, default=30,
                     help="engine: how long the converting request waits for the LM")
     lm.add_argument("--lm-prefetch-delay-ms", type=float, default=30,
@@ -129,9 +133,11 @@ def argument_parser() -> argparse.ArgumentParser:
 def build_converter(args):
     """Import, construct and warm up the zenz converter (raises without torch etc.)."""
     from yuragi.ime.zenz import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL, DEFAULT_STEPS,
-                                 ZenzConverter, ZenzModel)
+                                 DEFAULT_THREADS, ZenzConverter, ZenzModel)
     converter = ZenzConverter(
-        ZenzModel(args.lm_model or DEFAULT_MODEL, threads=args.lm_threads),
+        ZenzModel(args.lm_model or DEFAULT_MODEL,
+                  threads=DEFAULT_THREADS if args.lm_threads is None else args.lm_threads,
+                  device=getattr(args, "lm_device", None)),
         alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
         k=DEFAULT_K if args.lm_k is None else args.lm_k,
         steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps)

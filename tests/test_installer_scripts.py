@@ -80,6 +80,61 @@ class PowerShellTest(unittest.TestCase):
                     self.assertEqual(got, {"Action": "install", **odd})
                     result.unlink()
 
+    def test_torch_variant_from_nvidia_smi(self):
+        """setup.ps1 picks the CUDA build of torch only for a GPU and driver it supports."""
+        func = function_text(ROOT / "packaging" / "setup.ps1", "Select-TorchVariant")
+        header = "| NVIDIA-SMI 572.16   Driver Version: 572.16   CUDA Version: {} |"
+        cases = [
+            (header.format("12.8"), ["NVIDIA GeForce RTX 4060 Laptop GPU, 8.9"], "cu128"),
+            (header.format("13.0"), ["NVIDIA GeForce RTX 5070, 12.0"], "cu128"),
+            (header.format("12.6"), ["NVIDIA GeForce RTX 3060, 8.6"], "cu126"),
+            (header.format("12.8"), ["NVIDIA GeForce GTX 1060, 6.1"], "cu126"),  # cu128 has no Pascal
+            (header.format("12.4"), ["NVIDIA GeForce RTX 3060, 8.6"], "cpu"),  # old driver
+            (header.format("12.8"), ["NVIDIA GeForce GTX 750 Ti, 5.0"], "cpu"),
+            (header.format("12.8"), ["NVIDIA GeForce RTX 4060, [N/A]"], "cpu"),
+            (header.format("12.8"), [], "cpu"),
+            ("", ["NVIDIA GeForce RTX 4060, 8.9"], "cpu"),
+            (header.format("12.8"), ["Quadro P1000, 6.1", "NVIDIA RTX A2000, 8.6"], "cu128"),
+        ]
+        for smi_header, gpus, expected in cases:
+            with self.subTest(header=smi_header, gpus=gpus):
+                listed = ", ".join("'" + g.replace("'", "''") + "'" for g in gpus)
+                got = pwsh(f"{func}\nSelect-TorchVariant '{smi_header}' @({listed})").strip()
+                self.assertEqual(got, expected)
+
+    @unittest.skipIf(os.name == "nt", "the stand-in nvidia-smi is a shell script")
+    def test_torch_variant_runs_nvidia_smi(self):
+        """Get-TorchVariant: no nvidia-smi, a failing one, and a working one."""
+        func = function_text(ROOT / "packaging" / "setup.ps1", "Get-TorchVariant")
+        select = function_text(ROOT / "packaging" / "setup.ps1", "Select-TorchVariant")
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            env = dict(os.environ, SystemRoot=tmp, ProgramFiles=tmp,
+                       PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+            smi = bin_dir / "nvidia-smi.exe"
+
+            def run():
+                result = subprocess.run(
+                    [PWSH, "-NoProfile", "-NonInteractive", "-Command",
+                     f"{select}\n{func}\nGet-TorchVariant"],
+                    capture_output=True, text=True, timeout=120, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+
+            self.assertEqual(run(), "cpu")  # no NVIDIA driver
+            smi.write_text("#!/bin/sh\necho 'no devices were found' >&2\nexit 6\n")
+            smi.chmod(0o755)
+            self.assertEqual(run(), "cpu")
+            smi.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"--query-gpu=name,compute_cap\" ]; then\n"
+                "  echo 'NVIDIA GeForce RTX 4060 Laptop GPU, 8.9'\n"
+                "else\n"
+                "  echo '| NVIDIA-SMI 572.16  Driver Version: 572.16  CUDA Version: 12.8 |'\n"
+                "fi\n")
+            self.assertEqual(run(), "cu128")
+
 
 def powershell_steps(path: Path):
     """(name, script lines) of each workflow step with shell: powershell."""
@@ -104,6 +159,20 @@ def powershell_steps(path: Path):
             block = indent if key.endswith("|") else None
             step["run"].append(key[4:])
     return [(s["name"], s["run"]) for s in steps if s["shell"] == "powershell"]
+
+
+class InstallerTextTest(unittest.TestCase):
+    """What setup.ps1 does with the variant (no pwsh needed)."""
+
+    def test_torch_comes_from_the_selected_index(self):
+        text = (ROOT / "packaging" / "setup.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn('$TorchIndex = "https://download.pytorch.org/whl/$TorchVariant"', text)
+        self.assertIn('--index-url $TorchIndex "torch==$TorchVersion"', text)
+        self.assertNotIn("whl/cpu", text)  # no fixed CPU index left
+        # A CPU runtime keeps its old name; a GPU runtime is a different shared runtime.
+        self.assertIn('$runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"', text)
+        self.assertIn('"torch$TorchVersion-$TorchVariant"', text)
+        self.assertLess(text.index("$TorchVariant = Get-TorchVariant"), text.index("続行しますか?"))
 
 
 class WorkflowTest(unittest.TestCase):

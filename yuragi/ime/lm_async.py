@@ -4,8 +4,13 @@ LmWorker owns the converter on one daemon thread. ConnectionPipeline sits betwee
 connection and its ImeSession: a ThumbTap with LM work leaves the session
 awaiting; the request waits at most GRACE_MS for the worker, otherwise replies
 ``pending`` with the display unchanged. Keys that arrive while pending are
-queued in order and replayed once the LM picks (or, after DEADLINE_MS, the
-Viterbi 1-best) resolve the conversion, so the result equals the synchronous one.
+queued in order and replayed once the LM picks resolve the conversion, so the
+result equals the synchronous one.
+
+A conversion waits for the LM: its picks are the conversion. DEADLINE_MS is
+not a quality cut but a fault detector, set above every normal conversion; a
+conversion that reaches it (a stuck or broken LM) is logged and takes the
+Viterbi 1-best so that typing goes on.
 """
 
 from __future__ import annotations
@@ -22,7 +27,10 @@ from .server import apply_op, snapshot
 from .session import ConversionRequest, ImeSession
 
 GRACE_MS = 30
-DEADLINE_MS = 400
+# Windows (zenz medium, CPU 4 threads, k 4, 1 review; 2026-11-19): median
+# about 340 ms, 95th percentile 369 ms; CUDA median 30 ms. About 180% of the
+# CPU median: no normal conversion reaches it.
+DEADLINE_MS = 600
 REQUIRED_LM_DEADLINE_MS = 10_000
 POLL_MS = 10
 PREFETCH_DELAY_MS = 30
@@ -34,7 +42,7 @@ class Job:
     request: ConversionRequest
     wanted: bool = False  # a conversion is waiting for this result
     not_before: float = 0.0  # time.monotonic(); delays a prefetch
-    deadline: float = 0.0  # when wanted: give up and use the Viterbi 1-best
+    deadline: float = 0.0  # when wanted: a fault; log and use the Viterbi 1-best
     cancelled: bool = False
     done: threading.Event = field(default_factory=threading.Event)
     picks: list | None = None
@@ -298,6 +306,8 @@ class ConnectionPipeline:
             job.cancelled = True
             if self.require_lm:
                 raise TimeoutError("LM conversion timed out")
+            print(f"LM conversion not done after {self.deadline_ms:.0f} ms (fault); "
+                  "dictionary 1-best used", file=sys.stderr, flush=True)
             return None
         return PENDING
 

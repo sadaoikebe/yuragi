@@ -42,8 +42,13 @@ from .bunsetsu import segments_from
 
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
 DEFAULT_ALPHA = 1.0
-DEFAULT_K = 8
-DEFAULT_STEPS = 2
+# Measured on Windows (zenz medium, 200 own items; 2026-11-19): k 8 or 16
+# picks no better than 4, a second review adds one right answer, and 4 threads
+# is the fastest CPU setting. The same defaults on a GPU: it changes the speed,
+# not the picks.
+DEFAULT_K = 4
+DEFAULT_STEPS = 1
+DEFAULT_THREADS = 4  # torch CPU threads
 COST_PER_NAT = 500  # Mozc cost scale: cost ~ -500 ln p
 CONTEXT_CHARS = 200  # left context kept per connection (characters)
 PROMPT_CONTEXT_CHARS = 40  # what the prompt takes of it (Zenzai's default)
@@ -71,19 +76,37 @@ class Reviewer(Protocol):
     def reading_nll(self, readings: list[str]) -> list[float]: ...
 
 
+def pick_device(torch) -> str:
+    """"cuda" when a CUDA GPU really runs torch's kernels, else "cpu".
+
+    A CUDA build of torch can see a GPU it has no kernels for (an old
+    architecture) or lose the driver; then the model runs on the CPU."""
+    try:
+        if torch.cuda.is_available():
+            probe = torch.ones(2, device="cuda")
+            if float((probe + probe).sum().item()) == 4.0:
+                return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 class ZenzModel:
-    def __init__(self, model: str = DEFAULT_MODEL, *, threads: int | None = None) -> None:
+    def __init__(self, model: str = DEFAULT_MODEL, *, threads: int | None = DEFAULT_THREADS,
+                 device: str | None = None) -> None:
         import torch
         from transformers import AutoModelForCausalLM, GPT2Tokenizer
 
         if threads:
             torch.set_num_threads(threads)
         self.torch = torch
+        # float32 on either device: the GPU changes the speed, not the picks.
+        self.device = device or pick_device(torch)
         # local_files_only: the IME never goes to the network (DESIGN「エンジン」);
         # the model is fetched at install (packaging/fetch_model.py).
         self.tok = GPT2Tokenizer.from_pretrained(model, local_files_only=True)
         self.model = AutoModelForCausalLM.from_pretrained(
-            model, attn_implementation="eager", local_files_only=True).eval()
+            model, attn_implementation="eager", local_files_only=True).to(self.device).eval()
         # config.json's eos (2) is <s> in vocab.json; </s> is the tokenizer's.
         self.eos = self.tok.eos_token_id
         self.bytes = {i: bytes(self.tok.byte_decoder[c] for c in token)
@@ -91,11 +114,14 @@ class ZenzModel:
         self._prompt: tuple[str, object, int] | None = None  # text, KV cache, next token
         self._readings: dict[str, float] = {}
 
+    def _ids(self, rows: list[list[int]]):
+        return self.torch.tensor(rows, device=self.device)
+
     def _prompt_state(self, text: str):
         """KV cache and greedy next token after the prompt (kept for the next review)."""
         if self._prompt is None or self._prompt[0] != text:
             ids = self.tok.encode(text, add_special_tokens=False)
-            out = self.model(input_ids=self.torch.tensor([ids]), use_cache=True)
+            out = self.model(input_ids=self._ids([ids]), use_cache=True)
             self._prompt = text, out.past_key_values, int(out.logits[0, -1].argmax())
         return self._prompt[1], self._prompt[2]
 
@@ -112,9 +138,9 @@ class ZenzModel:
             ids = [s + [self.eos] * (width - len(s)) for s in seqs]
             with self.torch.inference_mode():
                 lp = self.torch.log_softmax(
-                    self.model(input_ids=self.torch.tensor(ids)).logits.float(), -1)
+                    self.model(input_ids=self._ids(ids)).logits.float(), -1)
             for row, (r, s) in enumerate(zip(todo, seqs)):
-                self._readings[r] = -float(lp[row, range(len(s) - 1), s[1:]].sum())
+                self._readings[r] = -float(lp[row, list(range(len(s) - 1)), s[1:]].sum())
         result = [self._readings[r] for r in readings]
         while len(self._readings) > 4096:
             del self._readings[next(iter(self._readings))]
@@ -129,7 +155,7 @@ class ZenzModel:
         with self.torch.inference_mode():
             past, first = self._prompt_state(prompt(context, reading))
             size = past.get_seq_length()
-            logits = self.model(input_ids=self.torch.tensor([ids[:-1]]), past_key_values=past,
+            logits = self.model(input_ids=self._ids([ids[:-1]]), past_key_values=past,
                                 use_cache=True).logits[0] if len(ids) > 1 else None
             past.crop(size)
         guesses = [first] + (logits.argmax(-1).tolist() if logits is not None else [])

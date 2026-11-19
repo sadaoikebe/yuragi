@@ -239,7 +239,7 @@ class Engine:
         converter = server.build_converter(settings)
         loaded = time.perf_counter()
         conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context, converter)
-        log(f"LM loaded in {loaded - start:.1f} s; "
+        log(f"LM loaded on {getattr(converter.model, 'device', '?')} in {loaded - start:.1f} s; "
             f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
         return converter
 
@@ -284,9 +284,12 @@ class Engine:
     def new_pipeline(self, sess):
         if self.worker is None:
             return None
-        from yuragi.ime.lm_async import ConnectionPipeline, REQUIRED_LM_DEADLINE_MS
+        from yuragi.ime.lm_async import ConnectionPipeline, DEADLINE_MS, REQUIRED_LM_DEADLINE_MS
         s = self.settings
-        deadline = REQUIRED_LM_DEADLINE_MS if s.require_lm else s.lm_deadline_ms
+        if s.require_lm:
+            deadline = REQUIRED_LM_DEADLINE_MS
+        else:
+            deadline = DEADLINE_MS if s.lm_deadline_ms is None else s.lm_deadline_ms
         return ConnectionPipeline(sess, self.worker, grace_ms=s.lm_grace_ms,
                                   deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
                                   prefetch_delay_ms=s.lm_prefetch_delay_ms)
