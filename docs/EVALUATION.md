@@ -10,10 +10,6 @@ python3 -m tools.eval.run_regression           # 回帰ゲート
 python3 -m tools.eval.run_mozc_eval --details /tmp/mozc-results.jsonl
 python3 -m tools.eval.run_mozc_eval --unambiguous
 python3 -m tools.eval.run_mozc_eval --no-user-lexicon
-python3 -m tools.eval.fetch_ajimee              # 初回のみ。AJIMEE-Bench のデータ
-python3 -m tools.eval.run_ajimee_eval --details /tmp/ajimee-results.jsonl
-python3 -m tools.eval.run_ajimee_nbest_eval --k 1 3 8 30 --summary /tmp/ajimee-nbest-summary.json
-python3 -m tools.eval.run_ajimee_lm_eval --summary /tmp/ajimee-lm.json   # LM 込み（torch + transformers + sentencepiece が要る）
 python3 -m tools.eval.classify_mozc_errors --output /tmp/mozc-errors      # Mozc 評価の失敗の分類（新しい空のフォルダに出す）
 python3 -m tools.replay_stage1 <ログ>          # 実打鍵ログの再生と採点（下の「実打鍵の記録」）
 ```
@@ -46,54 +42,6 @@ Mozc OSS 辞書に付く `evaluation.tsv` を使う。
 - `--details` は入力できる各行の `PASS` / `FAIL` / `SKIP` を JSONL に出す。
 
 単語の全候補を調べるときは `nbest_tokens(..., k=十分大きな値)`（CONVERSION.md の「n-best」）。
-
-## AJIMEE-Bench の評価
-
-### 出典・ライセンス
-
-[azooKey/AJIMEE-Bench](https://github.com/azooKey/AJIMEE-Bench) の
-`JWTD_v2/v1/evaluation_items.json`（200 件）を使う。
-取得元はコミット `401666cd56d1a570c2021798b64b6da4396bfd45` に固定。
-SHA-256: `e9eb668fd6aa14b1e26436f429b5550108af0a1dfd443b8cea0bcb3ab3028fca`。
-
-データは
-[日本語Wikipedia入力誤りデータセット v2](https://nlp.ist.i.kyoto-u.ac.jp/?日本語Wikipedia入力誤りデータセット)
-由来で、配布元が指定するライセンスは **CC BY-SA 3.0**
-（[配布元 README](https://github.com/azooKey/AJIMEE-Bench/blob/401666cd56d1a570c2021798b64b6da4396bfd45/README.md)）。
-配布元の `utils.py` / `test_utils.py` は CC0 1.0 と別記されている。
-`fetch_ajimee` はデータと、出典・ライセンスを記載した README の原本を、git 対象外の
-`data/cache/ajimee/` に保存する。配布元のコードは取得も実行もしない。データはリポジトリに入れない。
-データを再配布・改変する場合は、出典・ライセンス表示、改変表示、継承条件を守る
-（[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)）。
-`--details` の出力はデータ由来の本文を含む。
-
-### 採点
-
-入力のカタカナをひらがなにし、NICOLA 表に無い文字（句読点、数字、英字など）で区切って素通しする。
-複数の `expected_output` のどれかとの完全一致で採点する。`context_text` の有無ごとの集計も出すが、
-文脈は変換に渡さない（LM の評価を除く）。実打鍵・FSM の誤り・句読点入力の可否は評価しない。
-
-### 上位 k の到達率（`run_ajimee_nbest_eval`）
-
-amb 条件で、n-best を使う 3 つの指標を分けて出す。
-
-- `chunk_oracle@k`: 各かな区間の上位 k 候補から 1 つずつ選んで連結すると、正解のどれかになる率。
-  複数区間では文全体の k 件より多くを調べることになる。
-- `sentence@k`: 区間の候補をコストの和の順に組み合わせ、文全体の上位 k に正解が入る率。
-  単一区間では上と一致する。
-- `with_1best_chunk_oracle@k`: 各区間に `decode_tokens` の 1-best を先頭に足してから表記を重複除去し、
-  上位 k で区間 oracle を測る（評価用。`nbest_tokens` 自体はコスト順を保つ）。
-
-`decode_1best` は 1-best の一致率。`--summary` はデータの SHA-256・条件・各指標の件数・列挙時間を JSON に、
-`--details` は区間の候補・コスト・文全体の候補・正解などを JSONL に保存する（本文を含む）。
-前後比較は、同じ文数・データ・辞書・先頭追加の条件でそろえる。
-
-### LM 込み（`run_ajimee_lm_eval`）
-
-1 項目を 1 回の変換操作として、セッションと同じ経路（区間を左から順に採点し直し、左文脈は項目の
-`context_text`（指定時）と同じ項目で既に選んだ表記）で測る。α=0 は LM を呼ばない 1-best。
-同じ道具・同じデータでの on/off の比較で見る。α・k・左文脈の有無は `--alpha` `--k` `--context` で選ぶ。
-モデルは `--model` でローカルのディレクトリを渡せる。
 
 ## 標準入出力のサーバ（試験と診断）
 
