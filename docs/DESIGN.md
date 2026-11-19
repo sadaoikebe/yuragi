@@ -433,6 +433,8 @@ Tag が無ければ「インストールされていません」と表示して�
   `dist\yuragi-broker.exe` を作る（管理者権限・登録なし）。リリースのワークフローもこれを使う（CI は cmake を直接呼ぶ）。
 - `src\tip\dev-register.ps1 [-Python <python.exe>]`: タグ `dev` として登録する（UAC 1 回）。
   `HKCU\…\Tag = dev`、`versions\dev\engine.json` はリポジトリを指し、エンジンは指定の Python で動く。
+  開発登録は `--require-lm` を付けて起動する。設定が `lm_rescore: false` でも zenz を暖機し、成功してから
+  `ready` を返す。モデルの読み込みや暖機に失敗すると `fatal lm-unavailable` で終了する。
   DLL とブローカーは `dist\` から読み込む（開発機に限り `Program Files` 配置を省く）。DLL は
   `dist\yuragi_tip-a.dll`、`-b.dll`、… のうち、登録中でも使用中でもない最初のものにコピーして登録するので、
   古い DLL を読み込んだアプリを閉じなくても入れ直せる。

@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1 [-Python <python.exe>]
 #
 # - HKCU の Tag を dev にし、%LOCALAPPDATA%\yuragi-ime\versions\dev\engine.json を
-#   このリポジトリに向ける (エンジンは指定の Python で python -m yuragi.engine)。
+#   このリポジトリに向ける (python -m yuragi.engine --require-lm)。
 # - DLL とブローカーは dist\ から読み込む (開発機に限り Program Files に置かない)。
 #   DLL は dist\yuragi_tip-a.dll / -b.dll / ... のうち、登録中でなく使用中でもないものに
 #   コピーして登録するので、古い DLL を読み込んだアプリを閉じなくても更新できる。
@@ -15,6 +15,18 @@ $Dist = Join-Path $Repo 'dist'
 $Clsid = '{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}'
 $Layout = "0x0411:$Clsid{A7C4E202-0B3A-4F11-9E61-0C1A0B7E0A01}"
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
+
+function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo) {
+    $engine = [ordered]@{
+        format = 1
+        python = $Python
+        pythonw = (Join-Path (Split-Path $Python) 'pythonw.exe')
+        app = $Repo
+        args = @('-m', 'yuragi.engine', '--require-lm')
+        admin_args = @('-m', 'yuragi.ime.admin_ui')
+    }
+    [IO.File]::WriteAllText($Path, ($engine | ConvertTo-Json -Depth 3), [Text.UTF8Encoding]::new($false))
+}
 
 if (-not $Python) { $Python = (Get-Command python -ErrorAction Stop).Source }
 if (-not (Test-Path -LiteralPath $Python)) { throw "Python が見つかりません: $Python" }
@@ -67,15 +79,7 @@ New-Item -Force 'HKCU:\Software\yuragi-ime' | Out-Null
 Set-ItemProperty -LiteralPath 'HKCU:\Software\yuragi-ime' -Name 'Tag' -Value 'dev'
 $version = Join-Path $env:LOCALAPPDATA 'yuragi-ime\versions\dev'
 New-Item -ItemType Directory -Force $version | Out-Null
-$engine = [ordered]@{
-    format = 1
-    python = $Python
-    pythonw = (Join-Path (Split-Path $Python) 'pythonw.exe')
-    app = $Repo
-    args = @('-m', 'yuragi.engine')
-    admin_args = @('-m', 'yuragi.ime.admin_ui')
-}
-[IO.File]::WriteAllText((Join-Path $version 'engine.json'), ($engine | ConvertTo-Json -Depth 3), $Utf8NoBom)
+Write-DevEngineConfig (Join-Path $version 'engine.json') $Python $Repo
 Add-Type -Namespace YuragiDev -Name Input -MemberDefinition @'
 [DllImport("input.dll", CharSet = CharSet.Unicode)]
 public static extern bool InstallLayoutOrTip(string profile, uint flags);

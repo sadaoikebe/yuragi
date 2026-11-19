@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -44,6 +45,27 @@ def function_text(path: Path, name: str) -> str:
 
 @unittest.skipIf(PWSH is None, "pwsh is not installed (set YURAGI_PWSH)")
 class PowerShellTest(unittest.TestCase):
+    def test_dev_registration_requires_lm_with_an_empty_model_cache(self):
+        write_config = function_text(ROOT / "src/tip/dev-register.ps1", "Write-DevEngineConfig")
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            engine_json = data / "engine.json"
+            quoted = ["'" + str(path).replace("'", "''") + "'"
+                      for path in (engine_json, sys.executable, ROOT)]
+            pwsh(f"{write_config}\nWrite-DevEngineConfig {' '.join(quoted)}")
+            engine = json.loads(engine_json.read_text(encoding="utf-8"))
+            (data / "config.json").write_text('{"lm_rescore": false}', encoding="utf-8")
+            cache = str(data / "empty-hf-cache")
+            env = dict(os.environ, HF_HOME=cache, HF_HUB_CACHE=cache, HUGGINGFACE_HUB_CACHE=cache,
+                       TRANSFORMERS_CACHE=cache, HF_HUB_OFFLINE="1", PYTHONDONTWRITEBYTECODE="1")
+            result = subprocess.run(
+                [engine["python"], *engine["args"], "--data-dir", str(data)],
+                cwd=engine["app"], input=b"", capture_output=True, env=env, timeout=120,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr.decode("utf-8", errors="replace"))
+            self.assertEqual(result.stdout, b"")
+            self.assertIn(b"fatal lm-unavailable", result.stderr.splitlines())
+
     def test_elevated_arguments_survive_encoding(self):
         odd = {
             "Tag": "v0.2.0",
