@@ -26,7 +26,7 @@ from .zenz import conversion_picks
 from .server import apply_op, snapshot
 from .session import ConversionRequest, ImeSession
 
-GRACE_MS = 30
+GRACE_MS = 0
 # Windows (zenz medium, CPU 4 threads, k 4, 1 review; 2026-11-19): median
 # about 340 ms, 95th percentile 369 ms; CUDA median 30 ms. About 180% of the
 # CPU median: no normal conversion reaches it.

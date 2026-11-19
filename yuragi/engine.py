@@ -284,13 +284,15 @@ class Engine:
     def new_pipeline(self, sess):
         if self.worker is None:
             return None
-        from yuragi.ime.lm_async import ConnectionPipeline, DEADLINE_MS, REQUIRED_LM_DEADLINE_MS
+        from yuragi.ime.lm_async import (ConnectionPipeline, DEADLINE_MS, GRACE_MS,
+                                     REQUIRED_LM_DEADLINE_MS)
         s = self.settings
         if s.require_lm:
             deadline = REQUIRED_LM_DEADLINE_MS
         else:
             deadline = DEADLINE_MS if s.lm_deadline_ms is None else s.lm_deadline_ms
-        return ConnectionPipeline(sess, self.worker, grace_ms=s.lm_grace_ms,
+        grace = GRACE_MS if s.lm_grace_ms is None else s.lm_grace_ms
+        return ConnectionPipeline(sess, self.worker, grace_ms=grace,
                                   deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
                                   prefetch_delay_ms=s.lm_prefetch_delay_ms)
 

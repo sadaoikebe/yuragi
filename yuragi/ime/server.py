@@ -123,8 +123,9 @@ def argument_parser() -> argparse.ArgumentParser:
                     help="engine: a conversion still waiting for the LM after this long is "
                          "taken as a fault: logged, and the Viterbi 1-best is used "
                          "(default lm_async.DEADLINE_MS)")
-    lm.add_argument("--lm-grace-ms", type=float, default=30,
-                    help="engine: how long the converting request waits for the LM")
+    lm.add_argument("--lm-grace-ms", type=float, default=None,
+                    help="engine: how long the converting request waits for the LM "
+                         "(default lm_async.GRACE_MS)")
     lm.add_argument("--lm-prefetch-delay-ms", type=float, default=30,
                     help="engine: thumb press to prefetch start")
     return parser
