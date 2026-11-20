@@ -117,6 +117,12 @@ def cuda_devices() -> tuple[str, ...]:
         return ()
 
 
+def usable_cpus() -> int | None:
+    """The CPUs this process may use (os.process_cpu_count is Python 3.13+)."""
+    count = getattr(os, "process_cpu_count", os.cpu_count)
+    return count()
+
+
 class ZenzModel:
     def __init__(self, model: str = DEFAULT_MODEL, *, threads: int | None = DEFAULT_THREADS,
                  device: str = "cpu") -> None:
@@ -125,7 +131,7 @@ class ZenzModel:
 
         if threads:
             # More threads than the CPUs this process may use only slows the work.
-            torch.set_num_threads(max(1, min(threads, os.process_cpu_count() or threads)))
+            torch.set_num_threads(max(1, min(threads, usable_cpus() or threads)))
         self.torch = torch
         # float32 on either device: the GPU changes the speed, not the picks.
         self.device = device

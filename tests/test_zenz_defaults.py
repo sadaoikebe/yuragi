@@ -68,6 +68,7 @@ class DeviceStartupTest(unittest.TestCase):
         )
         self.enterContext(mock.patch.dict(sys.modules, {"torch": torch, "transformers": transformers}))
         self.enterContext(mock.patch.object(power, "on_battery", return_value=False))
+        self.enterContext(mock.patch.object(zenz, "usable_cpus", return_value=8))
         self.enterContext(mock.patch.object(zenz.ZenzModel, "review", autospec=True,
                                             side_effect=self.warm_up))
         self.enterContext(mock.patch("sys.stderr", new_callable=io.StringIO))
