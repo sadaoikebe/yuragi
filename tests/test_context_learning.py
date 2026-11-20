@@ -35,7 +35,7 @@ class Review:
         self.fix = (spell(text) if isinstance(text, str) else text, exact)
         self.calls = []
 
-    def reading_nll(self, readings):
+    def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
     def review(self, context, reading, draft, accepted):

@@ -6,7 +6,9 @@ it has no new dependency.
 
 Per kana run (Zenzai: AzooKeyKanaKanjiConverter, all_zenzai and
 ZenzCandidateEvaluator):
-1. The draft is the dictionary 1-best (decode_tokens).
+1. Choose a reading from the dictionary paths using their costs and the
+   likelihood of the full prompt with left context. Its representative path
+   becomes the draft.
 2. zenz reads its prompt and the draft in one forward. Where the model's
    greedy next token first differs from the draft's, the draft is wrong from
    there: the constraint becomes the draft's bytes so far plus the model's
@@ -24,13 +26,14 @@ Prompt (zenz-v2; Zenzai's ZenzPromptBuilder .v2, Docs/zenzai.md):
   U+EE00 <reading in katakana> [U+EE02 <left context, last 40 chars>] U+EE01
 then the output. Spaces become U+3000 and newlines are dropped; prompt and
 draft are tokenized separately; no <s> (tokenizer_config.json: add_bos_token
-false). The reading is the draft's: the thumb sides are not known, and a
-constraint may change the reading only where the dictionary agrees.
+false). Reading selection scores the prompt through the output start marker.
+Surface review keeps the selected reading fixed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 import time
 from typing import Protocol
 
@@ -74,7 +77,7 @@ class Reviewer(Protocol):
     def review(self, context: str, reading: str, draft: str,
                accepted: bytes) -> tuple[bytes, bool] | None: ...
 
-    def reading_nll(self, readings: list[str]) -> list[float]: ...
+    def reading_nll(self, context: str, readings: list[str]) -> list[float]: ...
 
 
 def cuda_devices() -> tuple[str, ...]:
@@ -108,7 +111,7 @@ class ZenzModel:
         self.bytes = {i: bytes(self.tok.byte_decoder[c] for c in token)
                       for token, i in self.tok.get_vocab().items()}
         self._prompt: tuple[str, object, int] | None = None  # text, KV cache, next token
-        self._readings: dict[str, float] = {}
+        self._readings: dict[bytes, float] = {}
 
     def _ids(self, rows: list[list[int]]):
         return self.torch.tensor(rows, device=self.device)
@@ -121,23 +124,26 @@ class ZenzModel:
             self._prompt = text, out.past_key_values, int(out.logits[0, -1].argmax())
         return self._prompt[1], self._prompt[2]
 
-    def reading_nll(self, readings: list[str]) -> list[float]:
-        """NLL (nats) of each reading as zenz's input: the prompt without context.
-
-        zenz models its input too: a reading that is not Japanese (a wrong
-        thumb side, あとなおちゃ) costs several nats more than the right one."""
-        todo = [r for r in dict.fromkeys(readings) if r not in self._readings]
+    def reading_nll(self, context: str, readings: list[str]) -> list[float]:
+        """Sum next-token NLLs (nats) through the end of each full prompt."""
+        keys, todo = [], {}
+        for reading in readings:
+            text = prompt(context, reading)
+            key = sha256(text.encode("utf-8")).digest()
+            keys.append(key)
+            if key not in self._readings:
+                todo[key] = text
         if todo:
-            seqs = [self.tok.encode(prompt("", r), add_special_tokens=False) for r in todo]
+            seqs = [self.tok.encode(text, add_special_tokens=False) for text in todo.values()]
             width = max(map(len, seqs))
-            # Right padding: the causal mask keeps it out of every row's score.
-            ids = [s + [self.eos] * (width - len(s)) for s in seqs]
+            # With causal attention, padding to the right cannot affect the prompt.
+            ids = [seq + [self.eos] * (width - len(seq)) for seq in seqs]
             with self.torch.inference_mode():
                 lp = self.torch.log_softmax(
-                    self.model(input_ids=self._ids(ids)).logits.float(), -1)
-            for row, (r, s) in enumerate(zip(todo, seqs)):
-                self._readings[r] = -float(lp[row, list(range(len(s) - 1)), s[1:]].sum())
-        result = [self._readings[r] for r in readings]
+                    self.model(input_ids=self._ids(ids), use_cache=False).logits.float(), -1)
+                for row, (key, seq) in enumerate(zip(todo, seqs)):
+                    self._readings[key] = -float(lp[row, list(range(len(seq) - 1)), seq[1:]].sum())
+        result = [self._readings[key] for key in keys]
         while len(self._readings) > 4096:
             del self._readings[next(iter(self._readings))]
         return result
@@ -172,19 +178,17 @@ class ZenzConverter:
     steps: int = DEFAULT_STEPS
     last: dict = field(default_factory=dict)  # stats of the most recent conversion
 
-    def reading(self, best: DecodeResult, tokens: list[dict], lex: MozcLex,
+    def reading(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
                 left_id: int) -> DecodeResult:
-        """The cheapest path of the reading with the lowest
-        (cost - 1-best cost) + alpha * 500 * zenz's NLL of the reading,
-        among the 1-best and the readings of the k-best surfaces."""
+        """Compare the first path per reading, starting with the dictionary 1-best."""
         nb, _ = nbest_tokens(tokens, lex, k=self.k, left_id=left_id)
         paths: dict[str, DecodeResult] = {}
         for d in [best] + nb:
             paths.setdefault(d.reading, d)
         if len(paths) < 2:
             return best
-        nlls = self.model.reading_nll(list(paths))
-        # min() keeps the earliest on ties, i.e. the 1-best's reading.
+        nlls = self.model.reading_nll(context, list(paths))
+        # min() keeps the earliest among the paths tied for lowest score.
         return min(zip(paths.values(), nlls),
                    key=lambda dn: (dn[0].score - best.score)
                    + self.alpha * COST_PER_NAT * dn[1])[0]
@@ -192,7 +196,7 @@ class ZenzConverter:
     def rescore(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
                 left_id: int = BOS_ID, learning=None) -> tuple[DecodeResult, int]:
         t0 = time.perf_counter()
-        draft = self.reading(best, tokens, lex, left_id)
+        draft = self.reading(context, best, tokens, lex, left_id)
         t1 = time.perf_counter()
         # zenz writes for this reading; its constraints must not move it.
         fixed = [{"kind": "plain", "kana": kana} for kana in draft.reading]
