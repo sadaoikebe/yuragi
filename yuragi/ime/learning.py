@@ -1,10 +1,17 @@
 """Local confirmation history (DESIGN「学習履歴のファイル」). Never imported by the evaluation loaders.
 
-The file is a JSONL log of confirmations and pair suppressions (Shift+F6,
-"forget"), read in order. What a conversion uses, for each reading: the
-surface chosen by LearningView.head from the last confirmations for the
-reading and its left bunsetsu. Nothing is added to any score. A suppression
-removes its (reading, surface) pair from every context.
+The file is a JSONL log of the user's choices and pair suppressions
+(Shift+F6, "forget"), read in order. Only a choice is recorded: a commit of
+what the engine showed adds nothing, so it changes no later conversion. What
+a conversion uses, for each reading: the surface chosen by LearningView.head
+from the last choices for the reading and its left bunsetsu. A choice
+overrides the LM's pick only after the same left bunsetsu. Nothing is added
+to any score. A suppression removes its (reading, surface) pair from every
+context.
+
+Rows written before choices were told apart (no "choice") are kept in the
+file but not used, except words learned from kana and symbols, which only a
+choice produced.
 
 Confirmed bunsetsu are also whole-bunsetsu arcs of the lattice (spans), so a
 spelling absent from the dictionary (user_word, from a kana confirmation) can
@@ -52,6 +59,11 @@ class Confirmation:
     user_word: bool = False
     symbol: bool = False  # a symbol from its reading: promotes it in candidates only
     prev: str | None = None
+    choice: bool = False  # written by a version that records the user's choices only
+
+    def used(self) -> bool:
+        """False for an older row that may be a plain commit of the engine's pick."""
+        return self.choice or self.user_word or self.symbol
 
 
 @dataclass(frozen=True)
@@ -97,19 +109,22 @@ class LearningView:
 
     def head(self, reading: str, prev: Bunsetsu | None = None, *, repeat: bool = False,
              zenz: str | None = None) -> Confirmation | None:
-        """The learned spelling for this interval, in rule priority order."""
-        entries = self._entries.get(reading, ())
-        if len(entries) <= 1:
-            return self._last.get(reading)
-        if prev is not None:
-            if repeat and prev.reading == reading:
-                row = self._pairs.get((reading, prev.surface))
-                if row is not None:
-                    return row
-            surface = self._contexts.get((reading, prev.surface))
-            if surface is not None:
-                return self._pairs[reading, surface]
-        return self._pairs.get((reading, zenz), self._last[reading])
+        """The learned spelling for this interval, in rule priority order.
+
+        zenz: the surface the LM wrote for this interval, if it did. A choice
+        made in another context does not override it; None then keeps it."""
+        if reading not in self._last:
+            return None
+        if prev is not None and repeat and prev.reading == reading:
+            row = self._pairs.get((reading, prev.surface))
+            if row is not None:
+                return row
+        surface = self._contexts.get((reading, prev.surface)) if prev is not None else None
+        if surface is not None:
+            return self._pairs[reading, surface]
+        if zenz is not None:
+            return self._pairs.get((reading, zenz))
+        return self._last[reading]
 
     def symbol(self, reading: str) -> str | None:
         """The symbol last chosen from this reading, if any."""
@@ -172,6 +187,8 @@ class LearningStore:
         self._rows: dict[tuple[str, str], tuple[int, Confirmation]] = {}
         # Pair -> left surface -> latest confirmation in that context.
         self._contexts: dict[tuple[str, str], dict[str, tuple[int, Confirmation]]] = {}
+        # Older rows not used (Confirmation.used), kept through compaction.
+        self._unused: dict[tuple[str, str], tuple[int, Confirmation]] = {}
         self._index: tuple | None = None  # built when a view needs it
         self.sync()
 
@@ -185,6 +202,9 @@ class LearningStore:
 
     def _apply(self, event, position: int) -> None:
         key = (event.reading, event.surface)
+        if isinstance(event, Confirmation) and not event.used():
+            self._unused[key] = (position, event)
+            return
         previous = self._rows.pop(key, None)
         if isinstance(event, Confirmation):
             if previous is not None and previous[1].symbol != event.symbol:
@@ -193,6 +213,7 @@ class LearningStore:
             if not event.symbol and event.prev:
                 self._contexts.setdefault(key, {})[event.prev] = (position, event)
         else:
+            self._unused.pop(key, None)
             self._contexts.pop(key, None)
 
     def _context_rows(self):
@@ -221,6 +242,7 @@ class LearningStore:
     def _clear(self, stamp) -> None:
         self._rows.clear()
         self._contexts.clear()
+        self._unused.clear()
         self.lines = self.skipped = 0
         self._seen = stamp
         self._changed()
@@ -291,24 +313,30 @@ class LearningStore:
               file=sys.stderr, flush=True)
 
     def confirm(self, selections: list[Candidate], lex: MozcLex, *,
-                prev: Bunsetsu | None = None, repeat: bool = False) -> None:
-        if not any(normal_bunsetsu(c) is not None or (c.kind == "symbol" and c.reading)
-                   for c in selections):
+                prev: Bunsetsu | None = None, repeat: bool = False,
+                chosen: list[bool] | None = None) -> None:
+        """Record the committed selections that the user chose (chosen[i];
+        default all). The others still give their right neighbor its left."""
+        if chosen is None:
+            chosen = [True] * len(selections)
+        if not any(wanted and (normal_bunsetsu(c) is not None
+                               or (c.kind == "symbol" and c.reading))
+                   for c, wanted in zip(selections, chosen)):
             return
         try:
             with self._writing():
                 now = time.time()
                 rows = []
-                for c in selections:
+                for c, wanted in zip(selections, chosen):
                     current = normal_bunsetsu(c)
-                    if current is not None:
+                    if wanted and current is not None:
                         left = prev.surface if prev is not None and not (
                             repeat and prev.reading == current.reading) else None
                         rows.append(self._confirmation(c, lex, now, left))
-                    elif c.kind == "symbol" and c.reading:
+                    elif wanted and c.kind == "symbol" and c.reading:
                         rows.append(Confirmation(c.reading, c.surface, now,
                                                  0, lex.base_pos(c.lid), lex.base_pos(c.rid),
-                                                 symbol=True))
+                                                 symbol=True, choice=True))
                     prev = current
                 self._append(rows)
         except OSError as exc:
@@ -329,7 +357,7 @@ class LearningStore:
                 cost, lid, rid = USER_WORD_COST, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID
         # Numeral connection IDs are local to the loaded lexicon.
         return Confirmation(c.reading, c.surface, now, cost, lex.base_pos(lid),
-                            lex.base_pos(rid), user_word, prev=prev)
+                            lex.base_pos(rid), user_word, prev=prev, choice=True)
 
     def suppress(self, reading: str, surface: str) -> bool:
         """Forget a learned pair; False when it is not learned (nothing written)."""
@@ -369,6 +397,7 @@ class LearningStore:
             self._sync_locked()
             live = dict(self._rows.values())
             live.update(self._context_rows())
+            live.update(self._unused.values())  # the user's data: never dropped unasked
             if self.lines <= 2 * len(live) or self.lines <= min_lines:
                 return None
             before = self.lines

@@ -78,8 +78,9 @@ class ContextLearningTest(unittest.TestCase):
             prev=Bunsetsu("", prev) if prev else None)
 
     @staticmethod
-    def plain(s, reading):
-        s.start_input(None, None, disconnected=True)
+    def plain(s, reading, *, after=None):
+        """Type reading, unambiguous; after: the commit it continues (TIP's seq)."""
+        s.start_input(None, after, disconnected=after is None)
         s._table = {"keys": {c: {"plain": c} for c in reading}}
         s._ingest([Literal(c) if c in "１２、" else Plain(c) for c in reading])
 
@@ -88,6 +89,15 @@ class ContextLearningTest(unittest.TestCase):
         while surface not in reply["candidates"] and reply["has_next_page"]:
             reply = keys.tap(NEXT)
         return keys.tap(ord("1") + reply["candidates"].index(surface))
+
+    @staticmethod
+    def choose_other(keys, reading):
+        """Convert, focus the clause with this reading, pick its second row; that surface."""
+        reply = keys.tap(SPACE)
+        while reply["segments"][reply["focus"]]["reading"] != reading:
+            reply = keys.tap(RIGHT)
+        reply = keys.tap("2")
+        return reply["segments"][reply["focus"]]["surface"]
 
     def assert_head(self, reply, surface):
         self.assertEqual(reply["segments"][reply["focus"]]["surface"], surface)
@@ -119,7 +129,7 @@ class ContextLearningTest(unittest.TestCase):
                 if model:  # each conversion reviews its draft, then the fixed draft
                     self.assertEqual(len(model.calls), 8)
 
-    def test_document_left_then_lm_then_last_after_restart(self):
+    def test_document_left_then_lm_after_restart(self):
         for reading, left, selected in (("げんこうの", "原稿の", "校正"),
                                         ("かいぎの", "会議の", "構成")):
             s = self.session()
@@ -131,15 +141,17 @@ class ContextLearningTest(unittest.TestCase):
             self.assertEqual(self.rows()[-1]["prev"], left)
 
         initial = self.path.read_bytes()
-        for left, vote, expected in (("原稿の", "構成", "校正"), (None, "校正", "校正"),
-                                     (None, "公正", "構成")):
+        # Chosen after 原稿の: it overrides the LM there. After a left with no
+        # choice (資料の), or none (document text only), the LM's pick stands.
+        for left, vote, expected in (("原稿の", "構成", "校正"), ("資料の", "公正", "公正"),
+                                     (None, "校正", "校正"), (None, "公正", "公正")):
             with self.subTest(left=left, vote=vote):
                 self.path.write_bytes(initial)
                 model = Review(vote)
                 s = self.session()
                 k = Keys(lambda msg: dispatch(s, msg))
                 if left:
-                    self.plain(s, "げんこうの")
+                    self.plain(s, {"原稿の": "げんこうの", "資料の": "しりょうの"}[left])
                     self.assertEqual(s.composition, left)
                     k.commit()
                     start = {"after_commit_seq": k.seq}
@@ -158,7 +170,10 @@ class ContextLearningTest(unittest.TestCase):
                     self.assert_head(k.tap(SPACE), expected)
                     self.pick(k, k.tap(LEFT), "構成")
                 k.commit()
-                self.assertEqual(self.rows()[-1].get("prev"), left)
+                if left:
+                    self.assertEqual(self.rows()[-1].get("prev"), left)
+                else:  # committed as shown: nothing learned
+                    self.assertEqual(self.path.read_bytes(), initial)
                 self.assertNotIn("識別用外部本文", self.path.read_text(encoding="utf-8"))
                 if left:
                     self.assertEqual(s._learning.snapshot().head(
@@ -202,8 +217,9 @@ class ContextLearningTest(unittest.TestCase):
         partial = k.tap(DOWN, mods=["ctrl"])
         self.assertEqual(partial["commit"], "公正")
         self.assert_head(partial, "厚生")
+        chosen = k.tap("2")["segments"][0]["surface"]
         k.commit()
-        self.assertEqual(self.rows()[-1]["prev"], "公正")
+        self.assertEqual((self.rows()[-1]["surface"], self.rows()[-1]["prev"]), (chosen, "公正"))
         self.assertFalse(s._last_commit.standalone)
 
     def test_boundaries_and_autocommit(self):
@@ -213,9 +229,10 @@ class ContextLearningTest(unittest.TestCase):
         cases = ("げんこうの１２こうせい", "げんこうの、こうせい")
         for text in cases:
             self.plain(s, text)
-            k.tap(SPACE)
+            self.choose_other(k, "こうせい")
             k.commit()
-            self.assertEqual([r.get("prev") for r in self.rows()[-2:]], [None, None])
+            self.assertEqual(self.rows()[-1]["reading"], "こうせい")
+            self.assertNotIn("prev", self.rows()[-1])  # a literal to the left
 
         self.plain(s, "げんこうの")
         k.tap(SPACE)
@@ -223,6 +240,7 @@ class ContextLearningTest(unittest.TestCase):
         auto = k.tap("R")  # first key of こうせい also commits the previous input
         for key in "AGL":
             k.tap(key)
+        self.choose_other(k, "こうせい")
         k.commit()
         self.assertEqual(self.rows()[-1]["prev"], auto["commit"])
         self.assertEqual(auto["commit"], "原稿の")
@@ -232,6 +250,7 @@ class ContextLearningTest(unittest.TestCase):
         k.tap("R", after_commit_seq=k.seq)
         for key in "AGL":
             k.tap(key)
+        self.choose_other(k, "こうせい")
         k.commit()
         self.assertNotIn("prev", self.rows()[-1])
 
@@ -313,12 +332,22 @@ class ContextLearningTest(unittest.TestCase):
                 ("存在しない経路", True, False, "構成")):
             with self.subTest(text=text, left_override=left_override):
                 self.path.write_bytes(initial)
-                self.learn(None, "現行の" if left_override else "原稿の",
+                # Chosen after 会議の: overrides the LM's 原稿の after that left.
+                self.learn("会議の" if left_override else None,
+                           "現行の" if left_override else "原稿の",
                            reading="げんこうの", cost=50_000)
-                s = self.session(Review(text, exact=exact))
+                s = self.session()
                 k = Keys(lambda msg: dispatch(s, msg))
-                self.plain(s, "げんこうのこうせい")
-                k.tap(SPACE)
+                start = {}
+                if left_override:
+                    self.plain(s, "かいぎの")
+                    self.assertEqual(s.composition, "会議の")
+                    start = {"after_commit_seq": k.commit()}
+                s.lm = ZenzConverter(Review(text, exact=exact))
+                self.plain(s, "げんこうのこうせい", after=start.get("after_commit_seq"))
+                first = k.tap(SPACE)
+                if left_override:
+                    self.assertEqual(first["segments"][0]["surface"], "現行の")
                 self.assert_head(k.tap(RIGHT), expected)
 
     def test_lm_failure_uses_the_same_snapshot_without_a_vote(self):
@@ -339,7 +368,7 @@ class ContextLearningTest(unittest.TestCase):
 
         class TwoRuns(Review):
             def review(self, context, reading, draft, accepted):
-                self.fix = spell("原稿の" if reading == "げんこうの" else "校正"), True
+                self.fix = spell("存在しない経路" if reading == "げんこうの" else "校正"), True
                 return super().review(context, reading, draft, accepted)
 
         model = TwoRuns("")
@@ -352,8 +381,6 @@ class ContextLearningTest(unittest.TestCase):
         k.tap(DOWN, mods=["ctrl"])
         partial = k.tap(DOWN, mods=["ctrl"])
         self.assert_head(partial, "校正")
-        k.commit()
-        self.assertNotIn("prev", self.rows()[-1])
 
     def test_worker_prefetch_snapshot_and_deadline(self):
         for mode in ("hit", "miss", "deadline"):
@@ -393,13 +420,13 @@ class ContextLearningTest(unittest.TestCase):
                     wanted.completed_at = worker.clock()
                     wanted.done.set()
                     self.assertEqual(k.send("timeout")["composition"], "")
-                    self.assertEqual(len(self.rows()), count + 1)
-                    self.assertEqual(self.rows()[-1]["surface"], "厚生")
+                    self.assertEqual(len(self.rows()), count)
                 else:
                     self.assert_head(reply, "校正")
 
     def test_compaction_retains_context_losers_and_pair_representatives(self):
-        # Legacy left text, malformed prev, equal times, the clock moving backwards.
+        # Rows from before choices were told apart (no "choice"; legacy left
+        # text, malformed prev), equal times, the clock moving backwards.
         legacy = dict(reading="こうせい", surface="公正", timestamp=1000, cost=5200,
                       lid=DEFAULT_NOUN_ID, rid=DEFAULT_NOUN_ID, left="原稿の")
         with self.path.open("w", encoding="utf-8") as stream:
@@ -423,7 +450,8 @@ class ContextLearningTest(unittest.TestCase):
             paths = [{"kind": "plain", "kana": c} for c in "こうせい"]
             return (learning_admin.pairs(self.path), list(snap.learned()),
                     list(snap.spans(paths, 0, self.lex)),
-                    [snap.head("こうせい", prev, zenz="公正").surface for prev in contexts])
+                    [getattr(snap.head("こうせい", prev, zenz="公正"), "surface", None)
+                     for prev in contexts])
 
         before = view()
         self.assertEqual(before[-1], ["構成", "校正", "構成"])
@@ -432,13 +460,15 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual(store.snapshot().head("こうせい", contexts[1]).cost, 5000)
         self.assertEqual(store.compact_if_needed(min_lines=0), (17, 7))
         self.assertEqual(view(), before)
+        self.assertIn("公正", self.path.read_text(encoding="utf-8"))  # kept, not used
         self.assertTrue(learning_admin.forget(self.path, "こうせい", "構成"))
-        self.assertEqual(view()[-1], ["校正", "校正", "公正"])
+        # 会議の has no choice left; the LM's 公正 stands.
+        self.assertEqual(view()[-1], ["校正", "校正", None])
         self.learn(None, "構成")
-        self.assertEqual(view()[-1], ["校正", "校正", "公正"])
+        self.assertEqual(view()[-1], ["校正", "校正", None])
         store.confirm([word("こうせい", "校正", kind="symbol")], self.lex)
         self.learn(None, "校正")
-        self.assertEqual(view()[-1], ["公正", "公正", "公正"])
+        self.assertEqual(view()[-1], [None, None, None])
 
     def test_failed_append_reloads_history_and_can_learn_again(self):
         self.learn("原稿の", "校正")

@@ -92,6 +92,16 @@ class Segment:
     index: int = 0
     zenz: ZenzEvidence | None = None
     order: CandidateOrder | None = None
+    # (reading, surface) the engine chose for this interval; None once the
+    # user set the interval (resize). Learning records only what differs.
+    shown: tuple[str, str] | None = None
+
+    def chosen(self) -> bool:
+        """The user's own choice: a resized interval or a changed selection."""
+        return self.shown is None or self.shown != (self.selected.reading, self.selected.surface)
+
+    def mark_shown(self) -> None:
+        self.shown = (self.selected.reading, self.selected.surface)
 
 
 def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:

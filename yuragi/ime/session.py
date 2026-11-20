@@ -675,6 +675,7 @@ class ImeSession:
             stream.ensure(0)
             self.segments = head + [Segment(start, len(lattice), found[0], fixed=True,
                                             choices=stream, context=PREDICTION)]
+            self.segments[-1].mark_shown()
             self.converted = True
             self.predicting = True
             self.focus = len(head)
@@ -788,6 +789,7 @@ class ImeSession:
         self._learning_view = self._learning.snapshot()
         segment.fixed = False
         self._prepare_cands(self.focus, reselect=True)
+        segment.mark_shown()
         self._open_cands()
         return True
 
@@ -943,6 +945,7 @@ class ImeSession:
             resized.fixed = False
             resized.zenz = None
             resized.order = None
+            resized.shown = None
             pins, left, right = candidate_inputs(
                 lattice, self.segments, index, self._left_id, self._lex)
             resized.selected = next(candidates(
@@ -1102,6 +1105,8 @@ class ImeSession:
         if picks is None and self._lex is not None:
             picks = request.decode(self._lex)
         self.segments = display_segments(request.parts, picks)
+        for segment in self.segments:
+            segment.mark_shown()
         self._word_starts = {start for run in picks or () for start in run.word_starts}
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)
@@ -1112,9 +1117,12 @@ class ImeSession:
 
     def _confirm(self, segments: list[Segment], *, standalone: bool) -> None:
         if self._learning is not None and self._lex is not None:
+            # Only the user's own choices: a commit of what the engine showed
+            # changes nothing later (CONVERSION「学習」).
             self._learning.confirm(
                 [s.selected for s in segments], self._lex,
-                prev=self._left_bunsetsu, repeat=self._repeat and standalone)
+                prev=self._left_bunsetsu, repeat=self._repeat and standalone,
+                chosen=[s.chosen() for s in segments])
 
     def _commit(self, *, reset_input: bool = True) -> str:
         text = self.composition

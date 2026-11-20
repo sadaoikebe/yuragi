@@ -13,7 +13,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_SPACE, VK_LEFT, VK_F6 = 0x0D, 0x20, 0x25, 0x75
+VK_RETURN, VK_SPACE, VK_LEFT, VK_UP, VK_DOWN, VK_F6 = 0x0D, 0x20, 0x25, 0x26, 0x28, 0x75
 
 
 class LearningTest(unittest.TestCase):
@@ -106,6 +106,39 @@ class LearningTest(unittest.TestCase):
                 self.assertLess(max(row.lid, row.rid), self.lex.pos_size)
                 reopened = self.session()
                 self.assertEqual(self.convert(reopened, reading).selected.surface, surface)
+
+    def test_committing_what_was_shown_writes_nothing(self):
+        # Every way to commit the shown result. One path that misses it would
+        # learn the engine's own pick again (CONVERSION「学習」).
+        text = "きょうはいいてんきですね"
+        s = self.session()
+        s._table = {"keys": {c: {"plain": c} for c in text}}
+
+        def show(convert):
+            s.tokens = [Plain(c) for c in text]
+            s._refresh()
+            if convert:
+                for op in ("down", "up"):  # a lone thumb key converts on its release
+                    dispatch(s, {"op": op, "vk": VK_SPACE})
+                self.assertTrue(s.converted)
+            return s.composition
+
+        for name, convert, keys in (
+                ("enter before converting", False, []),
+                ("enter after converting", True, []),
+                ("partial commit", True, [(VK_DOWN, ["ctrl"])]),
+                ("down and back up", True, [(VK_DOWN, None), (VK_UP, None)])):
+            with self.subTest(name):
+                shown = show(convert)
+                committed = "".join(
+                    dispatch(s, {"op": "down", "vk": vk, **({"mods": mods} if mods else {})})
+                    ["commit"] for vk, mods in keys + [(VK_RETURN, None)])
+                self.assertEqual(committed, shown)
+        with self.subTest("the next key commits"):
+            shown = show(True)
+            self.assertEqual(s._ingest([Plain(text[0])]), shown)
+            s.reset()
+        self.assertEqual(self.path.read_bytes(), b"")
 
     def test_shift_f6_forgets_the_choice(self):
         s = self.session()

@@ -141,17 +141,15 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(k.s.composition, "学校に")
         self.assertEqual(k.committed, "私は")
 
-    def test_learning_records_the_committed_clause(self):
+    def test_learning_records_a_chosen_committed_clause(self):
         k = self.typed("わたしはがっこうにいく", learning=True)
         k.convert()
+        k.ctrl_down()  # 私は, as shown: not learned, but the next clause's left
+        reply = k.tap(ord("2"))
+        chosen = reply["segments"][reply["focus"]]["surface"]
         k.ctrl_down()
-        rows = self.rows()
-        self.assertEqual([(r["reading"], r["surface"]) for r in rows],
-                         [("わたしは", "私は")])
-        k.ctrl_down()
-        rows = self.rows()
-        self.assertEqual([(r["reading"], r["surface"]) for r in rows[1:]],
-                         [("がっこうに", "学校に")])
+        self.assertEqual([(r["reading"], r["surface"], r["prev"]) for r in self.rows()],
+                         [("がっこうに", chosen, "私は")])
 
     def test_the_committed_head_keeps_the_press_direction(self):
         # い, then one press: w (turn 1) d (turn 2): left え・で or right が・な; る.
