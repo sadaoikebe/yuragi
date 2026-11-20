@@ -118,6 +118,9 @@ class PowerShellTest(unittest.TestCase):
             (header.format("12.8"), [], "cpu"),
             ("", ["NVIDIA GeForce RTX 4060, 8.9"], "cpu"),
             (header.format("12.8"), ["Quadro P1000, 6.1", "NVIDIA RTX A2000, 8.6"], "cu128"),
+            # Driver 610 renamed the field (2026-11-20): read as no GPU before.
+            ("| NVIDIA-SMI 610.74                 KMD Version: 610.74        CUDA UMD Version: 13.3     |",
+             ["NVIDIA GeForce RTX 4060 Laptop GPU, 8.9"], "cu128"),
         ]
         for smi_header, gpus, expected in cases:
             with self.subTest(header=smi_header, gpus=gpus):

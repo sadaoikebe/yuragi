@@ -230,6 +230,9 @@ The `tokenizers` wheel carries no license file.
 
 Location when installed: `%LOCALAPPDATA%\yuragi-ime\shared\model\<revision>\`.
 
+The installer always fetches the small model (used on the CPU), and the
+medium model too when it installs the GPU build of PyTorch.
+
 | | |
 | --- | --- |
 | Model | `Miwa-Keita/zenz-v2.5-medium` by Keita Miwa |
@@ -238,7 +241,15 @@ Location when installed: `%LOCALAPPDATA%\yuragi-ime\shared\model\<revision>\`.
 | Source | https://huggingface.co/Miwa-Keita/zenz-v2.5-medium |
 | Base model | `ku-nlp/gpt2-medium-japanese-char` (Kyoto University, CC BY-SA 4.0), https://huggingface.co/ku-nlp/gpt2-medium-japanese-char, as stated in the model card |
 
-The installer downloads the repository unmodified at that revision, so the
+| | |
+| --- | --- |
+| Model | `Miwa-Keita/zenz-v2.5-small` by Keita Miwa |
+| Revision | `1e408d69a7e284efa4e4d63e456f50e363a82953` (pinned in `packaging/fetch_model.py`) |
+| License | Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/ (`license: cc-by-sa-4.0` in the model card) |
+| Source | https://huggingface.co/Miwa-Keita/zenz-v2.5-small |
+| Base model | `ku-nlp/gpt2-small-japanese-char` (Kyoto University, CC BY-SA 4.0), https://huggingface.co/ku-nlp/gpt2-small-japanese-char, as stated in the model card |
+
+The installer downloads each repository unmodified at that revision, so the
 model card (`README.md`, with its license statement) is kept next to the
 model files. yuragi does not modify, convert or redistribute the model; it
 only runs it to convert text. The model is provided by its

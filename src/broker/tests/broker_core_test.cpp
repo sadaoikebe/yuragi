@@ -145,6 +145,22 @@ void ThreeExitsStopThenRetry() {
     assert(b.State() == EngineState::Ready);
 }
 
+// A ready engine that exits with ENGINE_RESTART_CODE is started again without
+// counting: it may do so any number of times (the power source changes).
+void PlannedRestartsAreNotCounted() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    Hello(b, 1);
+    for (int i = 0; i < ENGINE_MAX_EXITS + 2; ++i) {
+        Ready(b);
+        b.OnEngineExit(ENGINE_RESTART_CODE);
+        assert(b.State() == EngineState::Starting);
+    }
+    assert(f.starts == ENGINE_MAX_EXITS + 3 && f.stops.empty());
+    assert(Contains(f.Client(1), R"({"event":"reset"})"));
+}
+
 // A request with no reply ends the engine (a hang).
 void HungEngineIsKilled() {
     Fake f;
@@ -185,6 +201,7 @@ int main() {
     OldTipIsToldToLetKeysThrough();
     ExitWhileReadyResetsAndRestarts();
     ThreeExitsStopThenRetry();
+    PlannedRestartsAreNotCounted();
     HungEngineIsKilled();
     RetryWhileRunningRestartsWithoutCounting();
     std::puts("broker_core_test: all passed");

@@ -1,12 +1,13 @@
-"""Download the LM model at a pinned revision (DESIGN「インストールと更新」).
+"""Download an LM model at a pinned revision (DESIGN「インストールと更新」).
 
 Run with the installation's own Python (the one that will run the
 server), so the only network dependency is HuggingFace:
 
-  python packaging/fetch_model.py <dest-dir>
+  python packaging/fetch_model.py <name> <dest-dir>     name: medium | small
 
-The revision is a full commit hash: what gets installed never floats
-with the upstream repository.
+medium is for a GPU, small for the CPU (CONVERSION「装置とモデル」). The
+revision is a full commit hash: what gets installed never floats with the
+upstream repository. setup.ps1 and the release workflow read the MODEL_ lines.
 """
 
 from __future__ import annotations
@@ -14,19 +15,21 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-REPO_ID = "Miwa-Keita/zenz-v2.5-medium"
-REVISION = "623bc8edf5417129b8269b628223d08245e9c68e"
+MODEL_medium = ("Miwa-Keita/zenz-v2.5-medium", "623bc8edf5417129b8269b628223d08245e9c68e")
+MODEL_small = ("Miwa-Keita/zenz-v2.5-small", "1e408d69a7e284efa4e4d63e456f50e363a82953")
+MODELS = {"medium": MODEL_medium, "small": MODEL_small}
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 3 or sys.argv[1] not in MODELS:
         print(__doc__)
         return 2
-    dest = Path(sys.argv[1])
+    repo_id, revision = MODELS[sys.argv[1]]
+    dest = Path(sys.argv[2])
     from huggingface_hub import snapshot_download
 
-    snapshot_download(repo_id=REPO_ID, revision=REVISION, local_dir=dest)
-    print(f"model {REPO_ID}@{REVISION[:8]} -> {dest}")
+    snapshot_download(repo_id=repo_id, revision=revision, local_dir=dest)
+    print(f"model {repo_id}@{revision[:8]} -> {dest}")
     return 0
 
 

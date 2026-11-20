@@ -40,6 +40,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
+import os
+import statistics
 import time
 from typing import Protocol
 
@@ -57,11 +59,25 @@ DEFAULT_ALPHA = 1.0
 # defaults on a GPU: it changes the speed, not the picks.
 DEFAULT_K = 4
 DEFAULT_STEPS = None  # reviews per kana run: until the draft passes
-# Reviews after a run's first stop this long after the conversion started:
-# lm_async.DEADLINE_MS (600) less one more review and the remaining runs'
-# first reviews. A GPU (median 30 ms per conversion) does not reach it.
+# Reviews after a run's first stop this long after the conversion started, so
+# that one more review and the remaining runs' first reviews stay within the
+# LM deadline (lm_async.deadline_ms). A GPU (median 30 ms per conversion) does
+# not reach it.
 REVIEW_BUDGET_MS = 400
-DEFAULT_THREADS = 4  # torch CPU threads
+DEFAULT_THREADS = 4  # torch CPU threads (fewer if the process has fewer CPUs)
+# Calibration (CONVERSION「装置とモデル」): after its warm-up, each device/model
+# is timed on these readings, typed with the thumb side unknown, after a left
+# context, with its caches cleared each time. The median of a pass, the lower
+# of two passes (a busy moment at sign-in should not decide). A model is used
+# only if that is at most CALIBRATION_LIMIT_MS; else the next one is tried.
+# Measured on a Ryzen AI 9 HX 370 (2026-11-20): medium 38 ms on an RTX 4060
+# Laptop, 345 ms on the CPU; small 82 ms on the CPU (156 ms with one core).
+# Typing sentences there, a conversion took 2 to 2.5 times this (median:
+# medium on the CPU 634 ms, small 214 ms), so the limit keeps it near 0.5 s.
+CALIBRATION_READINGS = ("きょうはすこしはやくおきた", "あさごはんはぱんとたまごにした",
+                        "えきまであるくとかぜがきもちいい")
+CALIBRATION_CONTEXT = "週末は天気が良かったので、家族で近くの公園まで出かけた。"
+CALIBRATION_LIMIT_MS = 200
 COST_PER_NAT = 500  # Mozc cost scale: cost ~ -500 ln p
 CONTEXT_CHARS = 200  # left context kept per connection (characters)
 PROMPT_CONTEXT_CHARS = 40  # what the prompt takes of it (Zenzai's default)
@@ -108,7 +124,8 @@ class ZenzModel:
         from transformers import AutoModelForCausalLM, GPT2Tokenizer
 
         if threads:
-            torch.set_num_threads(threads)
+            # More threads than the CPUs this process may use only slows the work.
+            torch.set_num_threads(max(1, min(threads, os.process_cpu_count() or threads)))
         self.torch = torch
         # float32 on either device: the GPU changes the speed, not the picks.
         self.device = device
@@ -126,6 +143,12 @@ class ZenzModel:
         # current prompt; the KV cache then holds the prompt and ids[:-1].
         self._draft: tuple[list[int], list[int]] | None = None
         self._readings: dict[bytes, float] = {}
+
+    def forget(self) -> None:
+        """Drop the KV and reading caches (calibration times uncached work)."""
+        self._prompt = None
+        self._draft = None
+        self._readings.clear()
 
     def _ids(self, rows: list[list[int]]):
         return self.torch.tensor(rows, device=self.device)
@@ -237,6 +260,7 @@ class ZenzConverter:
     review_budget_ms: float = REVIEW_BUDGET_MS
     last: dict = field(default_factory=dict)  # stats of the most recent conversion
     rank_candidates: bool = True
+    calibration_ms: float | None = None  # calibrate(); sets the engine's LM deadline
 
     def reading(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
                 left_id: int) -> DecodeResult:
@@ -262,13 +286,15 @@ class ZenzConverter:
         t0 = time.perf_counter()
         if until is None:
             until = t0 + self.review_budget_ms / 1000
+        if cancelled():
+            return best, 0
         draft = self.reading(context, best, tokens, lex, left_id)
         t1 = time.perf_counter()
         # zenz writes for this reading; its constraints must not move it.
         fixed = [{"kind": "plain", "kana": kana} for kana in draft.reading]
         accepted, reviews, supported, cut = b"", 0, 0, 0
         while self.steps is None or reviews < self.steps:
-            if reviews and (time.perf_counter() > until or cancelled()):
+            if cancelled() or (reviews and time.perf_counter() > until):
                 cut = 1
                 break
             reviews += 1
@@ -292,6 +318,26 @@ class ZenzConverter:
 
     def warm_up(self) -> None:
         self.model.review("", "あ", "あ", b"")
+
+
+def calibrate(converter: ZenzConverter, lex: MozcLex, reverse: dict[str, dict]) -> float:
+    """The device/model's time for a typical conversion, in ms (CALIBRATION_READINGS).
+
+    reverse: lattice.table.reverse_table() of the layout."""
+    forget = getattr(converter.model, "forget", lambda: None)
+    passes = []
+    for _ in range(2):
+        times = []
+        for reading in CALIBRATION_READINGS:
+            forget()
+            tokens = [reverse[kana] for kana in reading]
+            start = time.perf_counter()
+            conversion_picks([tokens], lex, None, CALIBRATION_CONTEXT, converter)
+            times.append((time.perf_counter() - start) * 1000)
+        passes.append(statistics.median(times))
+    forget()
+    converter.last = {}
+    return min(passes)
 
 
 @dataclass

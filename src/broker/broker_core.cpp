@@ -227,7 +227,7 @@ void Broker::EngineGone(int code) {
     bool was_ready = state_ == EngineState::Ready;
     Log("engine exited with code " + std::to_string(code) + (was_ready ? "" : " before ready") +
         (last_fatal_.empty() ? "" : " (" + last_fatal_ + ")"));
-    bool restart = restarting_;
+    bool restart = restarting_ || (was_ready && code == ENGINE_RESTART_CODE);
     restarting_ = false;
     Stop reason = killing_ && kill_reason_ != Stop::None ? kill_reason_ : Stop::Exited;
     if (!restart) {
