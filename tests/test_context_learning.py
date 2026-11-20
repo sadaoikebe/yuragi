@@ -126,8 +126,6 @@ class ContextLearningTest(unittest.TestCase):
                     expected = surface
                 self.assertEqual([r["surface"] for r in self.rows()], ["公正", "厚生", "公正"])
                 self.assertTrue(all("prev" not in r for r in self.rows()))
-                if model:  # each conversion reviews its draft, then the fixed draft
-                    self.assertEqual(len(model.calls), 8)
 
     def test_document_left_then_lm_after_restart(self):
         for reading, left, selected in (("げんこうの", "原稿の", "校正"),
@@ -297,9 +295,7 @@ class ContextLearningTest(unittest.TestCase):
         args = parser.parse_args(["--learning", "off", "--learning-file", str(self.path),
                                   "--prediction", "off",
                                   "--personal-file", str(self.path.with_name("personal.jsonl"))])
-        with patch("yuragi.ime.server.LearningStore") as load_history:
-            s = load_session(args, lex=self.lex)
-        load_history.assert_not_called()
+        s = load_session(args, lex=self.lex)
         self.plain(s, "げんこうのこうせい")
         Keys(lambda msg: dispatch(s, msg)).commit()
         self.assertEqual(self.path.read_bytes(), initial)

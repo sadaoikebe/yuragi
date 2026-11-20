@@ -1,6 +1,7 @@
 """The built broker with a fake engine and a fake TIP, as processes.
 
-Windows only: YURAGI_BROKER names the built yuragi-broker.exe, and the TIP
+Windows only: YURAGI_BROKER names the built yuragi-broker.exe (without it the tests
+skip, except under CI, which builds one), and the TIP
 side is the named pipe. The broker's decisions are tested on every OS by
 src/broker/tests/broker_core_test.cpp with a fake platform.
 """
@@ -32,9 +33,18 @@ WAIT = 60.0
 
 
 def broker_binary() -> Path:
-    if not os.environ.get("YURAGI_BROKER"):
-        raise AssertionError("set YURAGI_BROKER to the built yuragi-broker.exe")
     return Path(os.environ["YURAGI_BROKER"])
+
+
+def skip_without_broker():
+    """Without a built broker the tests skip; CI builds one, so there it is a failure."""
+    if not WINDOWS:
+        return unittest.skip("the broker runs on Windows (src/broker/platform_win.cpp)")
+    if os.environ.get("YURAGI_BROKER"):
+        return lambda case: case
+    if os.environ.get("CI"):
+        raise AssertionError("set YURAGI_BROKER to the built yuragi-broker.exe")
+    return unittest.skip("set YURAGI_BROKER to the built yuragi-broker.exe")
 
 
 def alive(pid: int, born: int) -> bool:
@@ -144,7 +154,7 @@ class FakeTip:
         self.connection.close()
 
 
-@unittest.skipUnless(WINDOWS, "the broker runs on Windows (src/broker/platform_win.cpp)")
+@skip_without_broker()
 class BrokerCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
