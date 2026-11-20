@@ -240,13 +240,11 @@ class Engine:
 
     def load_lm(self, server, settings, warm):
         """Load and run a sample conversion on the LM worker (DESIGN「暖機」)."""
-        from yuragi.ime.zenz import conversion_picks
         start = time.perf_counter()
 
         def warm_conversion(converter):
             loaded = time.perf_counter()
-            conversion_picks(warm.parts, self.loaded._lex, warm.learning, warm.lm_context,
-                             converter, left_id=warm.left_id)
+            warm.decode(self.loaded._lex, converter)
             log(f"LM loaded on {converter.model.device} in {loaded - start:.1f} s; "
                 f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
 

@@ -1,6 +1,4 @@
-"""Learning (CONVERSION「学習」): the choice committed last comes first next time,
-whatever comes before it; Shift+F6 forgets it, and another process's change to
-the file is read again."""
+"""Learning: confirmed choices, contextual ranking and suppression."""
 
 from __future__ import annotations
 
@@ -81,11 +79,14 @@ class LearningTest(unittest.TestCase):
         for last, surface in zip(picks, picks[1:]):
             self.assertEqual(self.choose(s, "こうせい", "こうせい", surface), last)
 
-    def test_a_choice_far_down_comes_first_after_any_neighbor(self):
+    def test_left_bunsetsu_takes_priority_over_recency(self):
         s = self.session()
         self.choose(s, "きのうはきかん", "きかん", "旗艦")
         self.assertEqual(self.choose(s, "きょうもきかん", "きかん", "帰還"), "旗艦")
-        self.assertEqual(self.shown(s, "きのうはきかん", "きかん").selected.surface, "帰還")
+        segment = self.shown(s, "きのうはきかん", "きかん")
+        self.assertEqual(segment.selected.surface, "旗艦")
+        self.assertEqual(segment.choices.cache[0].surface, "旗艦")
+        self.assertIn(b'"prev"', self.path.read_bytes())
 
     def test_a_learned_clause_resizes_to_its_own_rows(self):
         s = self.session()

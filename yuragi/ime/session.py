@@ -8,9 +8,9 @@ and Shift gives the full-width upper engraving.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
-import itertools
+import sys
 from typing import Callable
 import unicodedata
 
@@ -22,11 +22,10 @@ from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
-from yuragi.lattice.token_viterbi import decode_tokens
-from .bunsetsu import (BOS_ID, PAGE_SIZE, Candidate, CandidateStream, Segment,
-                       candidates, learned_row, segments_from, with_learned, with_symbols)
-from .learning import LearningStore
-from .zenz import CONTEXT_CHARS, ZenzConverter, conversion_picks
+from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateStream, Segment,
+                       candidates, learned_row, normal_bunsetsu, with_learned, with_symbols)
+from .learning import LearningStore, LearningView
+from .zenz import CONTEXT_CHARS, KanaRun, ZenzConverter, conversion_picks
 from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
 from .symbols import symbol_spellings
@@ -145,14 +144,24 @@ class ConversionRequest:
     parts: list  # ImeSession._parts()
     lm_context: str
     left_id: int
-    learning: object | None  # LearningStore.snapshot()
-    key: tuple  # (repr(parts), lm_context, left_id, learning revision, personal revision)
+    learning: LearningView | None
+    key: tuple
+    prev: Bunsetsu | None = None
+    repeat: bool = False
+
+    def decode(self, lex: MozcLex, converter: ZenzConverter | None = None,
+               *, cancelled=lambda: False) -> list[KanaRun] | None:
+        return conversion_picks(
+            self.parts, lex, self.learning, self.lm_context, converter, cancelled=cancelled,
+            left_id=self.left_id, prev=self.prev, repeat=self.repeat)
 
 
 @dataclass
 class CommitContext:
     tail: str
     right_id: int
+    bunsetsu: Bunsetsu | None
+    standalone: bool
     seq: int | None = None  # assigned when the reply carrying the commit is built
 
 
@@ -176,6 +185,11 @@ class ImeSession:
     candidate_kinds: list[str] = field(default_factory=list)
     has_next_page: bool = False
     _learning: LearningStore | None = None
+    _learning_view: LearningView | None = None
+    _display_key: tuple | None = None
+    _left_bunsetsu: Bunsetsu | None = None
+    _repeat: bool = False  # the preceding commit was one independent bunsetsu
+    _partial: bool = False  # this input is the remainder of a partial commit
     # The LM (zenz), off unless a converter is given (server --lm-rescore).
     lm: ZenzConverter | None = None
     # Resident pipeline only: a ThumbTap leaves the LM pick to a worker.
@@ -232,6 +246,8 @@ class ImeSession:
         self._committed_context = self._lm_context = ""
         self._left_id = BOS_ID
         self._last_commit = None
+        self._left_bunsetsu = None
+        self._repeat = False
 
     def starts_input(self, vk: int, mods: list[str] | None) -> bool:
         return (not self.direct and not self.tokens and self._await is None
@@ -239,6 +255,7 @@ class ImeSession:
                 and not self._shortcut(mods))
 
     def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
+        self._partial = False
         last = self._last_commit
         if after is not None:
             if last is not None and after == last.seq:
@@ -246,12 +263,16 @@ class ImeSession:
                         (text.endswith(last.tail) or last.tail.endswith(text))):
                     self._lm_context = self._committed_context if text is None else text
                     self._left_id = last.right_id
+                    self._left_bunsetsu = last.bunsetsu
+                    self._repeat = last.standalone
                     return
             disconnected = True
         if disconnected or text == "":
             self._clear_context()
         self._lm_context = self._committed_context if text is None else text
         self._left_id = BOS_ID
+        self._left_bunsetsu = None
+        self._repeat = False
 
     def bind_commit(self, seq: int | None) -> None:
         if self._last_commit is not None:
@@ -398,15 +419,34 @@ class ImeSession:
         parts = self._parts()
         if not any(isinstance(part, list) for part in parts):
             return None
+        return self._conversion_input(parts)
+
+    def _conversion_input(self, parts: list) -> ConversionRequest:
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
-        return ConversionRequest(
-            parts, self._lm_context, self._left_id, learning,
-            (repr(parts), self._lm_context, self._left_id,
-             learning.revision if learning is not None else None,
-             self.personal.revision if self.personal is not None else None))
+        prev = self._left_bunsetsu
+        repeat = self._repeat and not self._partial
+        key = (repr(parts), self._lm_context, self._left_id,
+               learning.revision if learning is not None else None,
+               self.personal.revision if self.personal is not None else None,
+               prev, repeat)
+        return ConversionRequest(parts, self._lm_context, self._left_id, learning, key,
+                                 prev, repeat)
 
-    def finish_conversion(self, picks) -> str:
+    def _show_conversion(self, request: ConversionRequest, *, picks: list[KanaRun] | None = None,
+                         converter: ZenzConverter | None = None) -> None:
+        if converter is not None:
+            converter.last = {}
+            try:
+                picks = request.decode(self._lex, converter)
+            except Exception as exc:
+                print(f"LM conversion failed ({type(exc).__name__})", file=sys.stderr, flush=True)
+        self.converted = True
+        if picks is not None or self._display_key != request.key:
+            self._refresh(picks=picks, request=request)
+        self._open_cands()
+
+    def finish_conversion(self, picks: list[KanaRun] | None) -> str:
         """Resolve the awaited conversion (picks None: the Viterbi 1-best).
 
         Returns the text committed by the rest of the deferred key event.
@@ -414,10 +454,7 @@ class ImeSession:
         request = self._await
         assert request is not None
         self._await = None
-        self.converted = True
-        if picks is not None:
-            self._refresh(picks=picks, request=request)
-        self._open_cands()
+        self._show_conversion(request, picks=picks)
         rest, self._continuation = self._continuation, None
         text = (rest() if rest is not None else None) or ""
         assert self._await is None
@@ -527,10 +564,7 @@ class ImeSession:
         if self.predicting:
             self._cancel_conversion()  # the kana spelling of what was typed
         if not self.converted:
-            self.converted = True
-            if self.lm is not None:
-                self._refresh(rescore=True)
-            self._open_cands()
+            self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
         if self.focus < 0:
             return
         segment = self.segments[self.focus]
@@ -561,10 +595,9 @@ class ImeSession:
                                      full=vk == VK_F9)
             kind = "alnum"
         chosen = Candidate(surface, hira.reading, hira.score, hira.lid, hira.rid, kind)
-        segment.selected = chosen
+        self._set_selection(self.focus, chosen)
         segment.fixed = True
         segment.index = stream.find(chosen)  # -1: shown with no highlighted row
-        self.composition = "".join(s.selected.surface for s in self.segments)
         self._show_page()
 
     @staticmethod
@@ -610,9 +643,9 @@ class ImeSession:
             self._cancel_conversion()
             self._predict_key()
             return True
+        self._learning_view = self._learning.snapshot()
         segment.fixed = False
         self._prepare_cands(self.focus, reselect=True)
-        self.composition = "".join(s.selected.surface for s in self.segments)
         self._open_cands()
         return True
 
@@ -628,6 +661,8 @@ class ImeSession:
                 self._lm_context = self._committed_context
                 self._left_id = BOS_ID
                 self._last_commit = None
+                self._left_bunsetsu = None
+                self._repeat = False
             return None
         if vk == VK_ESCAPE:
             if self.converted:
@@ -671,7 +706,6 @@ class ImeSession:
         segment = self.segments[index]
         if segment.context == PREDICTION:
             return  # a fixed list, built by _predict_key
-        before = self.segments[index - 1] if index > 0 else None
         if segment.literal and segment.selected.kind == "literal":
             if segment.choices is None:
                 typed = segment.selected.reading
@@ -688,43 +722,72 @@ class ImeSession:
                     for text in number_spellings(digits)]))
                 segment.index = segment.choices.find(segment.selected)
             return
+        lattice, pins, left, right = self._candidate_inputs(index)
+        learning = self._learning_view
+        prev, repeat, zenz = self._learning_context(index)
+        reading = segment.selected.reading
+        context = (left, right, learning.revision if learning is not None else None,
+                   self.personal.revision if self.personal is not None else None,
+                   tuple(sorted((p, tuple(sorted(d))) for p, d in pins.items())),
+                   reading, prev, repeat, zenz)
+        if segment.choices is None or segment.context != context:
+            rows = candidates(
+                restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
+                learning=learning, now=self.clock())
+            head = self._learned_head(reading, prev, repeat, zenz)
+            segment.choices = CandidateStream(with_symbols(with_learned(
+                rows, head), self._symbols, learning))
+            segment.context = context
+            if not reselect:
+                segment.index = segment.choices.find(segment.selected)
+        if reselect:
+            segment.choices.ensure(0)
+            self._set_selection(index, segment.choices.cache[0])
+            segment.index = 0
+
+    def _candidate_inputs(self, index: int):
+        segment = self.segments[index]
+        before = self.segments[index - 1] if index > 0 else None
         left = (self._left_id if before is None
                 else left_id_after(before.selected.reading, self._lex) if before.literal
                 else before.selected.rid)
         right = (self.segments[index + 1].selected.lid
                  if index + 1 < len(self.segments)
                  and not self.segments[index + 1].literal else BOS_ID)
-        learning = self._learning.snapshot() if self._learning is not None else None
         lattice = self._lattice()
         # A press crossing the segment's boundary keeps its neighbors' direction.
         pins = self._pins(lattice, segment.start, segment.end,
                           (s for k, s in enumerate(self.segments) if k != index))
-        context = (left, right, learning.revision if learning is not None else None,
-                   self.personal.revision if self.personal is not None else None,
-                   tuple(sorted((p, tuple(sorted(d))) for p, d in pins.items())))
-        if segment.choices is None or segment.context != context:
-            assert self._lex is not None
-            rows = candidates(
-                restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
-                learning=learning, now=self.clock())
-            reading = segment.selected.reading
-            if reselect and segment.choices is None:
-                # A resized interval (_resize): the old selection is not one of
-                # its rows, so its learning is looked up by its first row's reading.
-                first = next(rows)  # every nonempty interval has a kana/literal path
-                reading = first.reading
-                rows = itertools.chain((first,), rows)
-            row = learning.head(reading) if learning is not None else None
-            segment.choices = CandidateStream(with_symbols(with_learned(
-                rows, learned_row(row) if row else None), self._symbols, learning))
-            segment.context = context
-            if not reselect:
-                segment.index = segment.choices.find(segment.selected)
-        if reselect:
-            # Every nonempty token interval has at least a kana/literal path.
-            segment.choices.ensure(0)
-            segment.selected = segment.choices.cache[0]
-            segment.index = 0
+        return lattice, pins, left, right
+
+    def _learning_context(self, index: int) -> tuple[Bunsetsu | None, bool, str | None]:
+        prev = (normal_bunsetsu(self.segments[index - 1].selected)
+                if index > 0 else self._left_bunsetsu)
+        repeat = self._repeat and not self._partial and len(self.segments) == 1
+        evidence = self.segments[index].zenz
+        return prev, repeat, evidence.surface if evidence else None
+
+    def _learned_head(self, reading: str, prev: Bunsetsu | None, repeat: bool,
+                      zenz: str | None) -> Candidate | None:
+        if self._learning_view is not None:
+            row = self._learning_view.head(reading, prev, repeat=repeat, zenz=zenz)
+            if row is not None:
+                return learned_row(row)
+        return None
+
+    def _set_selection(self, index: int, selected: Candidate) -> None:
+        self.segments[index].selected = selected
+        self._update_composition()
+
+    def _update_composition(self) -> None:
+        text = ""
+        for segment in self.segments:
+            evidence = segment.zenz
+            if evidence is not None and (evidence.reading != segment.selected.reading
+                                         or evidence.left != text):
+                segment.zenz = None
+            text += segment.selected.surface
+        self.composition = text
 
     def _resize(self, delta: int) -> None:
         """Override one automatic boundary, keeping all other intervals intact."""
@@ -753,14 +816,23 @@ class ImeSession:
             else:
                 self.segments[following].start -= 1
             changed = [self.focus, following]
-        # Rebuild only the intervals whose tokens changed. Seed the right
-        # interval with the previous left POS, then score the focus against it.
+        # Determine the new readings with the right interval's POS available
+        # to the left. Apply learning only after both readings are known.
         for index in reversed(changed):
             resized = self.segments[index]
             resized.choices = None
             resized.fixed = False
-            self._prepare_cands(index, reselect=True)
-        self.composition = "".join(s.selected.surface for s in self.segments)
+            resized.zenz = None
+            lattice, pins, left, right = self._candidate_inputs(index)
+            resized.selected = next(candidates(
+                restrict(lattice, resized.start, resized.end, pins), self._lex, left, right,
+                learning=self._learning_view))
+        for index in changed:
+            resized = self.segments[index]
+            learned = self._learned_head(resized.selected.reading, *self._learning_context(index))
+            if learned is not None:
+                resized.selected = learned
+        self._update_composition()
         self._open_cands()
 
     def _clear_cands(self) -> None:
@@ -787,9 +859,8 @@ class ImeSession:
         stream = segment.choices
         if stream is not None and stream.ensure(index):
             segment.index = index
-            segment.selected = stream.cache[index]
+            self._set_selection(self.focus, stream.cache[index])
             segment.fixed = True
-            self.composition = "".join(s.selected.surface for s in self.segments)
             self._show_page()
 
     def _cycle(self, delta: int) -> None:
@@ -842,10 +913,8 @@ class ImeSession:
                             assert tok is raw[-1]  # the FSM emits at most one token per call
                             self._await = request
                             continue
-                        self.converted = True
-                        if self.lm is not None:
-                            self._refresh(rescore=True)
-                        self._open_cands()
+                        request = self._conversion_input(self._parts())
+                        self._show_conversion(request, converter=self.lm)
                 else:
                     # No input: a space, full width as the kana mode's default.
                     insert += IDEOGRAPHIC_SPACE
@@ -914,27 +983,21 @@ class ImeSession:
                         pins[press] = pins.get(press, SIDES) & dirs
         return pins
 
-    def _refresh(self, *, rescore: bool = False, picks=None,
+    def _refresh(self, *, picks: list[KanaRun] | None = None,
                  request: ConversionRequest | None = None) -> None:
-        """Rebuild segments from the 1-best; with rescore or picks, from the LM's picks."""
+        """Rebuild the composition from one conversion and its learning view."""
         self.segments = []
         self.predicting = False
         offset = 0
-        self._sync_personal()
-        # Reuse the snapshot that the LM used to build its left context.
-        learning = (request.learning if request is not None else
-                    self._learning.snapshot() if self._learning is not None else None)
-        parts = self._parts()
-        if rescore and self.lm is not None and picks is None:
-            self.lm.last = {}
-            picks = conversion_picks(parts, self._lex, learning, self._lm_context, self.lm,
-                                     left_id=self._left_id)
-        if picks is not None and len(picks) != sum(isinstance(p, list) for p in parts):
-            picks = None
-        kana_runs = 0
-        left_id = self._left_id
+        if request is None:
+            request = self._conversion_input(self._parts())
+        self._display_key = request.key
+        self._learning_view = request.learning
+        if picks is None and self._lex is not None:
+            picks = request.decode(self._lex)
+        runs = iter(picks or ())
         self._word_starts = set()
-        for part in parts:
+        for part in request.parts:
             if isinstance(part, str):
                 last = self.segments[-1] if self.segments else None
                 if (half_width_ascii(part) and last is not None and last.literal
@@ -952,15 +1015,10 @@ class ImeSession:
                         part, part, 0, BOS_ID, BOS_ID, "number" if is_digit(part)
                         else "literal"), literal=True))
                 offset += 1
-                left_id = left_id_after(part, self._lex)
             elif self._lex is not None:
-                if picks is not None:
-                    dec = picks[kana_runs]
-                else:
-                    dec, _ = decode_tokens(part, self._lex, learning=learning, left_id=left_id)
-                kana_runs += 1
-                self._word_starts.update(offset + p.start for p in dec.pieces if not p.literal)
-                self.segments.extend(segments_from(dec.pieces, offset, self._lex, learning=learning))
+                run = next(runs)
+                self._word_starts.update(run.word_starts)
+                self.segments.extend(run.segments)
                 offset += len(part)
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)
@@ -969,12 +1027,18 @@ class ImeSession:
         if self.personal is not None and self._lex is not None:
             self.personal.sync(self._lex)
 
+    def _confirm(self, segments: list[Segment], *, standalone: bool) -> None:
+        if self._learning is not None and self._lex is not None:
+            self._learning.confirm(
+                [s.selected for s in segments], self._lex,
+                prev=self._left_bunsetsu, repeat=self._repeat and standalone)
+
     def _commit(self, *, reset_input: bool = True) -> str:
         text = self.composition
-        if self._learning is not None and self._lex is not None:
-            self._learning.confirm([s.selected for s in self.segments], self._lex)
         if text:
-            self._note_commit(text, self.segments[-1])
+            standalone = len(self.segments) == 1 and not self._partial
+            self._confirm(self.segments, standalone=standalone)
+            self._note_commit(text, self.segments[-1], standalone=standalone)
         if reset_input:
             self._reset_input()
         else:
@@ -985,6 +1049,9 @@ class ImeSession:
         """The input is gone (committed); the connection's state stays."""
         self.tokens.clear()
         self.segments.clear()
+        self._partial = False
+        self._display_key = None
+        self._learning_view = None
         self.focus = -1
         self.composition = ""
         self.converted = False
@@ -1000,16 +1067,15 @@ class ImeSession:
         """
         if not self.segments:
             return ""
+        if len(self.segments) == 1:
+            return self._commit(reset_input=False)
         head = self.segments[0]
         end = head.end
         text = head.selected.surface
-        if self._learning is not None and self._lex is not None:
-            self._learning.confirm([head.selected], self._lex)
+        self._confirm([head], standalone=False)
         self._note_commit(text, head)
-        if len(self.segments) == 1:
-            # Nothing remains: as an ordinary commit by the next character.
-            self._clear_input()
-            return text
+        self._partial = True
+        self._display_key = None
         # The directions the committed reading gives each press (the thumbs
         # of one press alternate); the remaining chords of a press keep it.
         chosen = Plan(self._lattice()).directions(head.start, head.end, head.selected.reading)
@@ -1026,6 +1092,10 @@ class ImeSession:
         for segment in self.segments:
             segment.start -= end
             segment.end -= end
+            evidence = segment.zenz
+            if evidence is not None:
+                segment.zenz = (replace(evidence, left=evidence.left[len(text):])
+                                if evidence.left.startswith(text) else None)
         self._word_starts = {b - end for b in self._word_starts if b >= end}
         self.composition = "".join(s.selected.surface for s in self.segments)
         self.focus = _first_stop(self.segments)
@@ -1033,7 +1103,8 @@ class ImeSession:
             self._open_cands()
         return text
 
-    def _note_commit(self, text: str, last: Segment | None = None) -> None:
+    def _note_commit(self, text: str, last: Segment | None = None, *,
+                     standalone: bool = False) -> None:
         """Advance the current input and remember what this connection committed."""
         right_id = BOS_ID
         if self._lex is not None and last is not None:
@@ -1044,7 +1115,10 @@ class ImeSession:
         self._committed_context = _append_context(self._committed_context, text)
         self._lm_context = _append_context(self._lm_context, text)
         self._left_id = right_id
-        self._last_commit = CommitContext(text[-CONTEXT_CHARS:], right_id)
+        self._left_bunsetsu = normal_bunsetsu(last.selected) if last is not None else None
+        self._repeat = standalone and self._left_bunsetsu is not None
+        self._last_commit = CommitContext(text[-CONTEXT_CHARS:], right_id,
+                                          self._left_bunsetsu, self._repeat)
 
 
 def _first_stop(segments: list[Segment]) -> int:

@@ -21,7 +21,7 @@ from yuragi.chord.keys import VK_TO_M
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job, LmWorker
-from yuragi.ime.zenz import ZenzConverter, conversion_picks
+from yuragi.ime.zenz import ZenzConverter
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ConversionRequest, ImeSession, Literal
 from yuragi.lattice.mozc_dict import Entry, MozcLex
@@ -94,10 +94,8 @@ class ManualWorker:
         if job.done.is_set():
             return
         if not job.cancelled:
-            r = job.request
-            job.picks = conversion_picks(r.parts, self.lex, r.learning, r.lm_context,
-                                         replace(self.template, last={}),
-                                         cancelled=lambda: job.cancelled, left_id=r.left_id)
+            job.picks = job.request.decode(
+                self.lex, replace(self.template, last={}), cancelled=lambda: job.cancelled)
         job.completed_at = self.clock()
         job.done.set()
 
@@ -389,7 +387,7 @@ class DeadlineTest(unittest.TestCase):
             poll_deciding.set()
             cancel_owner(owner)
 
-        with (patch("yuragi.ime.lm_async.conversion_picks", side_effect=finish_inference),
+        with (patch("yuragi.ime.session.conversion_picks", side_effect=finish_inference),
               patch.object(worker, "cancel_owner", side_effect=observe_cancel)):
             with ThreadPoolExecutor(max_workers=1) as polling:
                 try:

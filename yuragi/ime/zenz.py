@@ -38,7 +38,8 @@ from yuragi.lattice.decode import DecodeResult
 from yuragi.lattice.mozc_dict import BOS_ID, MozcLex, left_id_after
 from yuragi.lattice.token_viterbi import decode_prefix, decode_tokens, nbest_tokens
 
-from .bunsetsu import segments_from
+from .bunsetsu import (Bunsetsu, Segment, ZenzEvidence, learned_row,
+                       normal_bunsetsu, segments_from)
 
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
 DEFAULT_ALPHA = 1.0
@@ -189,17 +190,18 @@ class ZenzConverter:
                    + self.alpha * COST_PER_NAT * dn[1])[0]
 
     def rescore(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
-                left_id: int = BOS_ID, learning=None) -> DecodeResult:
+                left_id: int = BOS_ID, learning=None) -> tuple[DecodeResult, int]:
         t0 = time.perf_counter()
         draft = self.reading(best, tokens, lex, left_id)
         t1 = time.perf_counter()
         # zenz writes for this reading; its constraints must not move it.
         fixed = [{"kind": "plain", "kana": kana} for kana in draft.reading]
-        accepted, reviews = b"", 0
+        accepted, reviews, supported = b"", 0, 0
         while reviews < self.steps:
             reviews += 1
             fix = self.model.review(context, draft.reading, draft.surface, accepted)
             if fix is None:
+                supported = len(spell(draft.surface))
                 break
             accepted, exact = fix
             found = decode_prefix(fixed, lex, accepted, exact=exact, spell=spell,
@@ -207,37 +209,71 @@ class ZenzConverter:
             if found is None:
                 break
             draft = found
+            supported = len(accepted)
         t2 = time.perf_counter()
         for key, value in (("reading_ms", (t1 - t0) * 1000), ("zenz_ms", (t2 - t1) * 1000),
                            ("runs", 1), ("reviews", reviews),
                            ("changed", draft.surface != best.surface)):
             self.last[key] = self.last.get(key, 0) + value
-        return draft
+        return draft, supported
 
     def warm_up(self) -> None:
         self.model.review("", "あ", "あ", b"")
 
 
-def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
-                     converter: ZenzConverter, cancelled=lambda: False, *,
-                     left_id: int = BOS_ID) -> list[DecodeResult] | None:
-    """The LM part of ImeSession._refresh(rescore=True): one pick per kana run.
+@dataclass
+class KanaRun:
+    segments: list[Segment]
+    word_starts: set[int]
 
-    The left context follows _refresh's loop exactly, so the synchronous and
-    the worker paths pick the same results. None if cancelled.
+
+def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
+                     converter: ZenzConverter | None, cancelled=lambda: False, *,
+                     left_id: int = BOS_ID, prev: Bunsetsu | None = None,
+                     repeat: bool = False) -> list[KanaRun] | None:
+    """Decode and choose the displayed segments once, including for the LM prompt.
+
+    Each run has absolute token offsets. None means the worker was cancelled.
     """
-    picks: list[DecodeResult] = []
+    picks: list[KanaRun] = []
     text = ""
+    offset = 0
     for part in parts:
-        if isinstance(part, str):  # literal
+        if isinstance(part, str):
             text += part
             left_id = left_id_after(part, lex)
+            prev = None
+            offset += 1
             continue
         if cancelled():
             return None
         dec, _ = decode_tokens(part, lex, learning=learning, left_id=left_id)
-        dec = converter.rescore(lm_context + text, dec, part, lex, left_id, learning)
-        picks.append(dec)
-        segs = segments_from(dec.pieces, 0, lex, learning=learning)
-        text += "".join(s.selected.surface for s in segs)
+        supported = 0
+        if converter is not None:
+            dec, supported = converter.rescore(lm_context + text, dec, part, lex,
+                                               left_id, learning)
+        segments = segments_from(dec.pieces, offset, lex)
+        if learning is not None:
+            reviewed = text
+            displayed = text
+            end = 0
+            standalone = repeat and len(parts) == len(segments) == 1
+            for segment in segments:
+                original = segment.selected
+                if supported:
+                    end += len(spell(original.surface))
+                    if end <= supported and displayed == reviewed:
+                        segment.zenz = ZenzEvidence(reviewed, original.reading, original.surface)
+                row = learning.head(original.reading, prev, repeat=standalone,
+                                    zenz=segment.zenz.surface if segment.zenz else None)
+                if row is not None:
+                    segment.selected = learned_row(row)
+                prev = normal_bunsetsu(segment.selected)
+                reviewed += original.surface
+                displayed += segment.selected.surface
+            text = displayed
+        else:
+            text += "".join(s.selected.surface for s in segments)
+        picks.append(KanaRun(segments, {offset + p.start for p in dec.pieces if not p.literal}))
+        offset += len(part)
     return picks
