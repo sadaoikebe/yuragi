@@ -42,7 +42,7 @@ class Reviewer:
     def candidate_nll(self, context, candidates):
         return [0.0] * len(candidates)
 
-    def review(self, context, reading, draft, accepted):
+    def review(self, context, reading, draft, accepted, reachable):
         self.calls.append((context, reading, draft))
         return None
 

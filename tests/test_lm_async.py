@@ -43,7 +43,7 @@ class PickyModel:
     def candidate_nll(self, context, candidates):
         return [0.0] * len(candidates)
 
-    def review(self, context, reading, draft, accepted):
+    def review(self, context, reading, draft, accepted, reachable):
         # Wants the run to start in kana, except under some contexts.
         if len(context) % 3 == 2 or draft.startswith(reading[0]):
             return None
@@ -199,7 +199,7 @@ class LearnedContextTest(unittest.TestCase):
                 model.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
                 model.reading_nll.return_value = [5.0, 0.0]
                 # The LM cannot write its fix for か, so the learned 課 is shown there.
-                model.review.side_effect = lambda ctx, reading, draft, accepted: (
+                model.review.side_effect = lambda ctx, reading, draft, accepted, reachable: (
                     ("存".encode(), True) if reading == "か" else None)
                 events = Typist().space().events
                 if deferred:
@@ -237,7 +237,7 @@ class LearnedContextTest(unittest.TestCase):
             })
             session.tokens = [Plain("K"), Literal("、"), Plain("I")]
             model = Mock()
-            model.review.side_effect = lambda ctx, reading, draft, accepted: (
+            model.review.side_effect = lambda ctx, reading, draft, accepted, reachable: (
                 ("偉".encode(), True) if reading == "い" and draft != "偉" else None)
             model.candidate_nll.side_effect = lambda ctx, rows: (
                 [2, 2] + list(range(1, 3 - len(rows), -1)) if ctx == "本文科、"

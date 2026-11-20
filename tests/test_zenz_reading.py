@@ -5,7 +5,7 @@ import math
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from tests.real_dictionary import real_lex
 from tests.test_document_context import Keys, SPACE
@@ -189,7 +189,7 @@ class ContextReadingTest(unittest.TestCase):
                 self.reviewer.reset_mock()
                 self.assert_reading(self.replay(context), reading, surface)
                 self.reviewer.reading_nll.assert_called_once_with(context, ["きおく", "きどく"])
-                self.reviewer.review.assert_called_once_with(context, reading, surface, b"")
+                self.reviewer.review.assert_called_once_with(context, reading, surface, b"", ANY)
 
     def test_surface_review_cannot_reopen_the_reading(self):
         self.reviewer.review.return_value = spell("記憶"), True
@@ -267,7 +267,7 @@ class ContextReadingTest(unittest.TestCase):
                     self.assertEqual(reply["composition"], "記憶")
                     job = pipe.job
                     self.assertTrue(entered.wait(5))
-                    self.reviewer.review.assert_called_once_with(MESSAGE, "きどく", "既読", b"")
+                    self.reviewer.review.assert_called_once_with(MESSAGE, "きどく", "既読", b"", ANY)
                     if outcome == "reset":
                         self.assertEqual(pipe.handle({"op": "reset"})["composition"], "")
                     clock.now = job.deadline + (0.001 if outcome == "deadline" else -0.001)

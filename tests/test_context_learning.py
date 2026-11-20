@@ -41,7 +41,7 @@ class Review:
     def candidate_nll(self, context, candidates):
         return [0.0] * len(candidates)
 
-    def review(self, context, reading, draft, accepted):
+    def review(self, context, reading, draft, accepted, reachable):
         """Like the model, pass a draft that already writes the fix."""
         self.calls.append((context, reading, draft))
         text, exact = self.fix
@@ -363,9 +363,9 @@ class ContextLearningTest(unittest.TestCase):
         self.learn(None, "構成", cost=50_000)
 
         class TwoRuns(Review):
-            def review(self, context, reading, draft, accepted):
+            def review(self, context, reading, draft, accepted, reachable):
                 self.fix = spell("存在しない経路" if reading == "げんこうの" else "校正"), True
-                return super().review(context, reading, draft, accepted)
+                return super().review(context, reading, draft, accepted, reachable)
 
         model = TwoRuns("")
         s = self.session(model)

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 from yuragi.chord.fsm import Plain
 from yuragi.ime.learning import LearningStore
@@ -174,7 +174,7 @@ class PartialCommitTest(unittest.TestCase):
         reply = k.convert()
         self.assertEqual(reply["segments"][0]["reading"], "でる")
         model.reading_nll.assert_called_once_with("家", ["でる", "でぐ"])
-        model.review.assert_called_once_with("家", "でる", "出る", b"")
+        model.review.assert_called_once_with("家", "でる", "出る", b"", ANY)
 
     def test_lm_only_compares_readings_that_alternate_within_one_press(self):
         words = {

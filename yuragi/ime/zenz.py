@@ -12,16 +12,18 @@ ZenzCandidateEvaluator):
 2. zenz reads its prompt and the draft in one forward. Where the model's
    greedy next token first differs from the draft's, the draft is wrong from
    there: the constraint becomes the draft's bytes so far plus the model's
-   token (or exactly the bytes so far, if the model's token is </s>). If no
+   token (or exactly the bytes so far, if the model's token is </s>). A
+   constraint no dictionary path satisfies (decode_prefix) gives way to the
+   model's next token, down to the draft's own token or GUESSES tokens; if
+   none is left, the draft's token stands there and the review goes on. If no
    token differs, the draft passes.
-3. The dictionary 1-best under that prefix constraint (decode_prefix) is the
-   next draft, reviewed again, until a draft passes. Each constraint is
-   longer than the last or the same one made exact, so this ends within the
-   draft's byte length. The first review of every kana run always happens;
-   further ones stop once the conversion's review budget (shared by its kana
-   runs) has passed, or when the job is cancelled, and the latest draft
-   stands. `steps` can cap the reviews per run. A constraint no dictionary
-   path satisfies keeps the current draft.
+3. The 1-best under that prefix constraint (decode_prefix) is the next draft,
+   reviewed again, until a draft passes. Each constraint is longer than the
+   last or the same one made exact, so this ends within the draft's byte
+   length. The first review of every kana run always happens; further ones
+   stop once the conversion's review budget (shared by its kana runs) has
+   passed, or when the job is cancelled, and the latest draft stands. `steps`
+   can cap the reviews per run.
 Consecutive reviews reuse the KV cache of the prompt and of the token prefix
 the new draft shares with the previous one.
 The dictionary keeps the draft to paths for the chosen reading. Confirmed
@@ -64,6 +66,9 @@ DEFAULT_STEPS = None  # reviews per kana run: until the draft passes
 # LM deadline (lm_async.deadline_ms). A GPU (median 30 ms per conversion) does
 # not reach it.
 REVIEW_BUDGET_MS = 400
+# The model's tokens tried at a position where the draft differs: its 1st
+# to 5th. Not measured.
+GUESSES = 5
 DEFAULT_THREADS = 4  # torch CPU threads (fewer if the process has fewer CPUs)
 # Calibration (CONVERSION「装置とモデル」): after its warm-up, each device/model
 # is timed on these readings, typed with the thumb side unknown, after a left
@@ -99,8 +104,8 @@ def prompt(context: str, reading: str) -> str:
 
 
 class Reviewer(Protocol):
-    def review(self, context: str, reading: str, draft: str,
-               accepted: bytes) -> tuple[bytes, bool] | None: ...
+    def review(self, context: str, reading: str, draft: str, accepted: bytes,
+               reachable) -> tuple[bytes, bool] | None: ...
 
     def reading_nll(self, context: str, readings: list[str]) -> list[float]: ...
 
@@ -144,10 +149,11 @@ class ZenzModel:
         self.eos = self.tok.eos_token_id
         self.bytes = {i: bytes(self.tok.byte_decoder[c] for c in token)
                       for token, i in self.tok.get_vocab().items()}
-        self._prompt: tuple[str, object, int] | None = None  # text, KV cache, next token
-        # The last reviewed draft's token ids and greedy guesses under the
-        # current prompt; the KV cache then holds the prompt and ids[:-1].
-        self._draft: tuple[list[int], list[int]] | None = None
+        # text, KV cache, the model's GUESSES best next tokens
+        self._prompt: tuple[str, object, list[int]] | None = None
+        # The last reviewed draft's token ids and guesses under the current
+        # prompt; the KV cache then holds the prompt and ids[:-1].
+        self._draft: tuple[list[int], list[list[int]]] | None = None
         self._readings: dict[bytes, float] = {}
 
     def forget(self) -> None:
@@ -160,11 +166,12 @@ class ZenzModel:
         return self.torch.tensor(rows, device=self.device)
 
     def _prompt_state(self, text: str):
-        """KV cache and greedy next token after the prompt (kept for the next review)."""
+        """KV cache and best next tokens after the prompt (kept for the next review)."""
         if self._prompt is None or self._prompt[0] != text:
             ids = self.tok.encode(text, add_special_tokens=False)
             out = self.model(input_ids=self._ids([ids]), use_cache=True)
-            self._prompt = text, out.past_key_values, int(out.logits[0, -1].argmax())
+            self._prompt = (text, out.past_key_values,
+                            out.logits[0, -1].topk(GUESSES).indices.tolist())
             self._draft = None
         return self._prompt[1], self._prompt[2]
 
@@ -192,19 +199,25 @@ class ZenzModel:
             del self._readings[next(iter(self._readings))]
         return result
 
-    def review(self, context: str, reading: str, draft: str,
-               accepted: bytes) -> tuple[bytes, bool] | None:
+    def review(self, context: str, reading: str, draft: str, accepted: bytes,
+               reachable=lambda prefix, exact: True) -> tuple[bytes, bool] | None:
         """Zenzai's candidate evaluation: None if the draft passes, else
-        (prefix constraint, exact). Differences inside the accepted constraint
-        (the draft may tokenize it differently from the model) do not count."""
+        (prefix constraint, exact), the first one reachable(prefix, exact).
+        Differences inside the accepted constraint (the draft may tokenize it
+        differently from the model) do not count."""
         ids = self.tok.encode(normalize(draft), add_special_tokens=False)
         text = prompt(context, reading)
         with self.torch.inference_mode():
-            guesses = self._guesses(text, ids)
+            ranked = self._guesses(text, ids)
         done = b""
-        for token, guess in zip(ids, guesses):
-            if guess != token and len(done) >= len(accepted):
-                return (done, True) if guess == self.eos else (done + self.bytes[guess], False)
+        for token, guesses in zip(ids, ranked):
+            if len(done) >= len(accepted):
+                for guess in guesses:
+                    if guess == token:
+                        break
+                    fix = (done, True) if guess == self.eos else (done + self.bytes[guess], False)
+                    if reachable(*fix):
+                        return fix
             done += self.bytes[token]
         return None
 
@@ -229,8 +242,9 @@ class ZenzModel:
                 scores.append((predicted.logsumexp(-1) - targets).sum())
             return self.torch.stack(scores).tolist()
 
-    def _guesses(self, text: str, ids: list[int]) -> list[int]:
-        """The greedy next token at each position of ids after the prompt text.
+    def _guesses(self, text: str, ids: list[int]) -> list[list[int]]:
+        """The model's GUESSES best next tokens at each position of ids after
+        the prompt text.
 
         The guess at position i depends on ids[:i] only, so the guesses and KV
         of the prefix shared with the previous draft are kept."""
@@ -251,7 +265,7 @@ class ZenzModel:
         if keep < len(ids) - 1:
             logits = self.model(input_ids=self._ids([ids[keep:-1]]), past_key_values=past,
                                 use_cache=True).logits[0]
-            guesses = guesses + logits.argmax(-1).tolist()
+            guesses = guesses + logits.topk(GUESSES, -1).indices.tolist()
         self._draft = ids, guesses
         return guesses
 
@@ -299,22 +313,28 @@ class ZenzConverter:
         t1 = time.perf_counter()
         # zenz writes for this reading; its constraints must not move it.
         fixed = [{"kind": "plain", "kana": kana} for kana in draft.reading]
+        found: dict[tuple[bytes, bool], DecodeResult | None] = {}
+
+        def reachable(prefix: bytes, exact: bool) -> bool:
+            if (prefix, exact) not in found:
+                found[prefix, exact] = decode_prefix(fixed, lex, prefix, exact=exact, spell=spell,
+                                                     learning=learning, left_id=left_id)
+            return found[prefix, exact] is not None
+
         accepted, reviews, supported, cut = b"", 0, 0, 0
         while self.steps is None or reviews < self.steps:
             if cancelled() or (reviews and time.perf_counter() > until):
                 cut = 1
                 break
             reviews += 1
-            fix = self.model.review(context, draft.reading, draft.surface, accepted)
+            fix = self.model.review(context, draft.reading, draft.surface, accepted, reachable)
             if fix is None:
                 supported = len(spell(draft.surface))
                 break
-            accepted, exact = fix
-            found = decode_prefix(fixed, lex, accepted, exact=exact, spell=spell,
-                                  learning=learning, left_id=left_id)
-            if found is None:
+            if not reachable(*fix):
                 break
-            draft = found
+            accepted = fix[0]
+            draft = found[fix]
             supported = len(accepted)
         t2 = time.perf_counter()
         for key, value in (("reading_ms", (t1 - t0) * 1000), ("zenz_ms", (t2 - t1) * 1000),
