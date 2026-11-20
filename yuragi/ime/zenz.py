@@ -51,8 +51,7 @@ from yuragi.lattice.decode import DecodeResult
 from yuragi.lattice.mozc_dict import BOS_ID, MozcLex, left_id_after
 from yuragi.lattice.token_viterbi import decode_prefix, decode_tokens, nbest_tokens
 
-from .bunsetsu import (Bunsetsu, Candidate, Segment, ZenzEvidence, learned_row,
-                       normal_bunsetsu, segments_from)
+from .bunsetsu import Bunsetsu, Candidate, Segment, ZenzEvidence, normal_bunsetsu, segments_from
 
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
 DEFAULT_ALPHA = 1.0
@@ -409,16 +408,21 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
         standalone = repeat and len(parts) == len(segments) == 1
         for segment in segments:
             original = segment.selected
+            segment.source = original
             if supported:
-                end += len(spell(original.surface))
-                if end <= supported and text == reviewed:
-                    segment.zenz = ZenzEvidence(reviewed, original)
+                start = end
+                reviewed_words = 0
+                for word in original.words:
+                    end += len(spell(word.surface))
+                    reviewed_words += end <= supported
+                if start < supported and text == reviewed:
+                    segment.zenz = ZenzEvidence(reviewed, original, reviewed_words, end <= supported)
             if learning is not None:
-                row = learning.head(original.reading, prev, repeat=standalone,
-                                    zenz=original.surface if segment.zenz else None)
-                if row is not None:
-                    segment.selected = learned_row(row)
-                prev = normal_bunsetsu(segment.selected)
+                preferred = learning.preferred(original, lex, prev, repeat=standalone,
+                                               evidence=segment.zenz)
+                if preferred is not None:
+                    segment.selected = preferred
+                prev = normal_bunsetsu(segment.selected, lex)
             reviewed += original.surface
             text += segment.selected.surface
         picks.append(KanaRun(segments, {offset + p.start for p in dec.pieces if not p.literal}))

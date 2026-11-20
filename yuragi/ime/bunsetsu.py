@@ -28,15 +28,15 @@ SYMBOL_HEAD = 6
 
 
 @lru_cache(maxsize=1)
-def _pos_names() -> dict[int, str]:
+def _pos_names() -> dict[int, tuple[str, ...]]:
     directory = mozc_dict.DICT_DIR  # read at call time so --dict-dir overrides apply
     require_dict_files(["id.def"], directory)
-    return {int(i): name.strip() for line in (directory / "id.def").read_text(
+    return {int(i): tuple(name.strip().split(",")) for line in (directory / "id.def").read_text(
         encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
 
 
 def content(lid: int) -> bool:
-    p = _pos_names().get(lid, "").split(",")
+    p = _pos_names().get(lid, ("",))
     if p[0] in ("名詞", "動詞", "形容詞"):
         return p[1] not in ("接尾", "非自立")
     return p[0] in ("副詞", "連体詞", "接続詞", "感動詞", "接頭詞")
@@ -51,26 +51,40 @@ class Candidate:
     rid: int
     kind: str = "dictionary"
     word_cost: int | None = None  # raw internal cost, without neighbor transitions/learning
+    words: tuple[Piece, ...] = ()  # the dictionary path, in reading order
 
 
 @dataclass(frozen=True)
 class Bunsetsu:
     reading: str
     surface: str
+    last_word: Bunsetsu | None = None
 
 
-def normal_bunsetsu(c: Candidate) -> Bunsetsu | None:
-    """The selections that produce an ordinary confirmation row."""
-    if (c.reading and c.kind not in ("literal", "number", "date", "alnum", "symbol")
-            and (c.word_cost is not None or c.kind == "kana")):
-        return Bunsetsu(c.reading, c.surface)
-    return None
+def word_piece(piece: Piece, lex: MozcLex) -> bool:
+    return not piece.learned and content(lex.base_pos(piece.lid))
+
+
+def learnable(c: Candidate) -> bool:
+    return bool(c.reading and c.kind not in ("literal", "number", "date", "alnum", "symbol")
+                and (c.word_cost is not None or c.kind == "kana"))
+
+
+def normal_bunsetsu(c: Candidate, lex: MozcLex) -> Bunsetsu | None:
+    """The interval and its last independent word for the next selection."""
+    if not learnable(c):
+        return None
+    last = next((Bunsetsu(p.reading, p.surface) for p in reversed(c.words)
+                 if p.learned or word_piece(p, lex)), None)
+    return Bunsetsu(c.reading, c.surface, last)
 
 
 @dataclass(frozen=True)
 class ZenzEvidence:
     left: str  # reviewed text to the left within this input
     candidate: Candidate
+    reviewed_words: int
+    complete: bool
 
 
 @dataclass(frozen=True)
@@ -92,16 +106,46 @@ class Segment:
     index: int = 0
     zenz: ZenzEvidence | None = None
     order: CandidateOrder | None = None
-    # (reading, surface) the engine chose for this interval; None once the
-    # user set the interval (resize). Learning records only what differs.
-    shown: tuple[str, str] | None = None
+    # The dictionary/LM base and what was displayed after learning respectively.
+    source: Candidate | None = None
+    shown: Candidate | None = None  # None for explicitly resized intervals
 
     def chosen(self) -> bool:
         """The user's own choice: a resized interval or a changed selection."""
-        return self.shown is None or self.shown != (self.selected.reading, self.selected.surface)
+        return self.shown is None or (self.shown.reading, self.shown.surface) != (
+            self.selected.reading, self.selected.surface)
 
     def mark_shown(self) -> None:
-        self.shown = (self.selected.reading, self.selected.surface)
+        self.shown = self.selected
+
+
+def _joins(previous: Piece, current: Piece, lex: MozcLex | None) -> bool:
+    if previous.learned:
+        return False
+    base = lex.base_pos if lex is not None else int
+    names = _pos_names()
+    left = names.get(base(previous.rid), ("",))
+    right = names.get(base(current.lid), ("",))
+    if left[0] == "接頭詞":
+        return True
+    if left[:2] == ("名詞", "サ変接続") and right[0] == "動詞":
+        return right[4] == "サ変・スル"
+    if left[0] == right[0] == "名詞":
+        if left[1] == "数" or right[1] == "数":
+            return left[1] == right[1] == "数"
+        if left[1] == right[1] == "固有名詞":
+            return left[2] == "地域"
+        return left[1] in ("一般", "固有名詞", "サ変接続", "接尾") and right[1] in (
+            "一般", "固有名詞", "サ変接続")
+    return False
+
+
+def from_words(words: tuple[Piece, ...], lex: MozcLex | None, score: int = 0) -> Candidate:
+    cost = sum(p.cost for p in words)
+    if lex is not None:
+        cost += sum(lex.transition(a.rid, b.lid) for a, b in zip(words, words[1:]))
+    return Candidate("".join(p.surface for p in words), "".join(p.reading for p in words),
+                     score, words[0].lid, words[-1].rid, word_cost=cost, words=words)
 
 
 def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:
@@ -109,15 +153,11 @@ def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) 
     groups: list[list[Piece]] = []
     for piece in pieces:
         lid = piece.lid if lex is None else lex.base_pos(piece.lid)
-        if not groups or piece.learned or content(lid):
+        if not groups or piece.learned or (content(lid) and not _joins(groups[-1][-1], piece, lex)):
             groups.append([])
         groups[-1].append(piece)
-    return [Segment(offset + g[0].start, offset + g[-1].end,
-                        Candidate("".join(p.surface for p in g), "".join(p.reading for p in g),
-                                  0, g[0].lid, g[-1].rid, "dictionary",
-                                  sum(p.cost for p in g) + (sum(
-                                      lex.transition(a.rid, b.lid) for a, b in zip(g, g[1:]))
-                                      if lex is not None else 0))) for g in groups]
+    return [Segment(offset + g[0].start, offset + g[-1].end, from_words(tuple(g), lex))
+            for g in groups]
 
 
 def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
@@ -159,12 +199,12 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
     limit = inf if kana else best + COST_WINDOW
     serial = count()
     # priority, tie break, cost-so-far, position, RID, open-press side, first LID,
-    # surface, reading
-    heap = [(best, next(serial), 0, 0, initial[0], None, BOS_ID, "", "")]
+    # surface, reading, path
+    heap = [(best, next(serial), 0, 0, initial[0], None, BOS_ID, "", "", ())]
     seen = set()
     prefixes = {}
     while heap:
-        bound, _, cost, pos, rid, side, lid, surface, reading = heappop(heap)
+        bound, _, cost, pos, rid, side, lid, surface, reading, words = heappop(heap)
         if bound > limit:
             break
         if kana and cost != prefixes.get((pos, rid, side, reading), cost):
@@ -176,7 +216,7 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
                 yield Candidate(surface, reading, int(bound), lid,
                                 BOS_ID if rid == BOUNDARY_RID else rid, "dictionary",
                                 cost - lex.transition(BOS_ID if initial[0] == BOUNDARY_RID
-                                                      else initial[0], lid))
+                                                      else initial[0], lid), words)
             continue
         for w in arcs[pos]:
             if not admits(w.sides, side):
@@ -194,8 +234,10 @@ def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
                 if nc >= prefixes.get(key, inf):
                     continue
                 prefixes[key] = nc
+            path = words if kana else words + (Piece(
+                e.surface, e.reading, e.lid, e.cost, pos, w.end, w.rid, learned=w.learned),)
             heappush(heap, (bound, next(serial), nc, w.end, w.rid, out,
-                            e.lid if pos == 0 else lid, ns, nr))
+                            e.lid if pos == 0 else lid, ns, nr, path))
 
 
 def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,

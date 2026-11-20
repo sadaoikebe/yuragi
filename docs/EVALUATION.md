@@ -43,6 +43,17 @@ Mozc OSS 辞書に付く `evaluation.tsv` を使う。
 
 単語の全候補を調べるときは `nbest_tokens(..., k=十分大きな値)`（CONVERSION.md の「n-best」）。
 
+## 文節境界の差分（`compare_bunsetsu`）
+
+同じ辞書 1-best の語列を使い、自立語で区切っていた版と現在の文節の境界を比べる。
+境界が変わった行だけを旧・新の順で出し、集計には対象全体の文節数を含める。
+入力は既定で `evaluation.tsv` の読み。`--readings` で UTF-8 のかな列を 1 行 1 文ずつ指定できる。
+
+```sh
+python3 -m tools.eval.compare_bunsetsu --output bunsetsu-diff.tsv
+python3 -m tools.eval.compare_bunsetsu --readings kana.txt --output own-bunsetsu-diff.tsv
+```
+
 ## 標準入出力のサーバ（試験と診断）
 
 `python3 -m yuragi.ime.server` は 1 セッションを標準入出力の 1 行 1 JSON で動かす

@@ -27,7 +27,7 @@ from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateOrder, CandidateStream,
                        Segment, arranged_candidates, candidates, dictionary_candidates,
-                       learned_row, normal_bunsetsu, without_heads)
+                       normal_bunsetsu, without_heads, word_piece)
 from .learning import LearningStore, LearningView
 from .zenz import CONTEXT_CHARS, KanaRun, ZenzConverter, conversion_picks, prompt
 from .numbers import is_digit, number_spellings
@@ -182,8 +182,8 @@ class ConversionRequest:
             if cancelled() or time.perf_counter() >= until:
                 break
             pins, left, right = candidate_inputs(lattice, segments, index, self.left_id, lex)
-            prev = previous_bunsetsu(segments, index, self.prev)
-            heads = candidate_heads(segment, self.learning, prev, repeat)
+            prev = previous_bunsetsu(segments, index, self.prev, lex)
+            heads = candidate_heads(segment, lex, self.learning, prev, repeat)
             tokens = restrict(lattice, segment.start, segment.end, pins)
             dictionary = dictionary_candidates(tokens, lex, left, right, learning=self.learning)
             rows = tuple(islice(without_heads(dictionary, heads), PAGE_SIZE))
@@ -274,17 +274,21 @@ def press_pins(lattice: list[dict], start: int, end: int,
     return pins
 
 
-def previous_bunsetsu(segments: list[Segment], index: int, prev: Bunsetsu | None):
-    return normal_bunsetsu(segments[index - 1].selected) if index > 0 else prev
+def previous_bunsetsu(segments: list[Segment], index: int, prev: Bunsetsu | None, lex: MozcLex):
+    return normal_bunsetsu(segments[index - 1].selected, lex) if index > 0 else prev
 
 
-def candidate_heads(segment: Segment, learning: LearningView | None,
+def candidate_base(segment: Segment) -> Candidate:
+    source = segment.source
+    return source if source is not None and source.reading == segment.selected.reading else segment.selected
+
+
+def candidate_heads(segment: Segment, lex: MozcLex, learning: LearningView | None,
                     prev: Bunsetsu | None, repeat: bool) -> tuple[Candidate | None, Candidate | None]:
-    confirmed = segment.zenz.candidate if segment.zenz is not None else None
-    row = (learning.head(segment.selected.reading, prev, repeat=repeat,
-                         zenz=confirmed.surface if confirmed is not None else None)
-           if learning is not None else None)
-    learned = learned_row(row) if row is not None else None
+    evidence = segment.zenz
+    confirmed = evidence.candidate if evidence is not None and evidence.complete else None
+    learned = (learning.preferred(candidate_base(segment), lex, prev, repeat=repeat, evidence=evidence)
+               if learning is not None else None)
     if learned is not None and confirmed is not None and learned.surface == confirmed.surface:
         confirmed = None
     return learned, confirmed
@@ -295,7 +299,8 @@ def candidate_context(segment: Segment, pins: dict, left: int, right: int,
                       prev: Bunsetsu | None, repeat: bool) -> tuple:
     return (segment.start, segment.end, left, right, pins,
             learning.revision if learning is not None else None, personal_revision,
-            segment.selected.reading, prev, repeat, segment.zenz)
+            candidate_base(segment) if learning is not None else segment.selected.reading,
+            prev, repeat, segment.zenz)
 
 
 @dataclass
@@ -779,7 +784,10 @@ class ImeSession:
         c = segment.selected
         if c.kind in ("literal", "number", "date") or not c.reading:
             return False
-        if not self._learning.suppress(c.reading, c.surface):
+        pairs = [(c.reading, c.surface)]
+        if c.kind == "dictionary":
+            pairs.extend((p.reading, p.surface) for p in c.words if word_piece(p, self._lex))
+        if not self._learning.suppress_pairs(pairs):
             return False
         if segment.context == PREDICTION:
             # The forgotten word leaves the list; back to the input if none remain.
@@ -869,7 +877,7 @@ class ImeSession:
         lattice = self._lattice()
         pins, left, right = candidate_inputs(lattice, self.segments, index, self._left_id, self._lex)
         learning = self._learning_view
-        prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu)
+        prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
         repeat = self._repeat and not self._partial and len(self.segments) == 1
         personal_revision = self.personal.revision if self.personal is not None else None
         scope = candidate_context(segment, pins, left, right, learning, personal_revision,
@@ -884,7 +892,7 @@ class ImeSession:
             rows = candidates(
                 restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
                 learning=learning, now=self.clock())
-            heads = candidate_heads(segment, learning, prev, repeat)
+            heads = candidate_heads(segment, self._lex, learning, prev, repeat)
             segment.choices = CandidateStream(arranged_candidates(
                 rows, heads, order, self._symbols, learning))
             segment.context = context
@@ -951,11 +959,12 @@ class ImeSession:
             resized.selected = next(candidates(
                 restrict(lattice, resized.start, resized.end, pins), self._lex, left, right,
                 learning=self._learning_view))
+            resized.source = resized.selected
         repeat = self._repeat and not self._partial and len(self.segments) == 1
         for index in changed:
             resized = self.segments[index]
-            prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu)
-            learned, _ = candidate_heads(resized, self._learning_view, prev, repeat)
+            prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
+            learned, _ = candidate_heads(resized, self._lex, self._learning_view, prev, repeat)
             if learned is not None:
                 resized.selected = learned
         self._update_composition()
@@ -1122,7 +1131,7 @@ class ImeSession:
             self._learning.confirm(
                 [s.selected for s in segments], self._lex,
                 prev=self._left_bunsetsu, repeat=self._repeat and standalone,
-                chosen=[s.chosen() for s in segments])
+                chosen=[s.chosen() for s in segments], shown=[s.shown for s in segments])
 
     def _commit(self, *, reset_input: bool = True) -> str:
         text = self.composition
@@ -1206,7 +1215,8 @@ class ImeSession:
         self._committed_context = _append_context(self._committed_context, text)
         self._lm_context = _append_context(self._lm_context, text)
         self._left_id = right_id
-        self._left_bunsetsu = normal_bunsetsu(last.selected) if last is not None else None
+        self._left_bunsetsu = (normal_bunsetsu(last.selected, self._lex)
+                               if last is not None and self._lex is not None else None)
         self._repeat = standalone and self._left_bunsetsu is not None
         self._last_commit = CommitContext(text[-CONTEXT_CHARS:], right_id,
                                           self._left_bunsetsu, self._repeat)
