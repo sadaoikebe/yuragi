@@ -159,6 +159,7 @@ class ContextReadingTest(unittest.TestCase):
     def setUp(self):
         self.sess = ImeSession(_table=load_table(), _lex=real_lex())
         self.reviewer = Mock()
+        self.reviewer.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
         self.reviewer.reading_nll.side_effect = lambda context, readings: [
             (0.0 if r == "きどく" else 10.0) if context == MESSAGE else 0.0
             for r in readings

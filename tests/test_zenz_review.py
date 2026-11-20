@@ -1,9 +1,12 @@
 """zenz review: the shared review budget, and reuse of the previous draft's KV."""
 from __future__ import annotations
 
+import math
+from types import SimpleNamespace
 import unittest
 
 from tests.real_dictionary import real_lex
+from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.session import ImeSession, Literal
 from yuragi.ime.zenz import DEFAULT_MODEL, ZenzConverter, ZenzModel, prompt, spell
 from yuragi.lattice.table import load_table
@@ -48,6 +51,42 @@ def load_model():
         return ZenzModel(DEFAULT_MODEL, device="cpu")
     except Exception:  # no torch/transformers, or the model is not downloaded
         return None
+
+
+class CandidateLikelihoodTest(unittest.TestCase):
+    def test_scores_only_surface_tokens_and_eos_with_each_candidates_reading(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not available")
+
+        short_prompt = prompt("前", "あ")
+        long_prompt = prompt("前", "あい")
+        ids = {text: tokens for text, tokens in (
+            (short_prompt, [1, 2]), (long_prompt, [1, 3, 2]), ("会", [4]), ("会　議", [4, 5]),
+        )}
+        model = ZenzModel.__new__(ZenzModel)
+        model.torch = torch
+        model.device = "cpu"
+        model.eos = 0
+        model.tok = SimpleNamespace(encode=lambda text, *, add_special_tokens: ids[text])
+
+        def forward(*, input_ids, use_cache):
+            self.assertFalse(use_cache)
+            self.assertEqual(input_ids.tolist(), [[1, 2, 4, 0, 0], [1, 3, 2, 4, 5]])
+            logits = torch.zeros((2, 5, 6))
+            logits[0, 1, 4] = 1
+            logits[0, 2, 0] = 2
+            logits[1, 3, 5] = 3
+            logits[1, 4, 0] = 4
+            return SimpleNamespace(logits=logits)
+
+        model.model = forward
+        scores = model.candidate_nll("前", (Candidate("会", "あ", 0, 0, 0),
+                                           Candidate("会 議", "あい", 0, 0, 0)))
+        nll = [math.log1p(5 * math.exp(-boost)) for boost in (1, 2, 3, 4)]
+        self.assertAlmostEqual(scores[0], nll[0] + nll[1], places=6)
+        self.assertAlmostEqual(scores[1], math.log(6) + nll[2] + nll[3], places=6)
 
 
 class DraftCacheTest(unittest.TestCase):
