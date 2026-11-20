@@ -260,15 +260,16 @@ def nbest_tokens(
     k: int = 8,
     *,
     left_id: int = BOS_ID,
+    distinct: Literal["surface", "reading"] = "surface",
 ) -> tuple[list[DecodeResult], dict]:
-    """Return the cheapest k distinct surfaces, in nondecreasing cost order.
+    """Return the cheapest k distinct surfaces (or readings), in nondecreasing cost order.
 
     Exact forward Viterbi supplies the potential for backward A*. All eligible
     word arcs and RID states survive that pass; there is no beam, score window
     or pop cap.
     As before, unknown/high-cost (>= UNK_COST) pieces are ineligible and
     learning is not consulted. Literal arcs reset both sides to BOS/EOS.
-    Each surface retains its cheapest path's reading and pieces; ties are
+    Each surface (reading) retains its cheapest path; ties are
     deterministic but have no linguistic preference.
     Chords of one press alternate: forward states are (RID, open-press
     direction), and a backward suffix carries the direction it needs.
@@ -331,30 +332,30 @@ def nbest_tokens(
     best = min(cost + end_cost(lex, rid) for (rid, _), cost in forward[n].items())
     serial = count()
     # bound, tie-breaker, suffix cost, start, first LID, side needed at start,
-    # surface, linked path
+    # surface (reading) of the suffix, linked path
     heap = [(best, next(serial), 0, n, BOUNDARY_RID, None, "", None)]
-    # Equal (start, first LID, side, surface) suffixes admit exactly the same
-    # prefixes. Only their cheapest path matters for distinct-surface k-best.
+    # Equal (start, first LID, side, surface or reading) suffixes admit exactly
+    # the same prefixes. Only their cheapest path matters for distinct k-best.
     suffix_cost = {(n, BOUNDARY_RID, None, ""): 0}
+    by_reading = distinct == "reading"
     seen = set()
     while heap and len(out) < k:
-        bound, _, cost, pos, next_lid, need, surface, path = heappop(heap)
+        bound, _, cost, pos, next_lid, need, text, path = heappop(heap)
         pops += 1
-        if cost != suffix_cost[(pos, next_lid, need, surface)]:
+        if cost != suffix_cost[(pos, next_lid, need, text)]:
             continue
         if pos == 0:
-            if surface in seen:
+            if text in seen:
                 continue
-            seen.add(surface)
+            seen.add(text)
             pieces = []
-            reading = []
             while path is not None:
                 w, path = path
                 e = w.entry
-                reading.append(e.reading)
                 pieces.append(Piece(e.surface, e.reading, e.lid, e.cost,
                                     w.start, w.end, e.rid, w.literal, w.learned))
-            out.append(DecodeResult("".join(reading), surface, bound, pieces))
+            out.append(DecodeResult("".join(p.reading for p in pieces),
+                                    "".join(p.surface for p in pieces), bound, pieces))
             continue
         for w in incoming[pos]:
             if w.sides.bound and w.sides.exit != need:
@@ -366,7 +367,7 @@ def nbest_tokens(
             if potential is None:
                 continue  # no prefix reaches w.start with that side
             nc = cost + connection(w.rid, next_lid) + e.cost
-            ns = e.surface + surface
+            ns = (e.reading if by_reading else e.surface) + text
             key = (w.start, lid, needed, ns)
             if key in suffix_cost and nc >= suffix_cost[key]:
                 continue

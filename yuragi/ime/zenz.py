@@ -270,8 +270,9 @@ class ZenzConverter:
 
     def reading(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
                 left_id: int) -> DecodeResult:
-        """Compare the first path per reading, starting with the dictionary 1-best."""
-        nb, _ = nbest_tokens(tokens, lex, k=self.k, left_id=left_id)
+        """Compare the cheapest path of each of the k cheapest readings, after the
+        dictionary 1-best (which comes first among paths of its reading)."""
+        nb, _ = nbest_tokens(tokens, lex, k=self.k, left_id=left_id, distinct="reading")
         paths: dict[str, DecodeResult] = {}
         for d in [best] + nb:
             paths.setdefault(d.reading, d)
