@@ -65,7 +65,7 @@ class ContextLearningTest(unittest.TestCase):
         self.path = Path(tmp.name) / "learning.jsonl"
 
     def rows(self):
-        return [json.loads(line) for line in self.path.read_text().splitlines()]
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
 
     def session(self, model=None):
         return ImeSession(_lex=self.lex, _table=load_table(),
@@ -159,7 +159,7 @@ class ContextLearningTest(unittest.TestCase):
                     self.pick(k, k.tap(LEFT), "構成")
                 k.commit()
                 self.assertEqual(self.rows()[-1].get("prev"), left)
-                self.assertNotIn("識別用外部本文", self.path.read_text())
+                self.assertNotIn("識別用外部本文", self.path.read_text(encoding="utf-8"))
                 if left:
                     self.assertEqual(s._learning.snapshot().head(
                         "こうせい", Bunsetsu("げんこうの", left)).surface, "構成")
@@ -402,7 +402,7 @@ class ContextLearningTest(unittest.TestCase):
         # Legacy left text, malformed prev, equal times, the clock moving backwards.
         legacy = dict(reading="こうせい", surface="公正", timestamp=1000, cost=5200,
                       lid=DEFAULT_NOUN_ID, rid=DEFAULT_NOUN_ID, left="原稿の")
-        with self.path.open("w") as stream:
+        with self.path.open("w", encoding="utf-8") as stream:
             for prev in (None, "", ["原稿の"]):
                 stream.write(json.dumps({**legacy, "prev": prev}, ensure_ascii=False) + "\n")
             stream.write(json.dumps(legacy, ensure_ascii=False) + "\n")
