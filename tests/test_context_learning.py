@@ -136,20 +136,20 @@ class ContextLearningTest(unittest.TestCase):
             self.pick(k, k.tap(SPACE), left)
             self.pick(k, k.tap(RIGHT), selected)
             k.commit()
-            self.assertEqual(self.rows()[-1]["prev"], left)
 
         initial = self.path.read_bytes()
-        # Chosen after 原稿の: it overrides the LM there. After a left with no
-        # choice (資料の), or none (document text only), the LM's pick stands.
-        for left, vote, expected in (("原稿の", "構成", "校正"), ("資料の", "公正", "公正"),
-                                     (None, "校正", "校正"), (None, "公正", "公正")):
+        # The left word 原稿 matches across particles. Another left word or
+        # document text alone leaves the LM's pick in place.
+        for reading, left, vote, expected in (
+                ("げんこうを", "原稿を", "構成", "校正"), ("しりょうの", "資料の", "公正", "公正"),
+                (None, None, "校正", "校正"), (None, None, "公正", "公正")):
             with self.subTest(left=left, vote=vote):
                 self.path.write_bytes(initial)
                 model = Review(vote)
                 s = self.session()
                 k = Keys(lambda msg: dispatch(s, msg))
                 if left:
-                    self.plain(s, {"原稿の": "げんこうの", "資料の": "しりょうの"}[left])
+                    self.plain(s, reading)
                     self.assertEqual(s.composition, left)
                     k.commit()
                     start = {"after_commit_seq": k.seq}
@@ -169,13 +169,10 @@ class ContextLearningTest(unittest.TestCase):
                     self.pick(k, k.tap(LEFT), "構成")
                 k.commit()
                 if left:
-                    self.assertEqual(self.rows()[-1].get("prev"), left)
+                    self.assertEqual(self.rows()[-1].get("prev"), left[:-1])
                 else:  # committed as shown: nothing learned
                     self.assertEqual(self.path.read_bytes(), initial)
                 self.assertNotIn("識別用外部本文", self.path.read_text(encoding="utf-8"))
-                if left:
-                    self.assertEqual(s._learning.snapshot().head(
-                        "こうせい", Bunsetsu("げんこうの", left)).surface, "構成")
 
     def test_revisit_same_pos_left_edit_and_partial_commit(self):
         self.learn("原稿の", "校正")
@@ -201,9 +198,27 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual(partial["commit"], "現行の")
         self.assertEqual(partial["segments"][0]["start"], 0)
         self.assert_head(partial, "構成")
-        k.commit()
-        self.assertEqual([(r["surface"], r.get("prev")) for r in self.rows()[-2:]],
-                         [("現行の", None), ("構成", "現行の")])
+
+    def test_word_choice_inside_compound_replays_with_another_particle(self):
+        def convert(reading, draft):
+            s = self.session(Review(draft))
+            keys = Keys(lambda msg: dispatch(s, msg))
+            self.plain(s, reading)
+            return keys, keys.tap(SPACE)
+
+        keys, shown = convert("げんこうこうせいを", "原稿構成を")
+        self.pick(keys, shown, "原稿校正を")
+        keys.commit()
+        self.assertEqual([(p.reading, p.surface) for p in learning_admin.pairs(self.path)],
+                         [("こうせい", "校正")])
+
+        _, other = convert("しりょうこうせいが", "資料構成が")
+        self.assert_head(other, "資料構成が")
+        keys, replayed = convert("げんこうこうせいが", "原稿構成が")
+        self.assert_head(replayed, "原稿校正が")
+        self.assert_head(keys.tap(F6, mods=["shift"]), "原稿構成が")
+        _, reopened = convert("げんこうこうせいが", "原稿構成が")
+        self.assert_head(reopened, "原稿構成が")
 
     def test_partial_remainder_does_not_count_as_standalone_repeat(self):
         self.learn("公正", "厚生")

@@ -16,7 +16,7 @@ from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 
-VK_SPACE, VK_RETURN, VK_DOWN = 0x20, 0x0D, 0x28
+VK_SPACE, VK_RETURN, VK_LEFT, VK_DOWN = 0x20, 0x0D, 0x25, 0x28
 
 
 class Keys:
@@ -98,6 +98,17 @@ class PartialCommitTest(unittest.TestCase):
     def surfaces(self, reply):
         return [seg["surface"] for seg in reply["segments"]]
 
+    def test_compounds_are_one_interval_and_can_still_be_split(self):
+        for reading in ("れんらくする", "ごたんとうしゃ", "じゅうまんえん"):
+            with self.subTest(reading=reading):
+                reply = self.typed(reading).convert()
+                self.assertEqual([seg["reading"] for seg in reply["segments"]], [reading])
+        k = self.typed("れんらくする")
+        k.convert()
+        k.tap(VK_LEFT, ["shift"])
+        k.tap(VK_LEFT, ["shift"])
+        self.assertEqual(k.ctrl_down()["commit"], "連絡")
+
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
         k = self.typed("わたしはがっこうにいく")
         reply = k.convert()
@@ -141,7 +152,7 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(k.s.composition, "学校に")
         self.assertEqual(k.committed, "私は")
 
-    def test_learning_records_a_chosen_committed_clause(self):
+    def test_learning_records_a_chosen_word_in_a_partially_committed_clause(self):
         k = self.typed("わたしはがっこうにいく", learning=True)
         k.convert()
         k.ctrl_down()  # 私は, as shown: not learned, but the next clause's left
@@ -149,7 +160,7 @@ class PartialCommitTest(unittest.TestCase):
         chosen = reply["segments"][reply["focus"]]["surface"]
         k.ctrl_down()
         self.assertEqual([(r["reading"], r["surface"], r["prev"]) for r in self.rows()],
-                         [("がっこうに", chosen, "私は")])
+                         [("がっこう", chosen.removesuffix("に"), "私")])
 
     def test_the_committed_head_keeps_the_press_direction(self):
         # い, then one press: w (turn 1) d (turn 2): left え・で or right が・な; る.
