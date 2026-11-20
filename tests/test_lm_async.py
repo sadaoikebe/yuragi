@@ -198,7 +198,9 @@ class LearnedContextTest(unittest.TestCase):
                 model = Mock()
                 model.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
                 model.reading_nll.return_value = [5.0, 0.0]
-                model.review.return_value = None
+                # The LM cannot write its fix for か, so the learned 課 is shown there.
+                model.review.side_effect = lambda ctx, reading, draft, accepted: (
+                    ("存".encode(), True) if reading == "か" else None)
                 events = Typist().space().events
                 if deferred:
                     worker = ManualWorker(lex, model, delay=lambda _: 1)
@@ -247,20 +249,22 @@ class LearnedContextTest(unittest.TestCase):
             self.assertEqual([c.surface for c in model.candidate_nll.call_args.args[1]],
                              surfaces[:9])
 
-            # Visit the right clause. Two heads leave seven ranked rows on page one.
+            # Visit the right clause. The LM's 偉 leads (学 was learned with no left
+            # bunsetsu, so it does not override the LM); eight ranked rows follow.
             session._on_cand_key(0x27)
             session._on_cand_key(0x27)
-            self.assertEqual(session.candidates, ["学", "偉"] + surfaces[2:9][::-1])
+            self.assertEqual(session.candidates, ["偉"] + surfaces[2:9][::-1] + surfaces[:1])
             session._on_cand_key(0x22)
-            self.assertEqual(session.candidates, surfaces[:2] + surfaces[9:] + ["い", "イ"])
+            self.assertEqual(session.candidates, surfaces[1:2] + surfaces[9:] + ["学", "い", "イ"])
 
-            # Same POS, different text to the left. The old score and review both expire.
+            # Same POS, different text to the left. The old score and review both
+            # expire; with no LM vote left, the learned 学 leads.
             session._on_cand_key(0x25)
             session._on_cand_key(0x25)
             session._on_cand_key(ord("2"))
             session._on_cand_key(0x27)
             session._on_cand_key(0x27)
-            self.assertEqual(session.composition, "課、医")
+            self.assertEqual(session.composition, "課、井")
             self.assertEqual(session.candidates, ["学"] + surfaces[:8])
             self.assertEqual(model.candidate_nll.call_count, 1)
 
