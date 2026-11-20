@@ -39,7 +39,11 @@ class Review:
         return [0.0 for _ in readings]
 
     def review(self, context, reading, draft, accepted):
+        """Like the model, pass a draft that already writes the fix."""
         self.calls.append((context, reading, draft))
+        text, exact = self.fix
+        if spell(draft) == text or not exact and spell(draft).startswith(text):
+            return None
         return self.fix
 
 
@@ -109,8 +113,8 @@ class ContextLearningTest(unittest.TestCase):
                     expected = surface
                 self.assertEqual([r["surface"] for r in self.rows()], ["公正", "厚生", "公正"])
                 self.assertTrue(all("prev" not in r for r in self.rows()))
-                if model:
-                    self.assertEqual(len(model.calls), 4)
+                if model:  # each conversion reviews its draft, then the fixed draft
+                    self.assertEqual(len(model.calls), 8)
 
     def test_document_left_then_lm_then_last_after_restart(self):
         for reading, left, selected in (("げんこうの", "原稿の", "校正"),
@@ -332,8 +336,8 @@ class ContextLearningTest(unittest.TestCase):
 
         class TwoRuns(Review):
             def review(self, context, reading, draft, accepted):
-                self.calls.append((context, reading, draft))
-                return spell("原稿の" if reading == "げんこうの" else "校正"), True
+                self.fix = spell("原稿の" if reading == "げんこうの" else "校正"), True
+                return super().review(context, reading, draft, accepted)
 
         model = TwoRuns("")
         s = self.session(model)
@@ -341,7 +345,7 @@ class ContextLearningTest(unittest.TestCase):
         self.plain(s, "げんこうの、こうせい")
         reply = k.tap(SPACE)
         self.assertEqual(reply["composition"], "現行の、校正")
-        self.assertEqual(model.calls[1][0], "現行の、")
+        self.assertEqual(next(c for c in model.calls if c[1] == "こうせい")[0], "現行の、")
         k.tap(DOWN, mods=["ctrl"])
         partial = k.tap(DOWN, mods=["ctrl"])
         self.assert_head(partial, "校正")

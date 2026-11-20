@@ -15,9 +15,15 @@ ZenzCandidateEvaluator):
    token (or exactly the bytes so far, if the model's token is </s>). If no
    token differs, the draft passes.
 3. The dictionary 1-best under that prefix constraint (decode_prefix) is the
-   next draft, reviewed again. At most `steps` reviews; after the last one
-   the latest draft stands. A constraint no dictionary path satisfies keeps
-   the current draft.
+   next draft, reviewed again, until a draft passes. Each constraint is
+   longer than the last or the same one made exact, so this ends within the
+   draft's byte length. The first review of every kana run always happens;
+   further ones stop once the conversion's review budget (shared by its kana
+   runs) has passed, or when the job is cancelled, and the latest draft
+   stands. `steps` can cap the reviews per run. A constraint no dictionary
+   path satisfies keeps the current draft.
+Consecutive reviews reuse the KV cache of the prompt and of the token prefix
+the new draft shares with the previous one.
 So zenz writes the surface and the dictionary keeps it to words of the
 reading; the pick is a dictionary path like the 1-best, and the bunsetsu,
 candidate lists and learning work on it unchanged.
@@ -47,11 +53,14 @@ from .bunsetsu import (Bunsetsu, Segment, ZenzEvidence, learned_row,
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
 DEFAULT_ALPHA = 1.0
 # Measured on Windows (zenz medium, 200 own items; Sadao 2026-11-19): k 8 or 16
-# picks no better than 4, a second review adds one right answer, and 4 threads
-# is the fastest CPU setting. The same defaults on a GPU: it changes the speed,
-# not the picks.
+# picks no better than 4, and 4 threads is the fastest CPU setting. The same
+# defaults on a GPU: it changes the speed, not the picks.
 DEFAULT_K = 4
-DEFAULT_STEPS = 1
+DEFAULT_STEPS = None  # reviews per kana run: until the draft passes
+# Reviews after a run's first stop this long after the conversion started:
+# lm_async.DEADLINE_MS (600) less one more review and the remaining runs'
+# first reviews. A GPU (median 30 ms per conversion) does not reach it.
+REVIEW_BUDGET_MS = 400
 DEFAULT_THREADS = 4  # torch CPU threads
 COST_PER_NAT = 500  # Mozc cost scale: cost ~ -500 ln p
 CONTEXT_CHARS = 200  # left context kept per connection (characters)
@@ -111,6 +120,9 @@ class ZenzModel:
         self.bytes = {i: bytes(self.tok.byte_decoder[c] for c in token)
                       for token, i in self.tok.get_vocab().items()}
         self._prompt: tuple[str, object, int] | None = None  # text, KV cache, next token
+        # The last reviewed draft's token ids and greedy guesses under the
+        # current prompt; the KV cache then holds the prompt and ids[:-1].
+        self._draft: tuple[list[int], list[int]] | None = None
         self._readings: dict[bytes, float] = {}
 
     def _ids(self, rows: list[list[int]]):
@@ -122,6 +134,7 @@ class ZenzModel:
             ids = self.tok.encode(text, add_special_tokens=False)
             out = self.model(input_ids=self._ids([ids]), use_cache=True)
             self._prompt = text, out.past_key_values, int(out.logits[0, -1].argmax())
+            self._draft = None
         return self._prompt[1], self._prompt[2]
 
     def reading_nll(self, context: str, readings: list[str]) -> list[float]:
@@ -154,19 +167,41 @@ class ZenzModel:
         (prefix constraint, exact). Differences inside the accepted constraint
         (the draft may tokenize it differently from the model) do not count."""
         ids = self.tok.encode(normalize(draft), add_special_tokens=False)
+        text = prompt(context, reading)
         with self.torch.inference_mode():
-            past, first = self._prompt_state(prompt(context, reading))
-            size = past.get_seq_length()
-            logits = self.model(input_ids=self._ids([ids[:-1]]), past_key_values=past,
-                                use_cache=True).logits[0] if len(ids) > 1 else None
-            past.crop(size)
-        guesses = [first] + (logits.argmax(-1).tolist() if logits is not None else [])
+            guesses = self._guesses(text, ids)
         done = b""
         for token, guess in zip(ids, guesses):
             if guess != token and len(done) >= len(accepted):
                 return (done, True) if guess == self.eos else (done + self.bytes[guess], False)
             done += self.bytes[token]
         return None
+
+    def _guesses(self, text: str, ids: list[int]) -> list[int]:
+        """The greedy next token at each position of ids after the prompt text.
+
+        The guess at position i depends on ids[:i] only, so the guesses and KV
+        of the prefix shared with the previous draft are kept."""
+        past, first = self._prompt_state(text)
+        keep, guesses, size = 0, [first], past.get_seq_length()
+        if self._draft is not None:
+            old, old_guesses = self._draft
+            size -= max(len(old) - 1, 0)  # the cache holds the prompt and old[:-1]
+            lcp = 0
+            for a, b in zip(old, ids):
+                if a != b:
+                    break
+                lcp += 1
+            keep = max(0, min(lcp, len(old) - 1, len(ids) - 1))
+            guesses = old_guesses[:keep + 1]
+        past.crop(size + keep)
+        self._draft = None  # until the cache matches again
+        if keep < len(ids) - 1:
+            logits = self.model(input_ids=self._ids([ids[keep:-1]]), past_key_values=past,
+                                use_cache=True).logits[0]
+            guesses = guesses + logits.argmax(-1).tolist()
+        self._draft = ids, guesses
+        return guesses
 
 
 @dataclass
@@ -175,7 +210,8 @@ class ZenzConverter:
     model: Reviewer
     alpha: float = DEFAULT_ALPHA
     k: int = DEFAULT_K
-    steps: int = DEFAULT_STEPS
+    steps: int | None = DEFAULT_STEPS  # cap on reviews per kana run
+    review_budget_ms: float = REVIEW_BUDGET_MS
     last: dict = field(default_factory=dict)  # stats of the most recent conversion
 
     def reading(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
@@ -194,14 +230,23 @@ class ZenzConverter:
                    + self.alpha * COST_PER_NAT * dn[1])[0]
 
     def rescore(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
-                left_id: int = BOS_ID, learning=None) -> tuple[DecodeResult, int]:
+                left_id: int = BOS_ID, learning=None, *, until: float | None = None,
+                cancelled=lambda: False) -> tuple[DecodeResult, int]:
+        """Review until the draft passes. Reviews after the first stop at
+        `until` (perf_counter seconds; default: the budget from now) or on
+        cancellation."""
         t0 = time.perf_counter()
+        if until is None:
+            until = t0 + self.review_budget_ms / 1000
         draft = self.reading(context, best, tokens, lex, left_id)
         t1 = time.perf_counter()
         # zenz writes for this reading; its constraints must not move it.
         fixed = [{"kind": "plain", "kana": kana} for kana in draft.reading]
-        accepted, reviews, supported = b"", 0, 0
-        while reviews < self.steps:
+        accepted, reviews, supported, cut = b"", 0, 0, 0
+        while self.steps is None or reviews < self.steps:
+            if reviews and (time.perf_counter() > until or cancelled()):
+                cut = 1
+                break
             reviews += 1
             fix = self.model.review(context, draft.reading, draft.surface, accepted)
             if fix is None:
@@ -216,7 +261,7 @@ class ZenzConverter:
             supported = len(accepted)
         t2 = time.perf_counter()
         for key, value in (("reading_ms", (t1 - t0) * 1000), ("zenz_ms", (t2 - t1) * 1000),
-                           ("runs", 1), ("reviews", reviews),
+                           ("runs", 1), ("reviews", reviews), ("cut", cut),
                            ("changed", draft.surface != best.surface)):
             self.last[key] = self.last.get(key, 0) + value
         return draft, supported
@@ -241,6 +286,8 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
     """
     picks: list[KanaRun] = []
     text = ""
+    if converter is not None:
+        until = time.perf_counter() + converter.review_budget_ms / 1000
     offset = 0
     for part in parts:
         if isinstance(part, str):
@@ -255,7 +302,10 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
         supported = 0
         if converter is not None:
             dec, supported = converter.rescore(lm_context + text, dec, part, lex,
-                                               left_id, learning)
+                                               left_id, learning, until=until,
+                                               cancelled=cancelled)
+            if cancelled():
+                return None
         segments = segments_from(dec.pieces, offset, lex)
         if learning is not None:
             reviewed = text
