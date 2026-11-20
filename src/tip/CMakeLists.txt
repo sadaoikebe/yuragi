@@ -24,9 +24,16 @@ if(WIN32)
     target_compile_options(yuragi_tip PRIVATE /utf-8)
   endif()
   target_link_libraries(yuragi_tip PRIVATE ole32 oleaut32 uuid advapi32 user32 gdi32 userenv)
+  # 32-bit applications load the 32-bit build (DESIGN「32 ビットのアプリ」): beside the
+  # 64-bit one in the same folder, so both find the broker next to them.
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(TIP_NAME yuragi_tip32)
+  else()
+    set(TIP_NAME yuragi_tip)
+  endif()
   # The generator expression keeps multi-config generators from adding Release/.
   set_target_properties(yuragi_tip PROPERTIES
-    OUTPUT_NAME yuragi_tip
+    OUTPUT_NAME ${TIP_NAME}
     PREFIX ""
     RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/../../dist>"
     LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/../../dist>"

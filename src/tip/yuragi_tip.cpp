@@ -2424,9 +2424,17 @@ STDAPI DllRegisterServer() {
 }
 
 // Every step runs; the first failure is returned (DESIGN「守ること」6: no false "OK").
+// The profile is shared by the 32- and 64-bit builds (DESIGN「32 ビットのアプリ」): the
+// second to be unregistered finds it gone, which is not a failure.
 STDAPI DllUnregisterServer() {
     HRESULT co = CoInitialize(nullptr);
-    HRESULT hr = RegisterProfile(FALSE);
+    std::wstring tip_key = L"Software\\Microsoft\\CTF\\TIP\\" + GuidStr(CLSID_YuragiTip);
+    HKEY key = nullptr;
+    HRESULT hr = S_OK;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, tip_key.c_str(), 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        RegCloseKey(key);
+        hr = RegisterProfile(FALSE);
+    }
     LONG e = RegDeleteTreeW(HKEY_LOCAL_MACHINE, ClsidKey().c_str());
     if (e != ERROR_SUCCESS && e != ERROR_FILE_NOT_FOUND && SUCCEEDED(hr)) hr = HRESULT_FROM_WIN32(e);
     if (co == S_OK) CoUninitialize();

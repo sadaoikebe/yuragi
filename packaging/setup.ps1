@@ -2,7 +2,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Yes] [-Cpu]
 #
-# -AssetDir: リリースのアセット (DLL・ブローカー・ソース zip・tkinter と各 .sha256) を GitHub からではなく
+# -AssetDir: リリースのアセット (DLL 2 つ・ブローカー・ソース zip・tkinter と各 .sha256) を GitHub からではなく
 #   このフォルダから取る (公開前の版を実機で試すため。照合は同じ)。
 # -Cpu: NVIDIA の GPU があっても CPU 版の PyTorch を使う (GPU のドライバが不安定な PC など)。
 #
@@ -218,9 +218,11 @@ New-Item -ItemType Directory -Force $Download | Out-Null
 $baseUrl = "https://github.com/$Repo/releases/download/$Tag"
 $sourceZip = Join-Path $Download "yuragi-source.zip"
 $dllPath = Join-Path $Download "yuragi_tip.dll"
+$dll32Path = Join-Path $Download "yuragi_tip32.dll"  # 32 ビットのアプリ用 (DESIGN「32 ビットのアプリ」)
 $brokerPath = Join-Path $Download "yuragi-broker.exe"
 [void](Get-Verified "$baseUrl/yuragi-source.zip" $sourceZip)
 [void](Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath)
+[void](Get-Verified "$baseUrl/yuragi_tip32.dll" $dll32Path)
 [void](Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath)
 $StageApp = Join-Path $Stage "app"
 Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
@@ -405,6 +407,7 @@ function Invoke-Elevated([string[]]$arguments) {
 Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag, "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
+    "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
     "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-ScriptSource", $ElevatedPath)
 # DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "Windows への登録に失敗しました: $($result.message)" }
