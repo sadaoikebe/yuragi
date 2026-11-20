@@ -29,7 +29,9 @@ from .zenz import KanaRun
 GRACE_MS = 0
 # Windows (zenz medium, CPU 4 threads, k 4, 1 review; 2026-11-19): median
 # about 340 ms, 95th percentile 369 ms; CUDA median 30 ms. About 180% of the
-# CPU median: no normal conversion reaches it.
+# CPU median: no normal conversion reaches it. Since reviews repeat until the
+# draft passes, those after a run's first stop at zenz.REVIEW_BUDGET_MS, which
+# keeps a conversion under this.
 DEADLINE_MS = 600
 REQUIRED_LM_DEADLINE_MS = 10_000
 POLL_MS = 10

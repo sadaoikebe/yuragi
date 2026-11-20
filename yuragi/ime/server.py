@@ -133,7 +133,10 @@ def argument_parser() -> argparse.ArgumentParser:
     lm.add_argument("--lm-k", type=int, default=None,
                     help="k-best surfaces whose readings are compared (default 4)")
     lm.add_argument("--lm-steps", type=int, default=None,
-                    help="zenz reviews per kana run (default 1)")
+                    help="cap on zenz reviews per kana run (default: until the draft passes)")
+    lm.add_argument("--lm-review-ms", type=float, default=None,
+                    help="reviews after a kana run's first stop this long after the "
+                         "conversion started (default zenz.REVIEW_BUDGET_MS)")
     lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads (default 4)")
     lm.add_argument("--lm-device", choices=("cuda", "cpu"), default=None,
                     help="force a device (default: try CUDA devices, then the CPU)")
@@ -156,7 +159,10 @@ def argument_parser() -> argparse.ArgumentParser:
 def build_converter(args, *, warm_conversion=None):
     """Return the first converter that completes placement and warm-up."""
     from yuragi.ime.zenz import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL, DEFAULT_STEPS,
-                                DEFAULT_THREADS, ZenzConverter, ZenzModel, cuda_devices)
+                                DEFAULT_THREADS, REVIEW_BUDGET_MS, ZenzConverter, ZenzModel,
+                                cuda_devices)
+
+    budget = getattr(args, "lm_review_ms", None)
 
     def prepare(device):
         converter = ZenzConverter(
@@ -165,7 +171,8 @@ def build_converter(args, *, warm_conversion=None):
                       device=device),
             alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
             k=DEFAULT_K if args.lm_k is None else args.lm_k,
-            steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps)
+            steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps,
+            review_budget_ms=REVIEW_BUDGET_MS if budget is None else budget)
         converter.warm_up()
         if warm_conversion is not None:
             warm_conversion(converter)
