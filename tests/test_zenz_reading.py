@@ -16,7 +16,8 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter, ZenzModel, spell
 from yuragi.lattice.decode import DecodeResult
 from yuragi.lattice.mozc_dict import BOS_ID
-from yuragi.lattice.table import load_table
+from yuragi.lattice.table import load_table, reverse_table
+from yuragi.lattice.token_viterbi import decode_tokens
 
 START, CONTEXT, END = "\uee00", "\uee02", "\uee01"
 VOCAB_SIZE = 32
@@ -304,3 +305,13 @@ class ContextReadingTest(unittest.TestCase):
             self.reviewer.reading_nll.return_value = [3, 1, 0]
             self.assertIs(self.sess.lm.reading(*args), second)
         self.reviewer.reading_nll.assert_called_with("文脈", ["あ", "い", "う"])
+
+    def test_readings_reach_the_model_past_homophones(self):
+        """The 4 cheapest paths of うつだ are all うつり (移り・映り・写り・移)."""
+        reverse = reverse_table(self.sess._table)
+        tokens = [reverse[kana] for kana in "うつだ"]
+        best, _ = decode_tokens(tokens, self.sess._lex)
+        self.reviewer.reading_nll.side_effect = lambda context, readings: [
+            0 if reading == "うつだ" else 100 for reading in readings]
+        picked = self.sess.lm.reading("", best, tokens, self.sess._lex, BOS_ID)
+        self.assertEqual(picked.reading, "うつだ")
