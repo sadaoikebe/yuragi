@@ -40,6 +40,9 @@ class PickyModel:
     def reading_nll(self, context, readings):
         return [sum(ord(ch) % 7 for ch in r) * 0.7 for r in readings]
 
+    def candidate_nll(self, context, candidates):
+        return [0.0] * len(candidates)
+
     def review(self, context, reading, draft, accepted):
         # Wants the run to start in kana, except under some contexts.
         if len(context) % 3 == 2 or draft.startswith(reading[0]):
@@ -193,6 +196,7 @@ class LearnedContextTest(unittest.TestCase):
                 })
                 session.tokens = [Plain("K"), Literal("、"), AmbShift("I")]
                 model = Mock()
+                model.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
                 model.reading_nll.return_value = [5.0, 0.0]
                 model.review.return_value = None
                 events = Typist().space().events
@@ -215,6 +219,50 @@ class LearnedContextTest(unittest.TestCase):
                 model.reading_nll.assert_called_once_with("本文課、", ["い", "ち"])
                 self.assertEqual((reply["composition"], model.review.call_args_list[-1].args[:2]),
                                  ("課、地", ("本文課、", "ち")))
+
+    def test_ranked_page_keeps_heads_and_reverts_after_left_edit(self):
+        surfaces = list("医井意衣胃位威異遺伊移維")
+        lex = MozcLex({
+            "か": [Entry("科", "か", 1, 1, 100), Entry("課", "か", 1, 1, 200)],
+            "い": [Entry(text, "い", 1, 1, 100 + i) for i, text in enumerate(surfaces)]
+                 + [Entry("偉", "い", 1, 1, 7000)],
+        }, {"か", "い"}, [0] * 4, 2)
+        with tempfile.TemporaryDirectory() as directory:
+            learning = LearningStore(Path(directory) / "learning.jsonl")
+            learning.confirm([Candidate("学", "い", 0, 1, 1, word_cost=200)], lex)
+            session = ImeSession(_lex=lex, _learning=learning, _lm_context="本文", _table={
+                "keys": {"K": {"plain": "か"}, "I": {"plain": "い"}},
+            })
+            session.tokens = [Plain("K"), Literal("、"), Plain("I")]
+            model = Mock()
+            model.review.side_effect = lambda ctx, reading, draft, accepted: (
+                ("偉".encode(), True) if reading == "い" and draft != "偉" else None)
+            model.candidate_nll.side_effect = lambda ctx, rows: (
+                [2, 2] + list(range(1, 3 - len(rows), -1)) if ctx == "本文科、"
+                else [0] * len(rows))
+            worker = ManualWorker(lex, model)
+            pipe = ConnectionPipeline(session, worker, prefetch="off", clock=worker.clock)
+            for event in Typist().space().events:
+                pipe.handle(event)
+            self.assertEqual([c.surface for c in model.candidate_nll.call_args.args[1]],
+                             surfaces[:9])
+
+            # Visit the right clause. Two heads leave seven ranked rows on page one.
+            session._on_cand_key(0x27)
+            session._on_cand_key(0x27)
+            self.assertEqual(session.candidates, ["学", "偉"] + surfaces[2:9][::-1])
+            session._on_cand_key(0x22)
+            self.assertEqual(session.candidates, surfaces[:2] + surfaces[9:] + ["い", "イ"])
+
+            # Same POS, different text to the left. The old score and review both expire.
+            session._on_cand_key(0x25)
+            session._on_cand_key(0x25)
+            session._on_cand_key(ord("2"))
+            session._on_cand_key(0x27)
+            session._on_cand_key(0x27)
+            self.assertEqual(session.composition, "課、医")
+            self.assertEqual(session.candidates, ["学"] + surfaces[:8])
+            self.assertEqual(model.candidate_nll.call_count, 1)
 
 
 class DeadlineTest(unittest.TestCase):

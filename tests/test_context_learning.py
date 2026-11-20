@@ -38,6 +38,9 @@ class Review:
     def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
+    def candidate_nll(self, context, candidates):
+        return [0.0] * len(candidates)
+
     def review(self, context, reading, draft, accepted):
         """Like the model, pass a draft that already writes the fix."""
         self.calls.append((context, reading, draft))

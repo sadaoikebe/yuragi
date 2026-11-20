@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from itertools import islice
+from math import isfinite
 import sys
+import time
 from typing import Callable
 import unicodedata
 
@@ -22,10 +25,11 @@ from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
-from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateStream, Segment,
-                       candidates, learned_row, normal_bunsetsu, with_learned, with_symbols)
+from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateOrder, CandidateStream,
+                       Segment, arranged_candidates, candidates, dictionary_candidates,
+                       learned_row, normal_bunsetsu, without_heads)
 from .learning import LearningStore, LearningView
-from .zenz import CONTEXT_CHARS, KanaRun, ZenzConverter, conversion_picks
+from .zenz import CONTEXT_CHARS, KanaRun, ZenzConverter, conversion_picks, prompt
 from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
 from .symbols import symbol_spellings
@@ -148,12 +152,150 @@ class ConversionRequest:
     key: tuple
     prev: Bunsetsu | None = None
     repeat: bool = False
+    personal_revision: int | None = None
 
     def decode(self, lex: MozcLex, converter: ZenzConverter | None = None,
                *, cancelled=lambda: False) -> list[KanaRun] | None:
-        return conversion_picks(
+        until = (time.perf_counter() + converter.review_budget_ms / 1000
+                 if converter is not None else None)
+        picks = conversion_picks(
             self.parts, lex, self.learning, self.lm_context, converter, cancelled=cancelled,
-            left_id=self.left_id, prev=self.prev, repeat=self.repeat)
+            left_id=self.left_id, prev=self.prev, repeat=self.repeat, until=until)
+        if converter is None or not picks:
+            return picks
+        if converter.rank_candidates and not cancelled() and time.perf_counter() < until:
+            self._rank_candidates(lex, converter, picks, until, cancelled)
+        return None if cancelled() else picks
+
+    def _rank_candidates(self, lex: MozcLex, converter: ZenzConverter,
+                         picks: list[KanaRun], until: float, cancelled) -> None:
+        lattice = [token for part in self.parts for token in (
+            [{"kind": "literal", "text": part}] if isinstance(part, str) else part)]
+        segments = display_segments(self.parts, picks)
+        left_text = self.lm_context
+        repeat = self.repeat and len(segments) == 1
+        for index, segment in enumerate(segments):
+            context = left_text
+            left_text += segment.selected.surface
+            if segment.literal:
+                continue
+            if cancelled() or time.perf_counter() >= until:
+                break
+            pins, left, right = candidate_inputs(lattice, segments, index, self.left_id, lex)
+            prev = previous_bunsetsu(segments, index, self.prev)
+            heads = candidate_heads(segment, self.learning, prev, repeat)
+            tokens = restrict(lattice, segment.start, segment.end, pins)
+            dictionary = dictionary_candidates(tokens, lex, left, right, learning=self.learning)
+            rows = tuple(islice(without_heads(dictionary, heads), PAGE_SIZE))
+            if cancelled() or time.perf_counter() >= until:
+                break
+            if len(rows) < 2:
+                continue
+            started = time.perf_counter()
+            try:
+                scores = converter.model.candidate_nll(context, rows)
+            except RuntimeError as exc:
+                print(f"LM candidate scoring failed ({type(exc).__name__})",
+                      file=sys.stderr, flush=True)
+                continue
+            finished = time.perf_counter()
+            for key, value in (("candidate_ms", (finished - started) * 1000),
+                               ("candidate_rows", len(rows))):
+                converter.last[key] = converter.last.get(key, 0) + value
+            if finished >= until or cancelled():
+                break
+            if not all(map(isfinite, scores)):
+                continue
+            permutation = tuple(sorted(range(len(rows)), key=scores.__getitem__))
+            if permutation != tuple(range(len(rows))):
+                scope = candidate_context(segment, pins, left, right, self.learning,
+                                          self.personal_revision, prev, repeat)
+                segment.order = CandidateOrder(
+                    (scope, prompt(context, segment.selected.reading)), rows, permutation)
+
+
+def display_segments(parts: list, picks: list[KanaRun] | None) -> list[Segment]:
+    runs = iter(picks) if picks is not None else None
+    segments: list[Segment] = []
+    offset = 0
+    for part in parts:
+        if isinstance(part, str):
+            last = segments[-1] if segments else None
+            if (half_width_ascii(part) and last is not None and last.literal
+                    and half_width_ascii(last.selected.reading)):
+                # 英数の続き: the half-width run is one clause, as digits are.
+                text = last.selected.reading + part
+                last.end += 1
+                last.selected = Candidate(text, text, 0, BOS_ID, BOS_ID, "literal")
+            elif is_digit(part) and last is not None and last.selected.kind == "number":
+                digits = last.selected.reading + part
+                last.end += 1
+                last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
+            else:
+                segments.append(Segment(offset, offset + 1, Candidate(
+                    part, part, 0, BOS_ID, BOS_ID, "number" if is_digit(part)
+                    else "literal"), literal=True))
+            offset += 1
+        else:
+            if runs is not None:
+                segments.extend(next(runs).segments)
+            offset += len(part)
+    return segments
+
+
+def candidate_inputs(lattice: list[dict], segments: list[Segment], index: int,
+                     left_id: int, lex: MozcLex):
+    segment = segments[index]
+    before = segments[index - 1] if index > 0 else None
+    left = (left_id if before is None
+            else left_id_after(before.selected.reading, lex) if before.literal
+            else before.selected.rid)
+    right = (segments[index + 1].selected.lid
+             if index + 1 < len(segments) and not segments[index + 1].literal else BOS_ID)
+    # A press crossing the segment's boundary keeps its neighbors' direction.
+    pins = press_pins(lattice, segment.start, segment.end,
+                      (s for k, s in enumerate(segments) if k != index))
+    return pins, left, right
+
+
+def press_pins(lattice: list[dict], start: int, end: int,
+               others) -> dict[int, frozenset[str]]:
+    """Directions that the selections of other segments give the presses of
+    [start, end): a press that crosses a boundary keeps one direction."""
+    plan = Plan(lattice)
+    presses = {plan.press[i] for i in range(start, end)} - {None}
+    pins: dict[int, frozenset[str]] = {}
+    if presses:
+        for other in others:
+            for press, dirs in plan.directions(other.start, other.end,
+                                               other.selected.reading).items():
+                if press in presses:
+                    pins[press] = pins.get(press, SIDES) & dirs
+    return pins
+
+
+def previous_bunsetsu(segments: list[Segment], index: int, prev: Bunsetsu | None):
+    return normal_bunsetsu(segments[index - 1].selected) if index > 0 else prev
+
+
+def candidate_heads(segment: Segment, learning: LearningView | None,
+                    prev: Bunsetsu | None, repeat: bool) -> tuple[Candidate | None, Candidate | None]:
+    confirmed = segment.zenz.candidate if segment.zenz is not None else None
+    row = (learning.head(segment.selected.reading, prev, repeat=repeat,
+                         zenz=confirmed.surface if confirmed is not None else None)
+           if learning is not None else None)
+    learned = learned_row(row) if row is not None else None
+    if learned is not None and confirmed is not None and learned.surface == confirmed.surface:
+        confirmed = None
+    return learned, confirmed
+
+
+def candidate_context(segment: Segment, pins: dict, left: int, right: int,
+                      learning: LearningView | None, personal_revision: int | None,
+                      prev: Bunsetsu | None, repeat: bool) -> tuple:
+    return (segment.start, segment.end, left, right, pins,
+            learning.revision if learning is not None else None, personal_revision,
+            segment.selected.reading, prev, repeat, segment.zenz)
 
 
 @dataclass
@@ -426,12 +568,12 @@ class ImeSession:
         learning = self._learning.snapshot() if self._learning is not None else None
         prev = self._left_bunsetsu
         repeat = self._repeat and not self._partial
+        personal_revision = self.personal.revision if self.personal is not None else None
         key = (repr(parts), self._lm_context, self._left_id,
                learning.revision if learning is not None else None,
-               self.personal.revision if self.personal is not None else None,
-               prev, repeat)
+               personal_revision, prev, repeat)
         return ConversionRequest(parts, self._lm_context, self._left_id, learning, key,
-                                 prev, repeat)
+                                 prev, repeat, personal_revision)
 
     def _show_conversion(self, request: ConversionRequest, *, picks: list[KanaRun] | None = None,
                          converter: ZenzConverter | None = None) -> None:
@@ -522,7 +664,7 @@ class ImeSession:
                 self.tokens = tokens
             # A press crossing into the tail keeps the head's direction.
             tail = restrict(lattice, start, len(lattice),
-                            self._pins(lattice, start, len(lattice), head))
+                            press_pins(lattice, start, len(lattice), head))
             found = predict(tail, self._lex, self.predict_index, learning,
                             self.personal.revision if self.personal is not None else None)
             if not found:
@@ -722,21 +864,27 @@ class ImeSession:
                     for text in number_spellings(digits)]))
                 segment.index = segment.choices.find(segment.selected)
             return
-        lattice, pins, left, right = self._candidate_inputs(index)
+        lattice = self._lattice()
+        pins, left, right = candidate_inputs(lattice, self.segments, index, self._left_id, self._lex)
         learning = self._learning_view
-        prev, repeat, zenz = self._learning_context(index)
-        reading = segment.selected.reading
-        context = (left, right, learning.revision if learning is not None else None,
-                   self.personal.revision if self.personal is not None else None,
-                   tuple(sorted((p, tuple(sorted(d))) for p, d in pins.items())),
-                   reading, prev, repeat, zenz)
+        prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu)
+        repeat = self._repeat and not self._partial and len(self.segments) == 1
+        personal_revision = self.personal.revision if self.personal is not None else None
+        scope = candidate_context(segment, pins, left, right, learning, personal_revision,
+                                  prev, repeat)
+        order = segment.order
+        if order is not None:
+            left_text = self._lm_context + "".join(s.selected.surface for s in self.segments[:index])
+            if order.context != (scope, prompt(left_text, segment.selected.reading)):
+                order = None
+        context = (scope, order is not None)
         if segment.choices is None or segment.context != context:
             rows = candidates(
                 restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
                 learning=learning, now=self.clock())
-            head = self._learned_head(reading, prev, repeat, zenz)
-            segment.choices = CandidateStream(with_symbols(with_learned(
-                rows, head), self._symbols, learning))
+            heads = candidate_heads(segment, learning, prev, repeat)
+            segment.choices = CandidateStream(arranged_candidates(
+                rows, heads, order, self._symbols, learning))
             segment.context = context
             if not reselect:
                 segment.index = segment.choices.find(segment.selected)
@@ -744,36 +892,6 @@ class ImeSession:
             segment.choices.ensure(0)
             self._set_selection(index, segment.choices.cache[0])
             segment.index = 0
-
-    def _candidate_inputs(self, index: int):
-        segment = self.segments[index]
-        before = self.segments[index - 1] if index > 0 else None
-        left = (self._left_id if before is None
-                else left_id_after(before.selected.reading, self._lex) if before.literal
-                else before.selected.rid)
-        right = (self.segments[index + 1].selected.lid
-                 if index + 1 < len(self.segments)
-                 and not self.segments[index + 1].literal else BOS_ID)
-        lattice = self._lattice()
-        # A press crossing the segment's boundary keeps its neighbors' direction.
-        pins = self._pins(lattice, segment.start, segment.end,
-                          (s for k, s in enumerate(self.segments) if k != index))
-        return lattice, pins, left, right
-
-    def _learning_context(self, index: int) -> tuple[Bunsetsu | None, bool, str | None]:
-        prev = (normal_bunsetsu(self.segments[index - 1].selected)
-                if index > 0 else self._left_bunsetsu)
-        repeat = self._repeat and not self._partial and len(self.segments) == 1
-        evidence = self.segments[index].zenz
-        return prev, repeat, evidence.surface if evidence else None
-
-    def _learned_head(self, reading: str, prev: Bunsetsu | None, repeat: bool,
-                      zenz: str | None) -> Candidate | None:
-        if self._learning_view is not None:
-            row = self._learning_view.head(reading, prev, repeat=repeat, zenz=zenz)
-            if row is not None:
-                return learned_row(row)
-        return None
 
     def _set_selection(self, index: int, selected: Candidate) -> None:
         self.segments[index].selected = selected
@@ -783,7 +901,7 @@ class ImeSession:
         text = ""
         for segment in self.segments:
             evidence = segment.zenz
-            if evidence is not None and (evidence.reading != segment.selected.reading
+            if evidence is not None and (evidence.candidate.reading != segment.selected.reading
                                          or evidence.left != text):
                 segment.zenz = None
             text += segment.selected.surface
@@ -818,18 +936,23 @@ class ImeSession:
             changed = [self.focus, following]
         # Determine the new readings with the right interval's POS available
         # to the left. Apply learning only after both readings are known.
+        lattice = self._lattice()
         for index in reversed(changed):
             resized = self.segments[index]
             resized.choices = None
             resized.fixed = False
             resized.zenz = None
-            lattice, pins, left, right = self._candidate_inputs(index)
+            resized.order = None
+            pins, left, right = candidate_inputs(
+                lattice, self.segments, index, self._left_id, self._lex)
             resized.selected = next(candidates(
                 restrict(lattice, resized.start, resized.end, pins), self._lex, left, right,
                 learning=self._learning_view))
+        repeat = self._repeat and not self._partial and len(self.segments) == 1
         for index in changed:
             resized = self.segments[index]
-            learned = self._learned_head(resized.selected.reading, *self._learning_context(index))
+            prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu)
+            learned, _ = candidate_heads(resized, self._learning_view, prev, repeat)
             if learned is not None:
                 resized.selected = learned
         self._update_composition()
@@ -968,58 +1091,18 @@ class ImeSession:
             parts.append(run)
         return parts
 
-    def _pins(self, lattice: list[dict], start: int, end: int,
-              others) -> dict[int, frozenset[str]]:
-        """Directions that the selections of other segments give the presses of
-        [start, end): a press that crosses a boundary keeps one direction."""
-        plan = Plan(lattice)
-        presses = {plan.press[i] for i in range(start, end)} - {None}
-        pins: dict[int, frozenset[str]] = {}
-        if presses:
-            for other in others:
-                for press, dirs in plan.directions(other.start, other.end,
-                                                   other.selected.reading).items():
-                    if press in presses:
-                        pins[press] = pins.get(press, SIDES) & dirs
-        return pins
-
     def _refresh(self, *, picks: list[KanaRun] | None = None,
                  request: ConversionRequest | None = None) -> None:
         """Rebuild the composition from one conversion and its learning view."""
-        self.segments = []
         self.predicting = False
-        offset = 0
         if request is None:
             request = self._conversion_input(self._parts())
         self._display_key = request.key
         self._learning_view = request.learning
         if picks is None and self._lex is not None:
             picks = request.decode(self._lex)
-        runs = iter(picks or ())
-        self._word_starts = set()
-        for part in request.parts:
-            if isinstance(part, str):
-                last = self.segments[-1] if self.segments else None
-                if (half_width_ascii(part) and last is not None and last.literal
-                        and half_width_ascii(last.selected.reading)):
-                    # 英数の続き: the half-width run is one clause, as digits are.
-                    text = last.selected.reading + part
-                    last.end += 1
-                    last.selected = Candidate(text, text, 0, BOS_ID, BOS_ID, "literal")
-                elif is_digit(part) and last is not None and last.selected.kind == "number":
-                    digits = last.selected.reading + part
-                    last.end += 1
-                    last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
-                else:
-                    self.segments.append(Segment(offset, offset + 1, Candidate(
-                        part, part, 0, BOS_ID, BOS_ID, "number" if is_digit(part)
-                        else "literal"), literal=True))
-                offset += 1
-            elif self._lex is not None:
-                run = next(runs)
-                self._word_starts.update(run.word_starts)
-                self.segments.extend(run.segments)
-                offset += len(part)
+        self.segments = display_segments(request.parts, picks)
+        self._word_starts = {start for run in picks or () for start in run.word_starts}
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)
 

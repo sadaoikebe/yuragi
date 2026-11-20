@@ -172,7 +172,9 @@ def build_converter(args, *, warm_conversion=None):
             alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
             k=DEFAULT_K if args.lm_k is None else args.lm_k,
             steps=DEFAULT_STEPS if args.lm_steps is None else args.lm_steps,
-            review_budget_ms=REVIEW_BUDGET_MS if budget is None else budget)
+            review_budget_ms=REVIEW_BUDGET_MS if budget is None else budget,
+            # A batch of dictionary candidates can exceed the conversion deadline on CPU.
+            rank_candidates=device != "cpu")
         converter.warm_up()
         if warm_conversion is not None:
             warm_conversion(converter)

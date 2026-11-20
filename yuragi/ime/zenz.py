@@ -24,9 +24,9 @@ ZenzCandidateEvaluator):
    path satisfies keeps the current draft.
 Consecutive reviews reuse the KV cache of the prompt and of the token prefix
 the new draft shares with the previous one.
-So zenz writes the surface and the dictionary keeps it to words of the
-reading; the pick is a dictionary path like the 1-best, and the bunsetsu,
-candidate lists and learning work on it unchanged.
+The dictionary keeps the draft to paths for the chosen reading. Confirmed
+bunsetsu can be promoted in the candidate list, and the converter can use
+the remaining budget to score alternate dictionary surfaces.
 
 Prompt (zenz-v2; Zenzai's ZenzPromptBuilder .v2, Docs/zenzai.md):
   U+EE00 <reading in katakana> [U+EE02 <left context, last 40 chars>] U+EE01
@@ -47,7 +47,7 @@ from yuragi.lattice.decode import DecodeResult
 from yuragi.lattice.mozc_dict import BOS_ID, MozcLex, left_id_after
 from yuragi.lattice.token_viterbi import decode_prefix, decode_tokens, nbest_tokens
 
-from .bunsetsu import (Bunsetsu, Segment, ZenzEvidence, learned_row,
+from .bunsetsu import (Bunsetsu, Candidate, Segment, ZenzEvidence, learned_row,
                        normal_bunsetsu, segments_from)
 
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
@@ -87,6 +87,8 @@ class Reviewer(Protocol):
                accepted: bytes) -> tuple[bytes, bool] | None: ...
 
     def reading_nll(self, context: str, readings: list[str]) -> list[float]: ...
+
+    def candidate_nll(self, context: str, candidates: tuple[Candidate, ...]) -> list[float]: ...
 
 
 def cuda_devices() -> tuple[str, ...]:
@@ -177,6 +179,27 @@ class ZenzModel:
             done += self.bytes[token]
         return None
 
+    def candidate_nll(self, context: str, candidates: tuple[Candidate, ...]) -> list[float]:
+        """Score the continuation, including its EOS, under each reading's prompt."""
+        encode = self.tok.encode
+        prompts = [encode(prompt(context, c.reading), add_special_tokens=False)
+                   for c in candidates]
+        outputs = [encode(normalize(c.surface), add_special_tokens=False) + [self.eos]
+                   for c in candidates]
+        # The final EOS is a target only. Right padding cannot affect earlier logits.
+        seqs = [prefix + output[:-1] for prefix, output in zip(prompts, outputs)]
+        width = max(map(len, seqs))
+        ids = [seq + [self.eos] * (width - len(seq)) for seq in seqs]
+        with self.torch.inference_mode():
+            logits = self.model(input_ids=self._ids(ids), use_cache=False).logits
+            scores = []
+            for row, (prefix, output) in enumerate(zip(prompts, outputs)):
+                start = len(prefix) - 1
+                predicted = logits[row, start:start + len(output)].float()
+                targets = predicted[list(range(len(output))), output]
+                scores.append((predicted.logsumexp(-1) - targets).sum())
+            return self.torch.stack(scores).tolist()
+
     def _guesses(self, text: str, ids: list[int]) -> list[int]:
         """The greedy next token at each position of ids after the prompt text.
 
@@ -213,6 +236,7 @@ class ZenzConverter:
     steps: int | None = DEFAULT_STEPS  # cap on reviews per kana run
     review_budget_ms: float = REVIEW_BUDGET_MS
     last: dict = field(default_factory=dict)  # stats of the most recent conversion
+    rank_candidates: bool = True
 
     def reading(self, context: str, best: DecodeResult, tokens: list[dict], lex: MozcLex,
                 left_id: int) -> DecodeResult:
@@ -279,14 +303,14 @@ class KanaRun:
 def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
                      converter: ZenzConverter | None, cancelled=lambda: False, *,
                      left_id: int = BOS_ID, prev: Bunsetsu | None = None,
-                     repeat: bool = False) -> list[KanaRun] | None:
+                     repeat: bool = False, until: float | None = None) -> list[KanaRun] | None:
     """Decode and choose the displayed segments once, including for the LM prompt.
 
     Each run has absolute token offsets. None means the worker was cancelled.
     """
     picks: list[KanaRun] = []
     text = ""
-    if converter is not None:
+    if converter is not None and until is None:
         until = time.perf_counter() + converter.review_budget_ms / 1000
     offset = 0
     for part in parts:
@@ -307,27 +331,23 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
             if cancelled():
                 return None
         segments = segments_from(dec.pieces, offset, lex)
-        if learning is not None:
-            reviewed = text
-            displayed = text
-            end = 0
-            standalone = repeat and len(parts) == len(segments) == 1
-            for segment in segments:
-                original = segment.selected
-                if supported:
-                    end += len(spell(original.surface))
-                    if end <= supported and displayed == reviewed:
-                        segment.zenz = ZenzEvidence(reviewed, original.reading, original.surface)
+        reviewed = text
+        end = 0
+        standalone = repeat and len(parts) == len(segments) == 1
+        for segment in segments:
+            original = segment.selected
+            if supported:
+                end += len(spell(original.surface))
+                if end <= supported and text == reviewed:
+                    segment.zenz = ZenzEvidence(reviewed, original)
+            if learning is not None:
                 row = learning.head(original.reading, prev, repeat=standalone,
-                                    zenz=segment.zenz.surface if segment.zenz else None)
+                                    zenz=original.surface if segment.zenz else None)
                 if row is not None:
                     segment.selected = learned_row(row)
                 prev = normal_bunsetsu(segment.selected)
-                reviewed += original.surface
-                displayed += segment.selected.surface
-            text = displayed
-        else:
-            text += "".join(s.selected.surface for s in segments)
+            reviewed += original.surface
+            text += segment.selected.surface
         picks.append(KanaRun(segments, {offset + p.start for p in dec.pieces if not p.literal}))
         offset += len(part)
     return picks

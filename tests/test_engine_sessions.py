@@ -79,6 +79,9 @@ class SlowModel:
     def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
+    def candidate_nll(self, context, candidates):
+        return [0.0] * len(candidates)
+
     def review(self, context, reading, draft, accepted):
         time.sleep(self.sleep)
         return None if draft.startswith("卯") else ("卯".encode(), False)

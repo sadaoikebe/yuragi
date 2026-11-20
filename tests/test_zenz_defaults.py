@@ -80,10 +80,11 @@ class DeviceStartupTest(unittest.TestCase):
         return server.build_converter(server.argument_parser().parse_args(argv))
 
     def test_uses_the_first_gpu_that_warms_up(self):
-        model = self.build().model
+        converter = self.build()
+        self.assertTrue(converter.rank_candidates)
         self.assertEqual(self.placed, ["cuda:0"])
         self.assertEqual(self.warmed, ["cuda:0"])
-        self.assertEqual(model._ids([[0]]), ([[0]], "cuda:0"))
+        self.assertEqual(converter.model._ids([[0]]), ([[0]], "cuda:0"))
         self.set_threads.assert_called_once_with(4)
         self.assertTrue(self.model_loads[0]["local_files_only"])
 
@@ -95,11 +96,12 @@ class DeviceStartupTest(unittest.TestCase):
     def test_reloads_on_cpu_after_cuda_placement_fails(self):
         self.devices = 1
         self.placement_failures.add("cuda:0")
-        model = self.build().model
+        converter = self.build()
+        self.assertFalse(converter.rank_candidates)
         self.assertEqual(self.placed, ["cuda:0", "cpu"])
         self.assertEqual(len(self.model_loads), 2)
         self.assertEqual(self.warmed, ["cpu"])
-        self.assertEqual(model._ids([[0]]), ([[0]], "cpu"))
+        self.assertEqual(converter.model._ids([[0]]), ([[0]], "cpu"))
 
     def test_engine_tries_later_gpu_if_warmup_conversion_fails(self):
         conversions = []

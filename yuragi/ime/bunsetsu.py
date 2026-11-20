@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from heapq import heappop, heappush
-from itertools import count
+from itertools import chain, count, islice
 from typing import Iterator
 
 from yuragi.lattice.alternation import Plan, admits, after
@@ -70,8 +70,14 @@ def normal_bunsetsu(c: Candidate) -> Bunsetsu | None:
 @dataclass(frozen=True)
 class ZenzEvidence:
     left: str  # reviewed text to the left within this input
-    reading: str
-    surface: str
+    candidate: Candidate
+
+
+@dataclass(frozen=True)
+class CandidateOrder:
+    context: tuple
+    original: tuple[Candidate, ...]
+    permutation: tuple[int, ...]
 
 
 @dataclass
@@ -85,6 +91,7 @@ class Segment:
     context: tuple | None = None
     index: int = 0
     zenz: ZenzEvidence | None = None
+    order: CandidateOrder | None = None
 
 
 def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:
@@ -186,7 +193,7 @@ def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
     """Dictionary rows, then kana rows, then date rows (with now). learning (a
     LearningView) adds the learned bunsetsu as paths, at their own cost."""
     dictionary = []
-    for c in _paths(tokens, lex, left, right, kana=False, learning=learning):
+    for c in dictionary_candidates(tokens, lex, left, right, learning=learning):
         dictionary.append(c)
         yield c
     # Even a reading absent from every dictionary prefix remains reachable.
@@ -200,12 +207,17 @@ def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
         yield from _date_rows(dictionary, now)
 
 
+def dictionary_candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
+                          *, learning=None) -> Iterator[Candidate]:
+    return _paths(tokens, lex, left, right, kana=False, learning=learning)
+
+
 def with_symbols(rows: Iterator[Candidate],
                  symbols: dict[str, tuple[str, ...]] | None,
-                 learning=None) -> Iterator[Candidate]:
+                 learning=None, *, anchor: Candidate | None = None) -> Iterator[Candidate]:
     """A clause's rows (candidates()) with the symbols of its reading.
 
-    The first row's reading (the interval's 1-best) looks them up
+    The anchor (by default the first row) supplies the lookup reading
     (symbol_readings.load_symbols). At most SYMBOL_HEAD of them come after the
     first SYMBOL_OFFSET rows; the rest come last. The symbol last chosen from
     the reading (learning, a LearningView) comes first overall; the others keep
@@ -225,9 +237,9 @@ def with_symbols(rows: Iterator[Candidate],
 
     for n, c in enumerate(rows):
         if first is None:
-            first = c
-            found = symbols.get(c.reading, ()) if symbols else ()
-            chosen = learning.symbol(c.reading) if learning is not None else None
+            first = anchor if anchor is not None else c
+            found = symbols.get(first.reading, ()) if symbols else ()
+            chosen = learning.symbol(first.reading) if learning is not None else None
             if chosen in found:
                 yield from symbol_rows((chosen,))
         if c.surface in inserted:
@@ -250,15 +262,35 @@ def learned_row(row) -> Candidate:
     return Candidate(row.surface, row.reading, 0, row.lid, row.rid, kind, row.cost)
 
 
-def with_learned(rows: Iterator[Candidate], head: Candidate | None) -> Iterator[Candidate]:
-    """head (learned_row) first, then rows without its spelling."""
-    if head is None:
-        yield from rows
-        return
-    yield head
+def without_heads(rows: Iterator[Candidate],
+                  heads: tuple[Candidate | None, Candidate | None]) -> Iterator[Candidate]:
+    learned, confirmed = heads
     for c in rows:
-        if c.surface != head.surface:
-            yield c
+        if learned is not None and c.surface == learned.surface:
+            continue
+        if confirmed is not None and c.surface == confirmed.surface and c.kind != "kana":
+            continue  # The kana row is still how F6/F7 select this script.
+        yield c
+
+
+def arranged_candidates(rows: Iterator[Candidate],
+                        heads: tuple[Candidate | None, Candidate | None],
+                        order: CandidateOrder | None, symbols, learning) -> Iterator[Candidate]:
+    """Keep the pre-LM symbol lookup and leave the tail of the list lazy."""
+    learned, _ = heads
+    anchor = learned
+    if anchor is None:
+        anchor = next(rows, None)
+        if anchor is not None:
+            rows = chain((anchor,), rows)
+    rows = without_heads(rows, heads)
+    if order is not None:
+        prefix = tuple(islice(rows, len(order.original)))
+        if prefix == order.original:
+            prefix = tuple(prefix[i] for i in order.permutation)
+        rows = chain(prefix, rows)
+    fixed = (c for c in heads if c is not None)
+    yield from with_symbols(chain(fixed, rows), symbols, learning, anchor=anchor)
 
 
 def _date_rows(dictionary: list[Candidate], now: datetime) -> Iterator[Candidate]:

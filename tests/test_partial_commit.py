@@ -168,6 +168,7 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(reply["segments"][0]["reading"], "でる")
 
         model = Mock()
+        model.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
         model.reading_nll.return_value = [0.0, 10.0]
         model.review.return_value = None
         k.s.lm = ZenzConverter(model)
@@ -186,6 +187,7 @@ class PartialCommitTest(unittest.TestCase):
             )
         }
         model = Mock()
+        model.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
         model.reading_nll.return_value = [5.0, 0.0]
         model.review.return_value = None
         lex = MozcLex(words, set(words) | {"え", "が"}, [0] * 4, 2)
