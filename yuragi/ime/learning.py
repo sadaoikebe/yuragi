@@ -2,8 +2,9 @@
 
 The file is a JSONL log of confirmations and pair suppressions (Shift+F6,
 "forget"), read in order. What a conversion uses, for each reading: the
-surface confirmed last. It comes first (LearningView.head); nothing is added to
-any score. A suppression removes its (reading, surface) pair.
+surface chosen by LearningView.head from the last confirmations for the
+reading and its left bunsetsu. Nothing is added to any score. A suppression
+removes its (reading, surface) pair from every context.
 
 Confirmed bunsetsu are also whole-bunsetsu arcs of the lattice (spans), so a
 spelling absent from the dictionary (user_word, from a kana confirmation) can
@@ -22,7 +23,8 @@ written leaves learning off for now, with a line on stderr.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, fields, replace
 import json
 import os
 from pathlib import Path
@@ -31,11 +33,12 @@ import time
 
 from yuragi.lattice.alternation import Plan
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex
-from .bunsetsu import Candidate
+from .bunsetsu import Bunsetsu, Candidate, normal_bunsetsu
 
 DEFAULT_LEARNING_PATH = Path.home() / ".yuragi-ime" / "learning.jsonl"
 USER_WORD_COST = 6000
 COMPACT_MIN_LINES = 5000  # DESIGN「定数」
+_UNREAD = object()
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,7 @@ class Confirmation:
     rid: int
     user_word: bool = False
     symbol: bool = False  # a symbol from its reading: promotes it in candidates only
+    prev: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,7 +74,8 @@ def parse_line(raw: bytes):
         data = json.loads(raw.decode("utf-8"))
         kind = data.get("type", "confirm")
         if kind == "confirm":
-            return _event(data, Confirmation)
+            row = _event(data, Confirmation)
+            return row if isinstance(row.prev, str) and row.prev else replace(row, prev=None)
         if kind == "suppress":
             return _event(data, Suppression)
     except (ValueError, TypeError, KeyError, AttributeError):  # UnicodeError is a ValueError
@@ -87,12 +92,24 @@ class LearningView:
 
     def __init__(self, index: tuple, revision: int):
         # _index(): shared by the views of one revision
-        self._last, self._recent, self._entries, self._prefixes, self._symbols = index
+        self._last, self._recent, self._entries, self._prefixes, self._symbols, self._contexts, self._pairs = index
         self.revision = revision
 
-    def head(self, reading: str) -> Confirmation | None:
-        """The confirmation that comes first for this reading: the latest."""
-        return self._last.get(reading)
+    def head(self, reading: str, prev: Bunsetsu | None = None, *, repeat: bool = False,
+             zenz: str | None = None) -> Confirmation | None:
+        """The learned spelling for this interval, in rule priority order."""
+        entries = self._entries.get(reading, ())
+        if len(entries) <= 1:
+            return self._last.get(reading)
+        if prev is not None:
+            if repeat and prev.reading == reading:
+                row = self._pairs.get((reading, prev.surface))
+                if row is not None:
+                    return row
+            surface = self._contexts.get((reading, prev.surface))
+            if surface is not None:
+                return self._pairs[reading, surface]
+        return self._pairs.get((reading, zenz), self._last[reading])
 
     def symbol(self, reading: str) -> str | None:
         """The symbol last chosen from this reading, if any."""
@@ -119,15 +136,15 @@ class LearningView:
                     yield pos, Entry(row.surface, reading, row.lid, row.rid, row.cost)
 
 
-def _index(rows: dict[tuple[str, str], Confirmation]) -> tuple:
+def _index(rows: list[Confirmation], contexts: list[Confirmation]) -> tuple:
     """From the live rows (one per pair, oldest first): reading -> the latest
     row; the rows, the most recent first; reading -> those of its pairs; every
     prefix of a learned reading; reading -> the symbol chosen last. Symbol rows
-    are only in the last."""
+    are only in the symbol index. Context rows are also oldest first."""
     last: dict[str, Confirmation] = {}
     symbols: dict[str, str] = {}
     recent: list[Confirmation] = []
-    for row in reversed(rows.values()):
+    for row in reversed(rows):
         if row.symbol:
             symbols.setdefault(row.reading, row.surface)
             continue
@@ -137,7 +154,9 @@ def _index(rows: dict[tuple[str, str], Confirmation]) -> tuple:
     for row in recent:
         entries.setdefault(row.reading, []).append(row)
     prefixes = {r[:i] for r in entries for i in range(1, len(r) + 1)}
-    return last, recent, entries, prefixes, symbols
+    winners = {(row.reading, row.prev): row.surface for row in contexts}
+    pairs = {(row.reading, row.surface): row for row in recent}
+    return last, recent, entries, prefixes, symbols, winners, pairs
 
 
 class LearningStore:
@@ -150,8 +169,10 @@ class LearningStore:
         self.skipped = 0  # lines that were not JSON with the needed fields
         self._seen = None  # the file's (st_dev, st_ino, st_size, st_mtime_ns) when last read
         # (reading, surface) -> the latest such confirmation, the oldest first
-        self._rows: dict[tuple[str, str], Confirmation] = {}
-        self._index: tuple | None = None  # _index(self._rows), built when a view needs it
+        self._rows: dict[tuple[str, str], tuple[int, Confirmation]] = {}
+        # Pair -> left surface -> latest confirmation in that context.
+        self._contexts: dict[tuple[str, str], dict[str, tuple[int, Confirmation]]] = {}
+        self._index: tuple | None = None  # built when a view needs it
         self.sync()
 
     @staticmethod
@@ -162,37 +183,57 @@ class LearningStore:
         self.revision += 1
         self._index = None
 
-    def _apply(self, event) -> None:
+    def _apply(self, event, position: int) -> None:
         key = (event.reading, event.surface)
-        self._rows.pop(key, None)
+        previous = self._rows.pop(key, None)
         if isinstance(event, Confirmation):
-            self._rows[key] = event
+            if previous is not None and previous[1].symbol != event.symbol:
+                self._contexts.pop(key, None)
+            self._rows[key] = (position, event)
+            if not event.symbol and event.prev:
+                self._contexts.setdefault(key, {})[event.prev] = (position, event)
+        else:
+            self._contexts.pop(key, None)
+
+    def _context_rows(self):
+        return sorted(record for rows in self._contexts.values() for record in rows.values())
+
+    @contextmanager
+    def _lock(self):
+        # Lock a stable sidecar, since compaction replaces the history inode.
+        with self.path.with_name(self.path.name + ".lock").open("a+b") as lock:
+            if os.name == "nt":
+                import msvcrt
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            yield  # closing the file releases the lock
 
     # -- reading the file ----------------------------------------------------
-    def sync(self) -> None:
-        """Read the file again if it changed since this process last saw it."""
+    def _stat(self):
         try:
-            stamp = self._stamp(os.stat(self.path))
+            return self._stamp(self.path.stat())
         except FileNotFoundError:
-            stamp = None
-        except OSError:
-            stamp = self._seen  # cannot look now; keep what we have
-        if stamp == self._seen:
-            return
-        self._rows = {}
+            return None
+
+    def _clear(self, stamp) -> None:
+        self._rows.clear()
+        self._contexts.clear()
         self.lines = self.skipped = 0
         self._seen = stamp
         self._changed()
+
+    def _sync_locked(self) -> None:
+        stamp = self._stat()
+        if stamp == self._seen:
+            return
         if stamp is None:
+            self._clear(None)
             return
-        try:
-            with open(self.path, "rb") as stream:
-                data = stream.read()
-                self._seen = self._stamp(os.fstat(stream.fileno()))
-        except OSError as exc:
-            print(f"learning history unreadable ({type(exc).__name__}); not used for now",
-                  file=sys.stderr, flush=True)
-            return
+        data = self.path.read_bytes()
+        self._clear(stamp)
         for raw in data.split(b"\n"):
             if not raw.strip():
                 continue
@@ -201,11 +242,28 @@ class LearningStore:
             if event is None:
                 self.skipped += 1
             else:
-                self._apply(event)
+                self._apply(event, self.lines)
+
+    def sync(self) -> None:
+        """Read a changed file with the same lock used by its writers."""
+        try:
+            stamp = self._stat()
+            if stamp == self._seen:
+                return
+            if stamp is None:
+                self._clear(None)
+            else:
+                with self._lock():
+                    self._sync_locked()
+        except OSError as exc:
+            if self._seen is not _UNREAD:
+                self._clear(_UNREAD)
+            print(f"learning history unreadable ({type(exc).__name__}); not used for now",
+                  file=sys.stderr, flush=True)
 
     def records(self) -> list[Confirmation]:
-        """The surviving confirmations, oldest first (what compaction keeps)."""
-        return list(self._rows.values())
+        """One surviving confirmation per pair, oldest first."""
+        return [row for _, row in self._rows.values()]
 
     def has_pair(self, reading: str, surface: str) -> bool:
         return (reading, surface) in self._rows
@@ -216,92 +274,120 @@ class LearningStore:
         if not self._rows:
             return None
         if self._index is None:
-            self._index = _index(self._rows)
+            self._index = _index(self.records(), [row for _, row in self._context_rows()])
         return LearningView(self._index, self.revision)
 
     # -- writing -------------------------------------------------------------
-    def confirm(self, selections: list[Candidate], lex: MozcLex) -> None:
-        self.sync()
-        now = time.time()
-        rows = []
-        for c in selections:
-            if c.kind == "symbol" and c.reading:
-                rows.append(Confirmation(c.reading, c.surface, now,
-                                         0, lex.base_pos(c.lid), lex.base_pos(c.rid), symbol=True))
-                continue
-            if c.kind in ("literal", "number", "date", "alnum") or not c.reading:
-                continue
-            cost, lid, rid = c.word_cost, c.lid, c.rid
-            learned = self._rows.get((c.reading, c.surface))
-            user_word = learned is not None and learned.user_word
-            if c.kind == "kana":
-                existing = [e for e in lex.by_reading.get(c.reading, ())
-                            if e.surface == c.surface]
-                if existing:
-                    e = min(existing, key=lambda e: e.cost)
-                    cost, lid, rid = e.cost, e.lid, e.rid
-                else:
-                    user_word = True
-                    cost, lid, rid = USER_WORD_COST, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID
-            if cost is not None:
-                # Numeral connection IDs are local to the loaded lexicon.
-                rows.append(Confirmation(c.reading, c.surface, now,
-                                         cost, lex.base_pos(lid), lex.base_pos(rid), user_word))
-        self._append(rows)
+    @contextmanager
+    def _writing(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock():
+            self._sync_locked()
+            yield
+
+    def _write_failed(self, exc: OSError) -> None:
+        self._seen = _UNREAD
+        print(f"learning history not written ({type(exc).__name__})",
+              file=sys.stderr, flush=True)
+
+    def confirm(self, selections: list[Candidate], lex: MozcLex, *,
+                prev: Bunsetsu | None = None, repeat: bool = False) -> None:
+        if not any(normal_bunsetsu(c) is not None or (c.kind == "symbol" and c.reading)
+                   for c in selections):
+            return
+        try:
+            with self._writing():
+                now = time.time()
+                rows = []
+                for c in selections:
+                    current = normal_bunsetsu(c)
+                    if current is not None:
+                        left = prev.surface if prev is not None and not (
+                            repeat and prev.reading == current.reading) else None
+                        rows.append(self._confirmation(c, lex, now, left))
+                    elif c.kind == "symbol" and c.reading:
+                        rows.append(Confirmation(c.reading, c.surface, now,
+                                                 0, lex.base_pos(c.lid), lex.base_pos(c.rid),
+                                                 symbol=True))
+                    prev = current
+                self._append(rows)
+        except OSError as exc:
+            self._write_failed(exc)
+
+    def _confirmation(self, c: Candidate, lex: MozcLex, now: float,
+                      prev: str | None) -> Confirmation:
+        cost, lid, rid = c.word_cost, c.lid, c.rid
+        learned = self._rows.get((c.reading, c.surface))
+        user_word = learned is not None and learned[1].user_word
+        if c.kind == "kana":
+            existing = [e for e in lex.by_reading.get(c.reading, ()) if e.surface == c.surface]
+            if existing:
+                e = min(existing, key=lambda e: e.cost)
+                cost, lid, rid = e.cost, e.lid, e.rid
+            else:
+                user_word = True
+                cost, lid, rid = USER_WORD_COST, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID
+        # Numeral connection IDs are local to the loaded lexicon.
+        return Confirmation(c.reading, c.surface, now, cost, lex.base_pos(lid),
+                            lex.base_pos(rid), user_word, prev=prev)
 
     def suppress(self, reading: str, surface: str) -> bool:
         """Forget a learned pair; False when it is not learned (nothing written)."""
-        self.sync()
-        if (reading, surface) not in self._rows:
-            return False
-        return self._append([Suppression(reading, surface, time.time())])
-
-    def _append(self, rows) -> bool:
-        """Write rows and index them; False when there is nothing to write or
-        the write failed."""
-        if not rows:
-            return False
-        payload = "".join(json.dumps(asdict(r), ensure_ascii=False) + "\n"
-                          for r in rows).encode("utf-8")
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "ab") as stream:
-                stream.write(payload)
-                stream.flush()
-                stamp = self._stamp(os.fstat(stream.fileno()))
+            with self._writing():
+                if not self.has_pair(reading, surface):
+                    return False
+                self._append([Suppression(reading, surface, time.time())])
         except OSError as exc:
-            print(f"learning history not written ({type(exc).__name__})",
-                  file=sys.stderr, flush=True)
+            self._write_failed(exc)
             return False
-        self._seen = stamp
-        self.lines += len(rows)
-        for row in rows:
-            self._apply(row)
-        self._changed()
         return True
+
+    def _append(self, rows) -> None:
+        """Write rows and publish the new index, under the writer lock."""
+        with self.path.open("a+b") as stream:
+            # An edited file or a failed append may have left an unterminated row.
+            if stream.tell():
+                stream.seek(-1, os.SEEK_END)
+                if stream.read(1) != b"\n":
+                    stream.write(b"\n")
+            stream.write(_encode(rows))
+            stream.flush()
+            stamp = self._stamp(os.fstat(stream.fileno()))
+        self._seen = stamp
+        for row in rows:
+            self.lines += 1
+            self._apply(row, self.lines)
+        self._changed()
 
     # -- compaction (engine start) -------------------------------------------
     def compact_if_needed(self, *, min_lines: int = COMPACT_MIN_LINES) -> tuple[int, int] | None:
-        """Rewrite the file with only the live records, once, at start.
-
-        Runs when the file has more than twice the live records and more than
-        min_lines lines. Returns (lines before, lines after), or None when
-        nothing was done.
-        """
-        self.sync()
-        live = self.records()
-        if not (self.lines > 2 * len(live) and self.lines > min_lines):
+        """Compact when more than half the rows can be dropped."""
+        if self._stat() is None:
             return None
-        write_history(self.path, live)
-        before = self.lines
-        self.sync()  # a new file: read from the start
-        return before, len(live)
+        with self._lock():
+            self._sync_locked()
+            live = dict(self._rows.values())
+            live.update(self._context_rows())
+            if self.lines <= 2 * len(live) or self.lines <= min_lines:
+                return None
+            before = self.lines
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            try:
+                tmp.write_bytes(_encode(live[i] for i in sorted(live)))
+                os.replace(tmp, self.path)
+                self._sync_locked()
+            except OSError:
+                self._seen = _UNREAD
+                raise
+            return before, len(live)
 
 
-def write_history(path: Path, rows: list) -> None:
-    """Replace the history file with rows (written beside it, then renamed)."""
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes("".join(json.dumps(asdict(r), ensure_ascii=False) + "\n"
-                            for r in rows).encode("utf-8"))
-    os.replace(tmp, path)
+def _encode(rows) -> bytes:
+    lines = []
+    for row in rows:
+        data = asdict(row)
+        if isinstance(row, Confirmation) and row.prev is None:
+            del data["prev"]
+        lines.append(json.dumps(data, ensure_ascii=False) + "\n")
+    return "".join(lines).encode("utf-8")

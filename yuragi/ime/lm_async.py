@@ -22,9 +22,9 @@ import sys
 import threading
 import time
 
-from .zenz import conversion_picks
 from .server import apply_op, set_reply_commit, snapshot
 from .session import ConversionRequest, ImeSession
+from .zenz import KanaRun
 
 GRACE_MS = 0
 # Windows (zenz medium, CPU 4 threads, k 4, 1 review; 2026-11-19): median
@@ -50,7 +50,7 @@ class Job:
     completed_at: float | None = None
     completion_lock: threading.Lock = field(default_factory=threading.Lock)
     done: threading.Event = field(default_factory=threading.Event)
-    picks: list | None = None
+    picks: list[KanaRun] | None = None
     error: bool = False
 
 
@@ -200,11 +200,8 @@ class LmWorker:
 
     def _execute(self, job: Job) -> None:
         try:
-            request = job.request
-            job.picks = conversion_picks(
-                request.parts, self.lex, request.learning, request.lm_context,
-                replace(self.template, last={}), cancelled=lambda: job.cancelled,
-                left_id=request.left_id)
+            job.picks = job.request.decode(
+                self.lex, replace(self.template, last={}), cancelled=lambda: job.cancelled)
         except Exception as exc:
             # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True

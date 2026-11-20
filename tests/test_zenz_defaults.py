@@ -13,7 +13,8 @@ import unittest
 from unittest import mock
 
 from yuragi.engine import Engine
-from yuragi.ime import server, zenz
+from yuragi.ime.session import ConversionRequest
+from yuragi.ime import server, session, zenz
 from yuragi.ime.lm_async import DEADLINE_MS
 
 
@@ -141,7 +142,7 @@ class DeviceStartupTest(unittest.TestCase):
     def test_engine_tries_later_gpu_if_warmup_conversion_fails(self):
         conversions = []
 
-        def convert(parts, lex, learning, context, converter, *, left_id):
+        def convert(parts, lex, learning, context, converter, **kwargs):
             device = converter.model.device
             conversions.append(device)
             if device == "cuda:0":
@@ -149,9 +150,9 @@ class DeviceStartupTest(unittest.TestCase):
 
         engine = Engine(None, Namespace())
         engine.loaded = SimpleNamespace(_lex=object())
-        request = SimpleNamespace(parts=[], learning=None, lm_context="", left_id=0)
+        request = ConversionRequest([], "", 0, None, ())
         args = server.argument_parser().parse_args([])
-        with mock.patch.object(zenz, "conversion_picks", side_effect=convert):
+        with mock.patch.object(session, "conversion_picks", side_effect=convert):
             converter = engine.load_lm(server, args, request)
         self.assertEqual(converter.model.device, "cuda:1")
         self.assertEqual(self.warmed, ["cuda:0", "cuda:1"])

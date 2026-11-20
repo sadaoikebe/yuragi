@@ -53,6 +53,27 @@ class Candidate:
     word_cost: int | None = None  # raw internal cost, without neighbor transitions/learning
 
 
+@dataclass(frozen=True)
+class Bunsetsu:
+    reading: str
+    surface: str
+
+
+def normal_bunsetsu(c: Candidate) -> Bunsetsu | None:
+    """The selections that produce an ordinary confirmation row."""
+    if (c.reading and c.kind not in ("literal", "number", "date", "alnum", "symbol")
+            and (c.word_cost is not None or c.kind == "kana")):
+        return Bunsetsu(c.reading, c.surface)
+    return None
+
+
+@dataclass(frozen=True)
+class ZenzEvidence:
+    left: str  # reviewed text to the left within this input
+    reading: str
+    surface: str
+
+
 @dataclass
 class Segment:
     start: int
@@ -63,10 +84,10 @@ class Segment:
     choices: CandidateStream | None = None
     context: tuple | None = None
     index: int = 0
+    zenz: ZenzEvidence | None = None
 
 
-def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None,
-                  *, learning=None) -> list[Segment]:
+def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None) -> list[Segment]:
     # A kana run has no literals: ImeSession._refresh() makes their segments.
     groups: list[list[Piece]] = []
     for piece in pieces:
@@ -74,18 +95,12 @@ def segments_from(pieces: list[Piece], offset: int, lex: MozcLex | None = None,
         if not groups or piece.learned or content(lid):
             groups.append([])
         groups[-1].append(piece)
-    segments = [Segment(offset + g[0].start, offset + g[-1].end,
+    return [Segment(offset + g[0].start, offset + g[-1].end,
                         Candidate("".join(p.surface for p in g), "".join(p.reading for p in g),
                                   0, g[0].lid, g[-1].rid, "dictionary",
                                   sum(p.cost for p in g) + (sum(
                                       lex.transition(a.rid, b.lid) for a, b in zip(g, g[1:]))
                                       if lex is not None else 0))) for g in groups]
-    if learning is not None:
-        for segment in segments:
-            row = learning.head(segment.selected.reading)
-            if row is not None:
-                segment.selected = learned_row(row)
-    return segments
 
 
 def _paths(tokens: list[dict], lex: MozcLex, left: int, right: int,
