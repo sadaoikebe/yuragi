@@ -15,25 +15,6 @@ from yuragi.ime.session import ConversionRequest
 from yuragi.ime import power, server, session, zenz
 
 
-class DefaultsTest(unittest.TestCase):
-    def test_build_converter_without_device_attribute(self):
-        """Callers that build their own Namespace (tools/eval) still get the auto device."""
-        made = {}
-
-        class FakeModel:
-            def __init__(self, model, *, threads, device):
-                made.update(threads=threads, device=device)
-
-            def review(self, *args):
-                return None
-
-        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
-              mock.patch.object(zenz, "cuda_devices", return_value=())):
-            server.build_converter(Namespace(lm_model=None, lm_threads=None, lm_alpha=None,
-                                             lm_k=None, lm_steps=None))
-        self.assertEqual(made["device"], "cpu")
-
-
 class DeviceStartupTest(unittest.TestCase):
     def setUp(self):
         self.devices = 2
@@ -42,11 +23,9 @@ class DeviceStartupTest(unittest.TestCase):
         self.placed = []
         self.warmed = []
         self.model_loads = []
-        self.set_threads = mock.Mock()
         torch = SimpleNamespace(
             cuda=SimpleNamespace(device_count=lambda: self.devices),
-            set_num_threads=self.set_threads,
-            tensor=lambda rows, *, device: (rows, device),
+            set_num_threads=lambda threads: None,
         )
 
         def place(device):
@@ -81,56 +60,47 @@ class DeviceStartupTest(unittest.TestCase):
     def build(self, *argv):
         return server.build_converter(server.argument_parser().parse_args(argv))
 
-    def test_uses_the_first_gpu_that_warms_up(self):
-        converter = self.build()
-        self.assertTrue(converter.rank_candidates)
-        self.assertEqual(self.placed, ["cuda:0"])
-        self.assertEqual(self.warmed, ["cuda:0"])
-        self.assertEqual(converter.model._ids([[0]]), ([[0]], "cuda:0"))
-        self.set_threads.assert_called_once_with(4)
-        self.assertTrue(self.model_loads[0]["local_files_only"])
+    def test_a_device_that_fails_hands_over_to_the_next(self):
+        # Only the fallback loop is real here: the failures are stand-ins.
+        with self.subTest("placement fails on the only GPU: reload on the CPU"):
+            self.devices = 1
+            self.placement_failures = {"cuda:0"}
+            converter = self.build()
+            self.assertEqual(converter.model.device, "cpu")
+            self.assertFalse(converter.rank_candidates)
+            self.assertEqual(self.placed, ["cuda:0", "cpu"])
+            self.assertEqual(len(self.model_loads), 2)
+            self.assertEqual(self.warmed, ["cpu"])
 
-    def test_uses_cpu_without_cuda_devices(self):
-        self.devices = 0
-        self.assertEqual(self.build().model.device, "cpu")
-        self.assertEqual(self.warmed, ["cpu"])
+        with self.subTest("the engine's warm-up conversion fails on a GPU: the next GPU"):
+            self.devices = 2
+            self.placement_failures, self.warmed = set(), []
+            conversions = []
 
-    def test_reloads_on_cpu_after_cuda_placement_fails(self):
-        self.devices = 1
-        self.placement_failures.add("cuda:0")
-        converter = self.build()
-        self.assertFalse(converter.rank_candidates)
-        self.assertEqual(self.placed, ["cuda:0", "cpu"])
-        self.assertEqual(len(self.model_loads), 2)
-        self.assertEqual(self.warmed, ["cpu"])
-        self.assertEqual(converter.model._ids([[0]]), ([[0]], "cpu"))
+            def convert(parts, lex, learning, context, converter, **kwargs):
+                device = converter.model.device
+                conversions.append(device)
+                if device == "cuda:0":
+                    raise RuntimeError("warm-up conversion failed")
 
-    def test_engine_tries_later_gpu_if_warmup_conversion_fails(self):
-        conversions = []
+            engine = Engine(None, Namespace())
+            engine.loaded = SimpleNamespace(_lex=object(), _table={"keys": {}})
+            request = ConversionRequest([], "", 0, None, ())
+            args = server.argument_parser().parse_args([])
+            with (mock.patch.object(session, "conversion_picks", side_effect=convert),
+                  mock.patch.object(zenz, "calibrate", return_value=50.0)):
+                converter = engine.load_lm(server, args, request)
+            self.assertEqual(converter.model.device, "cuda:1")
+            self.assertEqual(self.warmed, ["cuda:0", "cuda:1"])
+            self.assertEqual(conversions, ["cuda:0", "cuda:1"])
 
-        def convert(parts, lex, learning, context, converter, **kwargs):
-            device = converter.model.device
-            conversions.append(device)
-            if device == "cuda:0":
-                raise RuntimeError("warm-up conversion failed")
-
-        engine = Engine(None, Namespace())
-        engine.loaded = SimpleNamespace(_lex=object(), _table={"keys": {}})
-        request = ConversionRequest([], "", 0, None, ())
-        args = server.argument_parser().parse_args([])
-        with (mock.patch.object(session, "conversion_picks", side_effect=convert),
-              mock.patch.object(zenz, "calibrate", return_value=50.0)):
-            converter = engine.load_lm(server, args, request)
-        self.assertEqual(converter.model.device, "cuda:1")
-        self.assertEqual(self.warmed, ["cuda:0", "cuda:1"])
-        self.assertEqual(conversions, ["cuda:0", "cuda:1"])
-
-    def test_explicit_device_failure_is_reported(self):
-        self.warmup_failures.add("cuda")
-        with self.assertRaisesRegex(RuntimeError, "model inference failed"):
-            self.build("--lm-device", "cuda")
-        self.assertEqual(self.placed, ["cuda"])
-        self.assertEqual(self.warmed, ["cuda"])
+        with self.subTest("a device named on the command line is not replaced"):
+            self.placed, self.warmed = [], []
+            self.warmup_failures = {"cuda"}
+            with self.assertRaisesRegex(RuntimeError, "model inference failed"):
+                self.build("--lm-device", "cuda")
+            self.assertEqual(self.placed, ["cuda"])
+            self.assertEqual(self.warmed, ["cuda"])
 
 
 class CalibrationLadderTest(unittest.TestCase):

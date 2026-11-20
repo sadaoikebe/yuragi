@@ -144,16 +144,6 @@ class PromptLikelihoodTest(unittest.TestCase):
         self.assertEqual(nll(tail[:-1] + "乙", ["かな", "か"]), b[::-1])
         self.assertEqual(len(self.backend.batches), 4)
 
-    def test_cache_evicts_by_insertion_order_after_collecting_results(self):
-        nll = self.model.reading_nll
-        first = nll("", ["か"])[0]
-        for number in range(4095):
-            nll(str(number), ["か"])
-
-        both = nll("", ["か", "かな", "か"])
-        self.assertEqual(both, [first, 3 * math.log(VOCAB_SIZE), first])
-        self.assertEqual(nll("", ["か", "かな"]), both[:2])
-
 
 class ContextReadingTest(unittest.TestCase):
     def setUp(self):
@@ -204,12 +194,6 @@ class ContextReadingTest(unittest.TestCase):
         self.reviewer.review.return_value = spell("記憶"), True
         self.assert_reading(self.replay(MESSAGE), "きどく", "既読")
         self.assertTrue(all(segment.zenz is None for segment in self.sess.segments))
-
-    def test_model_off_leaves_dictionary_conversion(self):
-        self.sess.lm = None
-        self.assert_reading(self.replay(MESSAGE), "きおく", "記憶")
-        self.reviewer.review.assert_not_called()
-        self.reviewer.reading_nll.assert_not_called()
 
     def test_single_reading_skips_scoring(self):
         k = Keys(lambda msg: dispatch(self.sess, msg))

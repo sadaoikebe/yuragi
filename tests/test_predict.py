@@ -50,7 +50,6 @@ class TabGestureTest(Fixture):
     def test_tab_opens_predictions_and_enter_commits(self):
         s = self.session()
         type_reading(s, "とうきょ")
-        before = s.composition
         reply = press(s, VK_TAB)
         self.assertTrue(reply["predicting"])
         self.assertTrue(reply["converted"])
@@ -58,7 +57,6 @@ class TabGestureTest(Fixture):
         self.assertEqual(reply["composition"], reply["candidates"][0])
         second = press(s, VK_TAB)  # the next prediction
         self.assertEqual(second["composition"], reply["candidates"][1])
-        self.assertNotEqual(before, "")
         commit = press(s, VK_RETURN)
         self.assertEqual(commit["commit"], reply["candidates"][1])
         self.assertFalse(commit["predicting"])

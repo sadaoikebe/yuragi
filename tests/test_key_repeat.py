@@ -46,10 +46,10 @@ class KeyRepeatTest(unittest.TestCase):
         self.send("down", VK_SPACE)
         self.send("up", VK_K)
         self.send("down", VK_SPACE, step=400)
-        self.assertTrue(self.send("down", VK_SPACE)["converted"])
-        self.send("down", VK_SPACE)
-        self.send("up", VK_SPACE)
-        self.assertTrue(self.send("down", VK_ENTER)["commit"])
+        converted = self.send("down", VK_SPACE)
+        self.assertTrue(converted["converted"])
+        # Held on, it goes on to the next candidate (USAGE「押しっぱなし」).
+        self.assertEqual(self.send("down", VK_SPACE)["composition"], converted["candidates"][1])
 
 
 if __name__ == "__main__":
