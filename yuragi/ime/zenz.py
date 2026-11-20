@@ -148,8 +148,8 @@ class ZenzModel:
         self.eos = self.tok.eos_token_id
         self.bytes = {i: bytes(self.tok.byte_decoder[c] for c in token)
                       for token, i in self.tok.get_vocab().items()}
-        # text, KV cache, the model's GUESSES best next tokens
-        self._prompt: tuple[str, object, list[int]] | None = None
+        # text, KV cache, the model's GUESSES best next tokens, token count
+        self._prompt: tuple[str, object, list[int], int] | None = None
         # The last reviewed draft's token ids and guesses under the current
         # prompt; the KV cache then holds the prompt and ids[:-1].
         self._draft: tuple[list[int], list[list[int]]] | None = None
@@ -170,9 +170,9 @@ class ZenzModel:
             ids = self.tok.encode(text, add_special_tokens=False)
             out = self.model(input_ids=self._ids([ids]), use_cache=True)
             self._prompt = (text, out.past_key_values,
-                            out.logits[0, -1].topk(GUESSES).indices.tolist())
+                            out.logits[0, -1].topk(GUESSES).indices.tolist(), len(ids))
             self._draft = None
-        return self._prompt[1], self._prompt[2]
+        return self._prompt[1:]
 
     def reading_nll(self, context: str, readings: list[str]) -> list[float]:
         """Sum next-token NLLs (nats) through the end of each full prompt."""
@@ -247,11 +247,10 @@ class ZenzModel:
 
         The guess at position i depends on ids[:i] only, so the guesses and KV
         of the prefix shared with the previous draft are kept."""
-        past, first = self._prompt_state(text)
-        keep, guesses, size = 0, [first], past.get_seq_length()
+        past, first, size = self._prompt_state(text)
+        keep, guesses = 0, [first]
         if self._draft is not None:
             old, old_guesses = self._draft
-            size -= max(len(old) - 1, 0)  # the cache holds the prompt and old[:-1]
             lcp = 0
             for a, b in zip(old, ids):
                 if a != b:
