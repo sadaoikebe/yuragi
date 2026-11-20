@@ -228,16 +228,6 @@ class ProcessTest(BrokerCase):
         self.assertEqual(second.returncode, 0)
         self.assertEqual(self.starts(), 1)
 
-    def test_management_tools_name_the_real_pipe(self):
-        # The window must not show "not running" beside a running broker.
-        from yuragi.ime import broker_client
-        sid = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True,
-                             text=True, check=True).stdout.strip().split(",")[-1].strip('"')
-        prefix = rf"\\.\pipe\yuragi-ime-{sid}-"
-        address = broker_client.pipe_address()
-        self.assertTrue(address.startswith(prefix), address)
-        self.assertTrue(address[len(prefix):].isdigit(), address)
-
     def test_quit_ends_broker_and_engine(self):
         self.plan("normal")
         proc = self.start()

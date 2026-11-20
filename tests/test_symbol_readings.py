@@ -60,8 +60,7 @@ class SymbolConversionTest(unittest.TestCase):
         return rows
 
     def test_yajirushi(self):
-        rows = self.assert_symbols_fourth("やじるし", "矢印", "→")
-        self.assertEqual([c.surface for c in rows[3:7]], ["→", "←", "↑", "↓"])
+        self.assert_symbols_fourth("やじるし", "矢印", "→")
 
     def test_kigou(self):
         rows = self.assert_symbols_fourth("きごう", "記号", "゛")

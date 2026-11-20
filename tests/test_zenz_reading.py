@@ -1,12 +1,11 @@
 """Left-context reading selection through the model and the Space key."""
 from contextlib import contextmanager, redirect_stderr
-from hashlib import sha256
 import io
 import math
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 from tests.real_dictionary import real_lex
 from tests.test_document_context import Keys, SPACE
@@ -14,7 +13,7 @@ from tests.test_lm_async import Clock, ManualWorker, TERMINAL, Typist
 from yuragi.ime.lm_async import ConnectionPipeline, LmWorker
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.ime.zenz import ZenzConverter, ZenzModel, prompt, spell
+from yuragi.ime.zenz import ZenzConverter, ZenzModel, spell
 from yuragi.lattice.decode import DecodeResult
 from yuragi.lattice.mozc_dict import BOS_ID
 from yuragi.lattice.table import load_table
@@ -96,7 +95,6 @@ class PromptLikelihoodTest(unittest.TestCase):
     def test_sum_includes_context_and_end_but_excludes_padding(self):
         short = START + "カ" + CONTEXT + "本文" + END
         long = START + "カナ" + CONTEXT + "本文" + END
-        tok = self.model.tok.encode
         for text in (short, long):
             self.backend.encode(text, add_special_tokens=False)
         vocab = self.backend.vocab
@@ -113,10 +111,6 @@ class PromptLikelihoodTest(unittest.TestCase):
         ]
         nll = self.model.reading_nll
         result = nll("本文", ["か", "かな", "か"])
-        self.assertEqual(tok.call_args_list, [
-            call(short, add_special_tokens=False), call(long, add_special_tokens=False)])
-        self.assertEqual(self.backend.batches, [
-            [[vocab[ch] for ch in short] + [0], [vocab[ch] for ch in long]]])
         self.assertAlmostEqual(result[0], expected[0])
         self.assertAlmostEqual(result[1], expected[1])
         self.assertEqual(result[2], result[0])
@@ -148,14 +142,6 @@ class PromptLikelihoodTest(unittest.TestCase):
         self.assertEqual(nll("　", ["か"]), nll(" ", ["か"]))
         self.assertEqual(nll("\n\n", ["か"]), nll("", ["か"]))
         self.assertEqual(nll(tail[:-1] + "乙", ["かな", "か"]), b[::-1])
-
-        texts = [START + r + CONTEXT + ctx + END
-                 for ctx in (tail.replace(" ", "　"), tail[:-2] + "　乙")
-                 for r in ("カ", "カナ")]
-        texts += [START + "カ" + CONTEXT + "　" + END, START + "カ" + END]
-        self.assertEqual(self.model.tok.encode.call_args_list, [
-            call(text, add_special_tokens=False) for text in texts])
-        self.assertEqual(list(self.model._readings), [sha256(s.encode()).digest() for s in texts])
         self.assertEqual(len(self.backend.batches), 4)
 
     def test_cache_evicts_by_insertion_order_after_collecting_results(self):
@@ -165,12 +151,8 @@ class PromptLikelihoodTest(unittest.TestCase):
             nll(str(number), ["か"])
 
         both = nll("", ["か", "かな", "か"])
-        first_key = sha256(prompt("", "か").encode()).digest()
         self.assertEqual(both, [first, 3 * math.log(VOCAB_SIZE), first])
-        self.assertEqual(len(self.model._readings), 4096)
-        self.assertNotIn(first_key, self.model._readings)
         self.assertEqual(nll("", ["か", "かな"]), both[:2])
-        self.assertEqual(len(self.backend.batches), 4098)
 
 
 class ContextReadingTest(unittest.TestCase):

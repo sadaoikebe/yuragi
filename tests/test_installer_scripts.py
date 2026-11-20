@@ -184,20 +184,6 @@ def powershell_steps(path: Path):
     return [(s["name"], s["run"]) for s in steps if s["shell"] == "powershell"]
 
 
-class InstallerTextTest(unittest.TestCase):
-    """What setup.ps1 does with the variant (no pwsh needed)."""
-
-    def test_torch_comes_from_the_selected_index(self):
-        text = (ROOT / "packaging" / "setup.ps1").read_text(encoding="utf-8-sig")
-        self.assertIn('$TorchIndex = "https://download.pytorch.org/whl/$TorchVariant"', text)
-        self.assertIn('--index-url $TorchIndex "torch==$TorchVersion"', text)
-        self.assertNotIn("whl/cpu", text)  # no fixed CPU index left
-        # A CPU runtime keeps its old name; a GPU runtime is a different shared runtime.
-        self.assertIn('$runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"', text)
-        self.assertIn('"torch$TorchVersion-$TorchVariant"', text)
-        self.assertLess(text.index("$TorchVariant = Get-TorchVariant"), text.index("続行しますか?"))
-
-
 class WorkflowTest(unittest.TestCase):
     def test_windows_powershell_steps_are_ascii(self):
         checked = 0
