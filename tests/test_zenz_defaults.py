@@ -12,7 +12,7 @@ from unittest import mock
 
 from yuragi.engine import Engine
 from yuragi.ime.session import ConversionRequest
-from yuragi.ime import server, session, zenz
+from yuragi.ime import power, server, session, zenz
 
 
 class DefaultsTest(unittest.TestCase):
@@ -67,6 +67,7 @@ class DeviceStartupTest(unittest.TestCase):
             GPT2Tokenizer=SimpleNamespace(from_pretrained=lambda *a, **kw: tokenizer),
         )
         self.enterContext(mock.patch.dict(sys.modules, {"torch": torch, "transformers": transformers}))
+        self.enterContext(mock.patch.object(power, "on_battery", return_value=False))
         self.enterContext(mock.patch.object(zenz.ZenzModel, "review", autospec=True,
                                             side_effect=self.warm_up))
         self.enterContext(mock.patch("sys.stderr", new_callable=io.StringIO))
@@ -113,10 +114,11 @@ class DeviceStartupTest(unittest.TestCase):
                 raise RuntimeError("warm-up conversion failed")
 
         engine = Engine(None, Namespace())
-        engine.loaded = SimpleNamespace(_lex=object())
+        engine.loaded = SimpleNamespace(_lex=object(), _table={"keys": {}})
         request = ConversionRequest([], "", 0, None, ())
         args = server.argument_parser().parse_args([])
-        with mock.patch.object(session, "conversion_picks", side_effect=convert):
+        with (mock.patch.object(session, "conversion_picks", side_effect=convert),
+              mock.patch.object(zenz, "calibrate", return_value=50.0)):
             converter = engine.load_lm(server, args, request)
         self.assertEqual(converter.model.device, "cuda:1")
         self.assertEqual(self.warmed, ["cuda:0", "cuda:1"])
@@ -128,6 +130,76 @@ class DeviceStartupTest(unittest.TestCase):
             self.build("--lm-device", "cuda")
         self.assertEqual(self.placed, ["cuda"])
         self.assertEqual(self.warmed, ["cuda"])
+
+
+class CalibrationLadderTest(unittest.TestCase):
+    """Which device and model the engine keeps, from each one's calibration time
+    (CONVERSION「装置とモデル」), with the arguments setup.ps1 writes. Models are stand-ins."""
+
+    GPU_INSTALL = ["--lm-model", "medium", "--lm-cpu-model", "small"]  # GPU build of torch
+    CPU_INSTALL = ["--lm-cpu-model", "small"]
+
+    def setUp(self):
+        self.loaded = []
+        self.times = {}
+        self.gpus = ("cuda:0",)
+
+        class FakeModel:
+            def __init__(model, name, *, threads, device):
+                self.loaded.append((device, name))
+                if self.times.get((device, name)) == "fails":
+                    raise RuntimeError("no kernel image is available for this GPU")
+                model.name, model.device = name, device
+
+            def review(model, *args):
+                return None
+
+        self.enterContext(mock.patch.object(zenz, "ZenzModel", FakeModel))
+        self.enterContext(mock.patch.object(zenz, "cuda_devices", lambda: self.gpus))
+        self.battery = False
+        self.enterContext(mock.patch.object(power, "on_battery", lambda: self.battery))
+        self.enterContext(mock.patch("sys.stderr", new_callable=io.StringIO))
+
+    def build(self, argv, times, *, require_lm=False):
+        self.times = times
+        args = server.argument_parser().parse_args(argv)
+        args.require_lm = require_lm
+        calibration = lambda c: times[(c.model.device, c.model.name)]
+        return server.build_converter(args, calibration=calibration, log=lambda m: None)
+
+    def test_gpu_install_uses_medium_on_the_gpu_and_loads_nothing_else(self):
+        converter = self.build(self.GPU_INSTALL, {("cuda:0", "medium"): 37})
+        self.assertEqual((converter.model.device, converter.model.name), ("cuda:0", "medium"))
+        self.assertEqual(self.loaded, [("cuda:0", "medium")])
+
+    def test_a_gpu_that_cannot_run_it_falls_to_small_on_the_cpu(self):
+        converter = self.build(self.GPU_INSTALL, {("cuda:0", "medium"): "fails",
+                                                  ("cpu", "small"): 82})
+        self.assertEqual((converter.model.device, converter.model.name), ("cpu", "small"))
+
+    def test_on_battery_the_gpu_is_not_tried(self):
+        self.battery = True
+        converter = self.build(self.GPU_INSTALL, {("cpu", "small"): 106})
+        self.assertEqual((converter.model.device, converter.model.name), ("cpu", "small"))
+        self.assertEqual(self.loaded, [("cpu", "small")])
+
+    def test_too_slow_a_pc_converts_without_the_lm(self):
+        self.gpus = ()  # the CPU build of torch
+        with self.assertRaises(server.LmTooSlow):
+            self.build(self.CPU_INSTALL, {("cpu", "small"): 400})
+
+    def test_require_lm_keeps_the_last_candidate_however_slow(self):
+        # dev-register.ps1 on a PC without a GPU: the default model on the CPU.
+        self.gpus = ()
+        converter = self.build([], {("cpu", zenz.DEFAULT_MODEL): 345}, require_lm=True)
+        self.assertEqual(converter.model.device, "cpu")
+
+    def test_deadline_stays_above_a_slow_pcs_conversions(self):
+        from yuragi.ime.lm_async import deadline_ms
+        self.gpus = ()
+        slow = self.build(self.CPU_INSTALL, {("cpu", "small"): 180})
+        # Typing sentences took up to about 5.5 times the calibration (lm_async).
+        self.assertGreater(deadline_ms(slow), 5.5 * 180)
 
 
 if __name__ == "__main__":

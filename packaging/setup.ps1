@@ -1,23 +1,34 @@
 ﻿# ゆらぎのインストールと更新。手順は DESIGN「インストール・更新・アンインストール」
 #
-#   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Yes]
+#   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Yes] [-Cpu]
+#
+# -AssetDir: リリースのアセット (DLL・ブローカー・ソース zip・tkinter と各 .sha256) を GitHub からではなく
+#   このフォルダから取る (公開前の版を実機で試すため。照合は同じ)。
+# -Cpu: NVIDIA の GPU があっても CPU 版の PyTorch を使う (GPU のドライバが不安定な PC など)。
 #
 # インストールも更新も同じ手順。どこで失敗しても「前の版が動く」か「新しい版が動く」の
 # どちらか (DESIGN「守ること」6)。利用者のデータ (%USERPROFILE%\.yuragi-ime) は消さない (同 7)。
 
 param(
-    [switch]$Yes
+    [switch]$Yes,
+    [switch]$Cpu,
+    [string]$AssetDir = ""
 )
 
 # PowerShell 7 (pwsh) から起動されたら、Windows PowerShell 5.1 で起動し直す。
 if ($PSVersionTable.PSEdition -eq "Core") {
     $relaunch = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
     if ($Yes) { $relaunch += "-Yes" }
+    if ($Cpu) { $relaunch += "-Cpu" }
+    if ($AssetDir) { $relaunch += @("-AssetDir", $AssetDir) }
     & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @relaunch
     exit $LASTEXITCODE
 }
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 の Invoke-WebRequest は進行表示を描くたびに遅くなる (数十 MB で数分)。
+$ProgressPreference = "SilentlyContinue"
+if ($AssetDir) { $AssetDir = (Resolve-Path -LiteralPath $AssetDir).Path }
 # この中で動かす Python は UTF-8 で入出力する (このプロセスの中だけ)。
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
@@ -60,12 +71,13 @@ function Invoke-Checked([string]$name, [scriptblock]$body) {
 }
 
 # PyTorch の版の選び方 (torch 2.9.1 の CUDA 版の配布物に合わせる)。nvidia-smi の出力から決める。
-#   $SmiHeader: nvidia-smi の通常の出力 ("CUDA Version: 12.8" = ドライバが扱える CUDA の上限)
+#   $SmiHeader: nvidia-smi の通常の出力 ("CUDA Version: 12.8" = ドライバが扱える CUDA の上限。
+#               ドライバ 610 系からは "CUDA UMD Version: 13.3")
 #   $SmiGpus:   nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader の行
 # cu128 は Volta より前の GPU を含まないので Turing (7.5) 以降に限る。cu126 は Pascal (6.0) から。
 # 判定できないものは CPU 版。CUDA 版でも、エンジンは GPU で計算できなければ CPU で動く。
 function Select-TorchVariant([string]$SmiHeader, [string[]]$SmiGpus) {
-    if ($SmiHeader -notmatch "CUDA Version:\s*(\d+)\.(\d+)") { return "cpu" }
+    if ($SmiHeader -notmatch "CUDA (?:UMD )?Version:\s*(\d+)\.(\d+)") { return "cpu" }
     $cuda = [int]$Matches[1] * 100 + [int]$Matches[2]
     $variant = "cpu"
     foreach ($line in $SmiGpus) {
@@ -79,6 +91,8 @@ function Select-TorchVariant([string]$SmiHeader, [string[]]$SmiGpus) {
 }
 
 # この PC の NVIDIA GPU を nvidia-smi (NVIDIA のドライバに付属) で調べる。無ければ CPU 版。
+# ドライバはあるのに GPU が見えない (ノート PC で GPU を切っている、など) ときは $script:GpuOff。
+$script:GpuOff = $false
 function Get-TorchVariant {
     $smi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
     if (-not $smi) {
@@ -91,9 +105,9 @@ function Get-TorchVariant {
     $ErrorActionPreference = "Continue"
     try {
         $header = (& $smi 2>$null) -join "`n"
-        if ($LASTEXITCODE -ne 0) { return "cpu" }
+        if ($LASTEXITCODE -ne 0) { $script:GpuOff = $true; return "cpu" }
         $gpus = @(& $smi "--query-gpu=name,compute_cap" "--format=csv,noheader" 2>$null)
-        if ($LASTEXITCODE -ne 0) { return "cpu" }
+        if ($LASTEXITCODE -ne 0 -or -not $gpus.Count) { $script:GpuOff = $true; return "cpu" }
     } catch { return "cpu" }
     return (Select-TorchVariant $header $gpus)
 }
@@ -118,12 +132,17 @@ if ($os.Major -lt 10) { Fail "Windows 10 以降が必要です (この PC: $os)�
 $free = (Get-PSDrive ($env:LOCALAPPDATA.Substring(0, 1))).Free
 if ($free -lt 3GB) { Fail "ディスクの空きが不足しています (必要: 3GB、空き: $([math]::Round($free / 1GB, 1))GB)。" }
 Say "  Windows $($os.Major).$($os.Minor) 64bit、ディスク空き $([math]::Round($free / 1GB, 1))GB  OK"
-$TorchVariant = Get-TorchVariant
-if ($TorchVariant -ne "cpu" -and $free -lt 10GB) {
+$TorchVariant = if ($Cpu) { "cpu" } else { Get-TorchVariant }
+if ($Cpu) {
+    Say "  -Cpu: CPU 版 PyTorch を使います"
+} elseif ($TorchVariant -ne "cpu" -and $free -lt 10GB) {
     Say "  CUDA 対応の GPU がありますが、GPU 版 PyTorch にはディスクの空きが 10GB 要るため CPU 版を使います"
     $TorchVariant = "cpu"
 } elseif ($TorchVariant -ne "cpu") {
     Say "  CUDA 対応の GPU があります: GPU 版 PyTorch ($TorchVariant) を使います"
+} elseif ($script:GpuOff) {
+    Say "  NVIDIA のドライバはありますが、GPU が見えません (GPU を切る設定になっているなど): CPU 版 PyTorch を使います"
+    Say "  GPU を使うには、GPU を有効にしてから、もう一度インストールの 1 行を実行してください"
 } else {
     Say "  CUDA 対応の GPU はありません: CPU 版 PyTorch を使います"
 }
@@ -139,12 +158,19 @@ if ($TorchVariant -eq "cpu") {
 }
 Say "  transformers・huggingface_hub ほか (PyPI)"
 Say "  Mozc 辞書 (github.com/google/mozc、約 93MB)"
-Say "  言語モデル zenz-v2.5-medium (huggingface.co、約 620 MB)"
+Say "  言語モデル zenz-v2.5-small (CPU 用、huggingface.co、約 170MB)"
+if ($TorchVariant -ne "cpu") { Say "  言語モデル zenz-v2.5-medium (GPU 用、huggingface.co、約 620MB)" }
 if (-not (Ask "続行しますか?")) { Fail "キャンセルしました。" }
 
 function Get-Verified([string]$url, [string]$dest) {
-    Invoke-WebRequest -UseBasicParsing $url -OutFile $dest
-    $expected = (Invoke-WebRequest -UseBasicParsing "$url.sha256").Content
+    if ($AssetDir) {
+        $local = Join-Path $AssetDir ($url.Split("/")[-1])
+        Copy-Item -LiteralPath $local -Destination $dest
+        $expected = [IO.File]::ReadAllText("$local.sha256")
+    } else {
+        Invoke-WebRequest -UseBasicParsing $url -OutFile $dest
+        $expected = (Invoke-WebRequest -UseBasicParsing "$url.sha256").Content
+    }
     if ($expected -is [byte[]]) { $expected = [Text.Encoding]::ASCII.GetString($expected) }
     $expected = $expected.Trim().ToLower()
     $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower()
@@ -175,7 +201,7 @@ function Write-EngineJson([string]$path, [string]$app, [string[]]$extra) {
         pythonw = (Join-Path (Split-Path $script:Python) "pythonw.exe")
         app = $app
         args = @("-c", $Boot, "yuragi.engine", "--dict-dir", $script:Dict,
-                 "--cache-dir", $script:Cache, "--lm-model", $script:Model) + $extra
+                 "--cache-dir", $script:Cache) + $script:ModelArgs + $extra
         admin_args = @("-c", $Boot, "yuragi.ime.admin_ui", "--dict-dir", $script:Dict)
     }
     [IO.File]::WriteAllText($path, ($engine | ConvertTo-Json -Depth 4), $Utf8NoBom)
@@ -254,13 +280,29 @@ New-Shared $script:Dict {
         Invoke-App $script:Python $StageApp @("yuragi.lattice.dict_manifest", "verify", "--dict-dir", $dir)
     }
 }
-$revision = (Select-String -LiteralPath (Join-Path $StageApp "packaging\fetch_model.py") -Pattern '^REVISION = "([0-9a-f]+)"').Matches[0].Groups[1].Value
-$script:Model = Join-Path $Shared "model\$revision"
-New-Shared $script:Model {
-    param($dir)
-    Invoke-Checked "言語モデルのダウンロード (Miwa-Keita/zenz-v2.5-medium)" {
-        & $script:Python (Join-Path $StageApp "packaging\fetch_model.py") $dir
-    }
+# 言語モデル (CONVERSION「装置とモデル」): CPU 用の small は常に、GPU 版 PyTorch なら GPU 用の medium も。
+# どれを使うかは、エンジンが起動のたびに実測して決める。
+# 引数名は $modelName: 中で呼ぶ Invoke-Checked の $name に隠されないように。
+# 引数名は $modelName: 中で呼ぶ Invoke-Checked の $name に隠されないように。
+function Get-Model([string]$modelName) {
+    $line = Select-String -LiteralPath (Join-Path $StageApp "packaging\fetch_model.py") -Pattern "^MODEL_$modelName = \(`"([^`"]+)`", `"([0-9a-f]+)`"\)"
+    if (-not $line) { Fail "packaging\fetch_model.py に MODEL_$modelName がありません。" }
+    $repo = $line.Matches[0].Groups[1].Value
+    $dir = Join-Path $Shared "model\$($line.Matches[0].Groups[2].Value)"
+    New-Shared $dir {
+        param($partial)
+        Invoke-Checked "言語モデルのダウンロード ($repo)" {
+            & $script:Python (Join-Path $StageApp "packaging\fetch_model.py") $modelName $partial
+        }
+    } | Out-Host   # the download's output must not become this function's value
+    return $dir
+}
+$script:Models = @(Get-Model "small")
+$script:ModelArgs = @("--lm-cpu-model", $script:Models[0])
+if ($TorchVariant -ne "cpu") {
+    $medium = Get-Model "medium"
+    $script:Models += $medium
+    $script:ModelArgs = @("--lm-model", $medium) + $script:ModelArgs
 }
 $script:Cache = Join-Path $Shared "cache"
 New-Item -ItemType Directory -Force $script:Cache | Out-Null
@@ -395,9 +437,9 @@ New-Item -ItemType Directory -Force $UserData | Out-Null
 $maintenance.ReleaseMutex()
 $maintenance.Dispose()
 Say ""
-Say "== 起動確認 (最大 60 秒)"
+Say "== 起動確認 (最大 120 秒)"
 Start-Process -FilePath $BrokerFinal
-$deadline = (Get-Date).AddSeconds(60)
+$deadline = (Get-Date).AddSeconds(120)
 $state = ""
 $conn = $null
 while ((Get-Date) -lt $deadline -and -not $conn) { $conn = Connect-Broker 1000 }
@@ -412,7 +454,7 @@ if ($conn) {
     $conn.Pipe.Dispose()
 }
 if ($state -ne "ready") {
-    $why = @{ starting = '60 秒以内に起動しませんでした'; down = '起動に失敗しました' }[$state]
+    $why = @{ starting = '120 秒以内に起動しませんでした'; down = '起動に失敗しました' }[$state]
     if (-not $why) { $why = '応答がありません' }
     Write-Host "エラー: 変換エンジンが起動しませんでした ($why)。" -ForegroundColor Red
     Write-Host "ログ: $(Join-Path $UserData 'logs')。次回サインイン時にも起動を試みます。"
@@ -422,7 +464,7 @@ Say "  変換エンジン  OK"
 
 # ---------------------------------------------------------------- 8 片付け
 # 失敗はインストールの失敗にしない。次回の setup がまた試す。
-$keep = @($Runtime, $script:Dict, $script:Model)
+$keep = @($Runtime, $script:Dict) + $script:Models
 $cacheName = ""
 try {
     Push-Location -LiteralPath $App

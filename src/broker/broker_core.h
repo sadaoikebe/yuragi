@@ -19,6 +19,10 @@ namespace broker {
 constexpr int ENGINE_MAX_EXITS = 3;  // this many exits within the window: stop
 constexpr int64_t ENGINE_EXIT_WINDOW_MS = 600000;
 constexpr int64_t ENGINE_HANG_MS = 5000;
+// An engine that was ready and exits with this code asks to be started again
+// (DESIGN「見張り」: it chooses its LM device again, e.g. after the power source
+// changed). Such an exit is not counted towards ENGINE_MAX_EXITS.
+constexpr int ENGINE_RESTART_CODE = 75;
 constexpr int64_t NEVER = INT64_MAX;
 
 using ClientId = uint64_t;

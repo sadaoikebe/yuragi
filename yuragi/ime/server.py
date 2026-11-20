@@ -31,6 +31,7 @@ from pathlib import Path
 from yuragi.ime.session import ImeSession
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
+from yuragi.ime import power
 from yuragi.ime.config import DEFAULTS, SETTINGS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
 from yuragi.ime.zenz import CONTEXT_CHARS
@@ -128,6 +129,8 @@ def argument_parser() -> argparse.ArgumentParser:
                     help="convert without the LM (the engine's default is with it)")
     lm.add_argument("--lm-model", default=None,
                     help="HF model id or local directory (default Miwa-Keita/zenz-v2.5-medium)")
+    lm.add_argument("--lm-cpu-model", action="append", default=None,
+                    help="model for the CPU, tried in order (repeat; default --lm-model)")
     lm.add_argument("--lm-alpha", type=float, default=None,
                     help="weight of zenz's reading NLL (default 1)")
     lm.add_argument("--lm-k", type=int, default=None,
@@ -147,7 +150,7 @@ def argument_parser() -> argparse.ArgumentParser:
     lm.add_argument("--lm-deadline-ms", type=float, default=None,
                     help="engine: a conversion still waiting for the LM after this long is "
                          "taken as a fault: logged, and the Viterbi 1-best is used "
-                         "(default lm_async.DEADLINE_MS)")
+                         "(default: from the LM's calibration, lm_async.deadline_ms)")
     lm.add_argument("--lm-grace-ms", type=float, default=None,
                     help="engine: how long the converting request waits for the LM "
                          "(default lm_async.GRACE_MS)")
@@ -156,17 +159,45 @@ def argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_converter(args, *, warm_conversion=None):
-    """Return the first converter that completes placement and warm-up."""
-    from yuragi.ime.zenz import (DEFAULT_ALPHA, DEFAULT_K, DEFAULT_MODEL, DEFAULT_STEPS,
-                                DEFAULT_THREADS, REVIEW_BUDGET_MS, ZenzConverter, ZenzModel,
-                                cuda_devices)
+class LmTooSlow(RuntimeError):
+    """Every device/model took longer than the calibration limit: convert without the LM."""
+
+
+def lm_candidates(args) -> list[tuple[str, str]]:
+    """(device, model) in the order they are tried (CONVERSION「装置とモデル」).
+
+    Each CUDA device with --lm-model (none on battery), then the CPU with each --lm-cpu-model
+    (with --lm-model if none is given). --lm-device: that device and --lm-model only."""
+    from yuragi.ime.zenz import DEFAULT_MODEL, cuda_devices
+
+    model = args.lm_model or DEFAULT_MODEL
+    device = getattr(args, "lm_device", None)
+    if device is not None:
+        return [(device, model)]
+    cpu_models = getattr(args, "lm_cpu_model", None) or [model]
+    # On battery the GPU is not even asked: a CUDA context keeps a laptop's GPU awake.
+    gpus = [] if power.on_battery() else cuda_devices()
+    return [(d, model) for d in gpus] + [("cpu", m) for m in cpu_models]
+
+
+def build_converter(args, *, warm_conversion=None, calibration=None, log=None):
+    """Return the first converter that completes placement and warm-up and, given
+    calibration(converter) -> ms, whose time is within the calibration limit.
+
+    The last candidate's failure is raised; LmTooSlow if none was fast enough."""
+    from yuragi.ime.zenz import (CALIBRATION_LIMIT_MS, DEFAULT_ALPHA, DEFAULT_K, DEFAULT_STEPS,
+                                DEFAULT_THREADS, REVIEW_BUDGET_MS, ZenzConverter, ZenzModel)
 
     budget = getattr(args, "lm_review_ms", None)
+    if log is None:
+        def log(message):
+            print(message, file=sys.stderr, flush=True)
+    # A developer's --require-lm takes the last candidate however slow it is.
+    keep_last = getattr(args, "require_lm", False)
 
-    def prepare(device):
+    def prepare(device, model):
         converter = ZenzConverter(
-            ZenzModel(args.lm_model or DEFAULT_MODEL,
+            ZenzModel(model,
                       threads=DEFAULT_THREADS if args.lm_threads is None else args.lm_threads,
                       device=device),
             alpha=DEFAULT_ALPHA if args.lm_alpha is None else args.lm_alpha,
@@ -180,18 +211,28 @@ def build_converter(args, *, warm_conversion=None):
             warm_conversion(converter)
         return converter
 
-    device = getattr(args, "lm_device", None)
-    if device is not None:
-        return prepare(device)
-    for device in cuda_devices():
+    candidates = lm_candidates(args)
+    for index, (device, model) in enumerate(candidates):
+        last = index == len(candidates) - 1
+        name = Path(model).name or model
         try:
-            return prepare(device)
+            converter = prepare(device, model)
         except Exception as exc:
-            print(f"LM startup failed on {device} ({type(exc).__name__})",
-                  file=sys.stderr, flush=True)
-        # Collect cycles from the failed model before trying a fresh one.
+            if last:
+                raise
+            log(f"LM startup failed: {name} on {device} ({type(exc).__name__})")
+        else:
+            if calibration is None:
+                return converter
+            ms = converter.calibration_ms = calibration(converter)
+            log(f"LM calibration: {name} on {device}: {ms:.0f} ms")
+            if ms <= CALIBRATION_LIMIT_MS or (keep_last and last):
+                return converter
+            log(f"LM too slow: {name} on {device} (limit {CALIBRATION_LIMIT_MS} ms)")
+            converter = None
+        # Collect cycles from the failed or rejected model before trying a fresh one.
         gc.collect()
-    return prepare("cpu")
+    raise LmTooSlow("no device and model within the calibration limit")
 
 
 def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:

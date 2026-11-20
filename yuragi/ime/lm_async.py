@@ -7,8 +7,9 @@ awaiting; the request waits at most GRACE_MS for the worker, otherwise replies
 queued in order and replayed once the LM picks resolve the conversion, so the
 result equals the synchronous one.
 
-A conversion waits for the LM: its picks are the conversion. DEADLINE_MS is
-not a quality cut but a fault detector, set above every normal conversion; a
+A conversion waits for the LM: its picks are the conversion. The deadline
+(deadline_ms(): DEADLINE_MS, or more for a slower machine's LM) is not a quality
+cut but a fault detector, set above every normal conversion; a
 conversion that reaches it (a stuck or broken LM) is logged and takes the
 Viterbi 1-best so that typing goes on.
 """
@@ -27,12 +28,14 @@ from .session import ConversionRequest, ImeSession
 from .zenz import KanaRun
 
 GRACE_MS = 0
-# Windows (zenz medium, CPU 4 threads, k 4, 1 review; Sadao 2026-11-19): median
-# about 340 ms, 95th percentile 369 ms; CUDA median 30 ms. About 180% of the
-# CPU median: no normal conversion reaches it. Since reviews repeat until the
-# draft passes, those after a run's first stop at zenz.REVIEW_BUDGET_MS, which
-# keeps a conversion under this.
+# The least deadline (a fast LM, e.g. on a GPU: median about 30 ms). Reviews
+# after a run's first stop at zenz.REVIEW_BUDGET_MS, which keeps a conversion
+# under the deadline.
 DEADLINE_MS = 600
+# The deadline scales with the machine (zenz.calibrate): typing sentences, a
+# conversion took up to about 5.5 times the calibration time (small on a CPU,
+# 2026-11-20), so a normal one stays under it on a slow PC too.
+DEADLINE_CALIBRATIONS = 10
 REQUIRED_LM_DEADLINE_MS = 10_000
 POLL_MS = 10
 PREFETCH_DELAY_MS = 30
@@ -74,6 +77,7 @@ class LmWorker:
         self._slots: dict[int, Job] = {}  # id(owner) -> queued prefetch
         self._running: Job | None = None
         self._stopped = False
+        self.failures = 0  # jobs that raised (a GPU that went away, say)
         self.thread = threading.Thread(target=self._run, name="lm-worker", daemon=True)
         self.thread.start()
 
@@ -201,12 +205,14 @@ class LmWorker:
                 return job
 
     def _execute(self, job: Job) -> None:
+        converter = replace(self.template, last={})
         try:
             job.picks = job.request.decode(
-                self.lex, replace(self.template, last={}), cancelled=lambda: job.cancelled)
+                self.lex, converter, cancelled=lambda: job.cancelled)
         except Exception as exc:
             # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True
+            self.failures += 1
             print(f"LM job failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         with self._cond:
             with job.completion_lock:
@@ -217,7 +223,17 @@ class LmWorker:
             print(f"LM worker job={id(job)} submitted={job.submitted_at:.6f} "
                   f"eligible={max(job.submitted_at, job.not_before):.6f} "
                   f"started={job.started_at:.6f} completed={job.completed_at:.6f} "
-                  f"cancelled={job.cancelled} error={job.error}", file=sys.stderr, flush=True)
+                  f"cancelled={job.cancelled} error={job.error} wanted={job.wanted} "
+                  f"stats={ {k: round(v) for k, v in converter.last.items()} }",
+                  file=sys.stderr, flush=True)
+
+
+def deadline_ms(converter) -> float:
+    """The fault deadline for this machine's LM (DEADLINE_MS at least)."""
+    calibration = getattr(converter, "calibration_ms", None)
+    if calibration is None:
+        return DEADLINE_MS
+    return max(DEADLINE_MS, DEADLINE_CALIBRATIONS * calibration)
 
 
 PENDING = object()
@@ -227,7 +243,7 @@ class ConnectionPipeline:
     """Per connection. Called with the server's dispatch lock held."""
 
     def __init__(self, sess: ImeSession, worker, *,
-                 grace_ms: float = GRACE_MS, deadline_ms: float = DEADLINE_MS,
+                 grace_ms: float = GRACE_MS, deadline_ms: float | None = DEADLINE_MS,
                  poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | off
                  prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic,
                  require_lm: bool = False, timing: bool = False):
@@ -300,7 +316,10 @@ class ConnectionPipeline:
     def _submit_convert(self) -> None:
         request = self.sess._await
         wanted_at = self.clock()
-        deadline = wanted_at + self.deadline_ms / 1000
+        limit = self.deadline_ms
+        if limit is None:  # from the LM's calibration (the worker is ready here)
+            limit = deadline_ms(self.worker.template)
+        deadline = wanted_at + limit / 1000
         spec = self.spec
         if (spec is not None and not spec.cancelled and not spec.error
                 and spec.request.key == request.key):
@@ -339,7 +358,7 @@ class ConnectionPipeline:
         self._trace_resolution(job, now, "deadline")
         if self.require_lm:
             raise TimeoutError("LM conversion timed out")
-        print(f"LM conversion not done after {self.deadline_ms:.0f} ms (fault); "
+        print(f"LM conversion not done after {1000 * (job.deadline - job.wanted_at):.0f} ms (fault); "
               "dictionary 1-best used", file=sys.stderr, flush=True)
         return None
 
@@ -353,6 +372,13 @@ class ConnectionPipeline:
         sess = self.sess
         if sess._await is not None or not self.worker.available():
             return
+        if sess.fsm.state != "S3" and self.spec is not None:
+            # The thumb press became a chord (or the input changed otherwise): the
+            # prefetch is for an input that will not be converted. Free the worker
+            # for the next one instead of finishing it.
+            self.worker.cancel_owner(self)
+            self.spec = None
+            self.spec_key = None
         if self.prefetch == "off" or sess.converted or not sess.tokens:
             return
         if sess.fsm.state != "S3":

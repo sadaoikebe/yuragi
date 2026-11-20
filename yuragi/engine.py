@@ -36,6 +36,14 @@ import traceback
 
 PROTO = 1
 MAX_TOKENS = 200  # DESIGN「定数」: the input length a conversion handles
+# DESIGN「見張り」: exiting with this code after ready asks the broker to start the
+# engine again without counting it as a failure (broker_core.h ENGINE_RESTART_CODE).
+RESTART_CODE = 75
+# CONVERSION「装置とモデル」: when the LM device should change (power source, a GPU
+# that failed), the engine restarts once nobody has typed for this long.
+IDLE_BEFORE_RESTART_S = 60
+POWER_POLL_S = 15
+GPU_FAILURES_BEFORE_RESTART = 2
 DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
 # Warm-up input (DESIGN「暖機」): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
@@ -61,13 +69,22 @@ def where(exc: BaseException) -> str:
 
 
 class Channel:
-    """The engine's half of the pipe: the real stdout, reserved for messages.
+    """The engine's half of the pipe: the real stdin and stdout, reserved for messages.
 
     Python's sys.stdout (and file descriptor 1) point at stderr instead, so a
-    library that prints cannot corrupt the protocol.
+    library that prints cannot corrupt the protocol. The standard input becomes
+    NUL: on Windows, while this process waits on a synchronous read of the
+    pipe, loading a DLL that looks at the standard input (numpy's OpenBLAS,
+    when torch is imported on the LM worker) stalls until the next message
+    arrives, which, with nobody typing, can be indefinitely.
     """
 
     def __init__(self):
+        self.input = os.fdopen(os.dup(0), "rb")
+        null = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(null, 0)  # also the process's standard input handle (Windows)
+        os.close(null)
+        sys.stdin = open(os.devnull, encoding="utf-8")
         self._out = os.fdopen(os.dup(1), "wb", buffering=0)
         os.dup2(2, 1)
         sys.stdout = sys.stderr
@@ -111,7 +128,11 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-dir", type=Path, default=None,
                         help="where the dictionary cache is kept (default data/cache)")
     parser.add_argument("--lm-model", default=None,
-                        help="the installed LM model directory (engine.json)")
+                        help="the installed LM model directory for a GPU (engine.json); "
+                             "also for the CPU without --lm-cpu-model")
+    parser.add_argument("--lm-cpu-model", action="append", default=None,
+                        help="an installed LM model directory for the CPU, in the order "
+                             "they are tried (repeat; engine.json)")
     parser.add_argument("--lm-grace-ms", type=float, default=None,
                         help="override the LM wait for latency comparisons")
     parser.add_argument("--lm-timing", action="store_true",
@@ -169,6 +190,9 @@ class Engine:
         self.loaded = None
         self.worker = None
         self.settings = None
+        self.lock = threading.Lock()  # one request at a time, or the restart
+        self.last_request = time.monotonic()
+        self.lm_on_battery = False  # the power source when the LM device was chosen
 
     # -- startup -----------------------------------------------------------------
     def load(self, args: argparse.Namespace) -> None:
@@ -229,6 +253,7 @@ class Engine:
         settings.learning_file = args.data_dir / "learning.jsonl"
         settings.personal_file = args.data_dir / "personal_lexicon.jsonl"
         settings.lm_model = args.lm_model
+        settings.lm_cpu_model = args.lm_cpu_model
         settings.lm_grace_ms = args.lm_grace_ms
         settings.lm_timing = args.lm_timing
         for key, value in config.load(args.data_dir / config.CONFIG_NAME).items():
@@ -240,7 +265,9 @@ class Engine:
 
     def load_lm(self, server, settings, warm):
         """Load and run a sample conversion on the LM worker (DESIGN「暖機」)."""
+        from yuragi.ime.power import on_battery
         start = time.perf_counter()
+        self.lm_on_battery = on_battery()
 
         def warm_conversion(converter):
             loaded = time.perf_counter()
@@ -248,7 +275,13 @@ class Engine:
             log(f"LM loaded on {converter.model.device} in {loaded - start:.1f} s; "
                 f"warm-up conversion {1000 * (time.perf_counter() - loaded):.0f} ms")
 
-        return server.build_converter(settings, warm_conversion=warm_conversion)
+        def calibration(converter):
+            from yuragi.ime.zenz import calibrate
+            from yuragi.lattice.table import reverse_table
+            return calibrate(converter, self.loaded._lex, reverse_table(self.loaded._table))
+
+        return server.build_converter(settings, warm_conversion=warm_conversion,
+                                      calibration=calibration, log=log)
 
     def lm_disabled(self) -> None:
         log("LM not used (it could not be loaded)")
@@ -292,13 +325,12 @@ class Engine:
     def new_pipeline(self, sess):
         if self.worker is None:
             return None
-        from yuragi.ime.lm_async import (ConnectionPipeline, DEADLINE_MS, GRACE_MS,
-                                     REQUIRED_LM_DEADLINE_MS)
+        from yuragi.ime.lm_async import ConnectionPipeline, GRACE_MS, REQUIRED_LM_DEADLINE_MS
         s = self.settings
         if s.require_lm:
             deadline = REQUIRED_LM_DEADLINE_MS
         else:
-            deadline = DEADLINE_MS if s.lm_deadline_ms is None else s.lm_deadline_ms
+            deadline = s.lm_deadline_ms  # None: from the LM's calibration
         grace = GRACE_MS if s.lm_grace_ms is None else s.lm_grace_ms
         return ConnectionPipeline(sess, self.worker, grace_ms=grace,
                                   deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
@@ -324,7 +356,53 @@ class Engine:
                 if connection is not None:
                     connection.close()
             else:
-                self.channel.send(self.request(msg))
+                with self.lock:
+                    self.last_request = time.monotonic()
+                    reply = self.request(msg)
+                self.channel.send(reply)
+
+    # -- choosing the LM device again (CONVERSION「装置とモデル」) ---------------------
+    def device_change(self) -> str | None:
+        """Why the LM should be loaded again on another device, or None."""
+        from yuragi.ime.power import on_battery
+        worker = self.worker
+        if worker is None or worker.state == "loading":
+            return None
+        template = worker.template
+        on_gpu = template is not None and str(template.model.device).startswith("cuda")
+        if on_gpu and worker.failures >= GPU_FAILURES_BEFORE_RESTART:
+            return "the LM failed on the GPU"
+        battery = on_battery()
+        if on_gpu and battery:
+            return "on battery: leaving the GPU"
+        if (not on_gpu and self.lm_on_battery and not battery
+                and self.settings.lm_model is not None):
+            return "on AC power: trying the GPU"
+        return None
+
+    def idle(self) -> bool:
+        """Nobody has typed for a while and no input is under way (caller holds the lock)."""
+        if time.monotonic() - self.last_request < IDLE_BEFORE_RESTART_S:
+            return False
+        for connection in self.connections.values():
+            sess = connection.sess
+            if sess.tokens or sess.converted or sess._await is not None:
+                return False
+        return True
+
+    def watch_device(self) -> None:
+        """Runs on its own thread: restarts the engine for another LM device, when idle."""
+        while True:
+            time.sleep(POWER_POLL_S)
+            reason = self.device_change()
+            if reason is None:
+                continue
+            with self.lock:
+                if not self.idle():
+                    continue
+                log(f"restarting: {reason}")
+                sys.stderr.flush()
+                os._exit(RESTART_CODE)
 
     def request(self, msg: dict) -> dict:
         """One request; whatever goes wrong inside stays inside this one (DESIGN「要求 1 件ごとの防壁」)."""
@@ -360,7 +438,9 @@ def main(argv=None) -> int:
     gc.freeze()  # the dictionary must not be traversed by full collections while typing
     channel.ready()
     log(f"ready in {time.perf_counter() - started:.2f} s")
-    engine.serve(sys.stdin.buffer)
+    if engine.worker is not None and not args.require_lm:
+        threading.Thread(target=engine.watch_device, name="lm-device", daemon=True).start()
+    engine.serve(channel.input)
     log("stdin closed; exiting")
     if engine.worker is not None:
         engine.worker.stop()
