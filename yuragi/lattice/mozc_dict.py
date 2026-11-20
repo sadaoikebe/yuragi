@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from array import array
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ from typing import Literal
 ROOT = Path(__file__).resolve().parents[2]
 DICT_DIR = ROOT / "third_party" / "mozc_oss_dict"
 MANIFEST = ROOT / "data" / "dictionary-manifest.json"
-CACHE_FORMAT = "mozc_lex_v4"
+CACHE_FORMAT = "mozc_lex_v5"
 
 
 def cache_name(manifest: Path = MANIFEST) -> str:
@@ -80,7 +81,7 @@ class Entry:
 class MozcLex:
     by_reading: dict[str, list[Entry]]
     prefixes: set[str]
-    connect: list[int]
+    connect: array  # int16
     pos_size: int
     numeral_pos: tuple[NumeralPos, ...] = ()  # IDs after the raw Mozc matrix
 
@@ -165,12 +166,12 @@ def _parse_dict_files() -> tuple[dict[str, list[Entry]], set[str]]:
     return by_reading, prefixes
 
 
-def _parse_connection() -> tuple[list[int], int]:
+def _parse_connection() -> tuple[array, int]:
     path = DICT_DIR / "connection_single_column.txt"
     with path.open(encoding="utf-8") as f:
         try:
             pos_size = int(f.readline().strip())
-            vals = [int(line) for line in f]
+            vals = array("h", map(int, f))
         except ValueError:
             raise DictionaryFormatError(f"{path.name}: not a number") from None
     expected = pos_size * pos_size
@@ -361,5 +362,5 @@ def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:
         for start in range(0, len(lex.connect), lex.pos_size):
             end = start + lex.pos_size
             if not any(lex.connect[start:end]):
-                lex.connect[start:end] = [penalty] * lex.pos_size
+                lex.connect[start:end] = array("h", [penalty]) * lex.pos_size
     return lex
