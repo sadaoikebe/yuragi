@@ -1,6 +1,8 @@
-"""zenz review: the shared review budget, and reuse of the previous draft's KV."""
+"""zenz review: the shared review budget, the model's fixes no path can write,
+and reuse of the previous draft's KV."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 import math
 from types import SimpleNamespace
 import unittest
@@ -25,7 +27,7 @@ class Disagrees:
     def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
-    def review(self, context, reading, draft, accepted):
+    def review(self, context, reading, draft, accepted, reachable):
         self.calls.append(reading)
         wanted = self.wanted.setdefault(
             reading, next(o for o in self.options[reading] if o != draft))
@@ -44,6 +46,29 @@ class ReviewBudgetTest(unittest.TestCase):
         self.assertIsNotNone(s.conversion_request().decode(s._lex, s.lm))
         self.assertEqual(model.calls, ["げんこうの", "こうせい"])
         self.assertEqual(s.lm.last["cut"], 2)
+
+
+class ReachTest(unittest.TestCase):
+    def test_an_unreachable_token_gives_way_to_the_next(self):
+        """Per position, the model's best tokens in order, down to the draft's own."""
+        model = ZenzModel.__new__(ZenzModel)
+        model.torch = SimpleNamespace(inference_mode=nullcontext)
+        model.tok = SimpleNamespace(encode=lambda text, *, add_special_tokens: list(map(ord, text)))
+        model.bytes = {ord(c): c.encode() for c in "あいうかきえ"}
+        model.eos = 0
+        a, i, u, ka, ki, e = map(ord, "あいうかきえ")
+        for name, ranked, reachable, fix in (
+            ("the 2nd token", [[a], [ka, ki, i], [u]], {"あき"}, ("あき", False)),
+            ("</s>, then the 2nd", [[a], [0, ka], [u]], {"あか"}, ("あか", False)),
+            ("none before the draft's token: on to the next position",
+             [[a], [ka, i, ki], [e, u]], {"あき", "あいえ"}, ("あいえ", False)),
+        ):
+            with self.subTest(name):
+                model._guesses = lambda text, ids: ranked
+                self.assertEqual(
+                    model.review("", "あいう", "あいう", b"",
+                                 lambda prefix, exact: prefix.decode() in reachable),
+                    (fix[0].encode(), fix[1]))
 
 
 def load_model():
