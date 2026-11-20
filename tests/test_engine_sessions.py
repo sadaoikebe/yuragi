@@ -76,7 +76,7 @@ class SlowModel:
     def __init__(self, sleep=0.1):
         self.sleep = sleep
 
-    def reading_nll(self, readings):
+    def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
     def review(self, context, reading, draft, accepted):

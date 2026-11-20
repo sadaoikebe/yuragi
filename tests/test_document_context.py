@@ -36,7 +36,7 @@ class Reviewer:
     def __init__(self):
         self.calls = []
 
-    def reading_nll(self, readings):
+    def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
     def review(self, context, reading, draft, accepted):

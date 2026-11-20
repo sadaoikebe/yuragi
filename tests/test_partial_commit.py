@@ -5,11 +5,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from yuragi.chord.fsm import Plain
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
+from yuragi.ime.zenz import ZenzConverter
+from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 
@@ -163,6 +166,34 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(reply["commit"], "家")
         self.assertEqual(self.surfaces(reply), ["出る"])
         self.assertEqual(reply["segments"][0]["reading"], "でる")
+
+        model = Mock()
+        model.reading_nll.return_value = [0.0, 10.0]
+        model.review.return_value = None
+        k.s.lm = ZenzConverter(model)
+        k.tap(0x1B)  # cancel conversion and decode the remaining chords again
+        reply = k.convert()
+        self.assertEqual(reply["segments"][0]["reading"], "でる")
+        model.reading_nll.assert_called_once_with("家", ["でる", "でぐ"])
+        model.review.assert_called_once_with("家", "でる", "出る", b"")
+
+    def test_lm_only_compares_readings_that_alternate_within_one_press(self):
+        words = {
+            reading: [Entry(surface, reading, 1, 1, cost)]
+            for reading, surface, cost in (
+                ("えが", "絵画", 200), ("がえ", "替え", 300),
+                ("ええ", "ええ", 100), ("がが", "画が", 100),
+            )
+        }
+        model = Mock()
+        model.reading_nll.return_value = [5.0, 0.0]
+        model.review.return_value = None
+        lex = MozcLex(words, set(words) | {"え", "が"}, [0] * 4, 2)
+        k = Keys(ImeSession(_lex=lex, _table=load_table(), lm=ZenzConverter(model)))
+        k.chords("w", "w")
+        reply = k.convert()
+        self.assertEqual((reply["segments"][0]["reading"], reply["composition"]), ("がえ", "替え"))
+        model.reading_nll.assert_called_once_with("", ["えが", "がえ"])
 
 
 if __name__ == "__main__":

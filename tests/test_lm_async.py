@@ -16,7 +16,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from yuragi.chord.fsm import Plain
+from yuragi.chord.fsm import AmbShift, Plain
 from yuragi.chord.keys import VK_TO_M
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
@@ -37,7 +37,7 @@ VK_SPACE, VK_RETURN = 0x20, 0x0D
 class PickyModel:
     """Deterministic, context-dependent zenz stand-in that often overrides the 1-best."""
 
-    def reading_nll(self, readings):
+    def reading_nll(self, context, readings):
         return [sum(ord(ch) % 7 for ch in r) * 0.7 for r in readings]
 
     def review(self, context, reading, draft, accepted):
@@ -184,14 +184,16 @@ class LearnedContextTest(unittest.TestCase):
                 lex = MozcLex({
                     "か": [Entry("科", "か", 1, 1, 100), Entry("課", "か", 1, 1, 300)],
                     "い": [Entry("胃", "い", 1, 1, 100)],
-                }, {"か", "い"}, [0] * 4, 2)
+                    "ち": [Entry("地", "ち", 1, 1, 800)],
+                }, {"か", "い", "ち"}, [0] * 4, 2)
                 learning = LearningStore(Path(directory) / "learning.jsonl")
                 learning.confirm([Candidate("課", "か", 0, 1, 1, word_cost=300)], lex)
-                session = ImeSession(_lex=lex, _learning=learning, _table={
-                    "keys": {"K": {"plain": "か"}, "I": {"plain": "い"}},
+                session = ImeSession(_lex=lex, _learning=learning, _lm_context="本文", _table={
+                    "keys": {"K": {"plain": "か"}, "I": {"left": "い", "right": "ち"}},
                 })
-                session.tokens = [Plain("K"), Literal("、"), Plain("I")]
+                session.tokens = [Plain("K"), Literal("、"), AmbShift("I")]
                 model = Mock()
+                model.reading_nll.return_value = [5.0, 0.0]
                 model.review.return_value = None
                 events = Typist().space().events
                 if deferred:
@@ -210,8 +212,9 @@ class LearnedContextTest(unittest.TestCase):
                     for event in events:
                         reply = dispatch(session, event)
                 self.assertTrue(reply["converted"])
+                model.reading_nll.assert_called_once_with("本文課、", ["い", "ち"])
                 self.assertEqual((reply["composition"], model.review.call_args_list[-1].args[:2]),
-                                 ("課、胃", ("課、", "い")))
+                                 ("課、地", ("本文課、", "ち")))
 
 
 class DeadlineTest(unittest.TestCase):
