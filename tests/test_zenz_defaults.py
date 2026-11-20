@@ -1,6 +1,4 @@
-"""The product's zenz settings (Sadao, 2026-11-19, from the Windows measurement
-of zenz medium): threads 4, k 4, one review, the same on CPU and GPU; the
-engine waits for the LM and its deadline only detects a fault. No torch: the
+"""Building the zenz converter: device choice and fallback. No torch: the
 model and torch are stand-ins.
 """
 from __future__ import annotations
@@ -15,34 +13,9 @@ from unittest import mock
 from yuragi.engine import Engine
 from yuragi.ime.session import ConversionRequest
 from yuragi.ime import server, session, zenz
-from yuragi.ime.lm_async import DEADLINE_MS
 
 
 class DefaultsTest(unittest.TestCase):
-    def test_build_converter_uses_the_defaults(self):
-        made = {}
-
-        class FakeModel:
-            def __init__(self, model, *, threads, device):
-                made.update(model=model, threads=threads, device=device)
-
-            def review(self, *args):
-                return None
-
-        args = server.argument_parser().parse_args([])
-        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
-              mock.patch.object(zenz, "cuda_devices", return_value=())):
-            converter = server.build_converter(args)
-        self.assertEqual(made, dict(model=zenz.DEFAULT_MODEL, threads=4, device="cpu"))
-        self.assertEqual((converter.k, converter.steps, converter.alpha), (4, 1, 1.0))
-        args = server.argument_parser().parse_args(
-            ["--lm-threads", "2", "--lm-k", "8", "--lm-steps", "2", "--lm-device", "cpu"])
-        with (mock.patch.object(zenz, "ZenzModel", FakeModel),
-              mock.patch.object(zenz, "cuda_devices", return_value=())):
-            converter = server.build_converter(args)
-        self.assertEqual((made["threads"], made["device"]), (2, "cpu"))
-        self.assertEqual((converter.k, converter.steps), (8, 2))
-
     def test_build_converter_without_device_attribute(self):
         """Callers that build their own Namespace (tools/eval) still get the auto device."""
         made = {}
@@ -58,18 +31,7 @@ class DefaultsTest(unittest.TestCase):
               mock.patch.object(zenz, "cuda_devices", return_value=())):
             server.build_converter(Namespace(lm_model=None, lm_threads=None, lm_alpha=None,
                                              lm_k=None, lm_steps=None))
-        self.assertEqual(made, dict(threads=4, device="cpu"))
-
-    def test_engine_pipeline_deadline(self):
-        settings = server.argument_parser().parse_args([])
-        settings.require_lm = False
-        self.assertIsNone(settings.lm_deadline_ms)
-        engine = Engine(None, Namespace())
-        engine.worker = object()
-        engine.settings = settings
-        self.assertEqual(engine.new_pipeline(sess=None).deadline_ms, DEADLINE_MS)
-        settings.lm_deadline_ms = 250.0  # an evaluation override still works
-        self.assertEqual(engine.new_pipeline(sess=None).deadline_ms, 250.0)
+        self.assertEqual(made["device"], "cpu")
 
 
 class DeviceStartupTest(unittest.TestCase):

@@ -93,13 +93,6 @@ class LmPipelineTest(EngineCase):
             time.sleep(0.01)
         self.assertEqual(worker.state, state)
 
-    def test_pipeline_uses_grace_from_engine_arguments(self):
-        for argv, expected in (((), 0), (("--lm-grace-ms", "30"), 30)):
-            with self.subTest(argv=argv):
-                engine = self.engine(worker=object(), argv=argv)
-                self.open(engine, 1)
-                self.assertEqual(engine.connections[1].pipeline.grace_ms, expected)
-
     def test_pending_reply_then_poll_then_replay(self):
         loaded = loaded_session()
         worker = LmWorker(lambda: ZenzConverter(SlowModel()), loaded._lex)

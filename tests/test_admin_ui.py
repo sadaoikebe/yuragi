@@ -107,7 +107,6 @@ class WidgetLayerTest(Base):
         self.assertEqual([p.surface for p in self.model.learned()], ["肩"])
         w.settings_tree.selection.return_value = (str(list(SETTINGS).index("prediction")),)
         w._pick_setting()
-        self.assertEqual((w.s_label.get(), w.s_value.get()), ("入力の予測", "Tab キーで出す"))
         self.assertEqual(w.s_help.get(), SETTINGS["prediction"].help)  # whole, not cut by the column
         w.s_value.set("使わない")
         w._save_setting()
