@@ -269,6 +269,34 @@ class LearnedContextTest(unittest.TestCase):
             self.assertEqual(model.candidate_nll.call_count, 1)
 
 
+class LoadRetryTest(unittest.TestCase):
+    """The worker loads the LM again when retry_after says so (engine.lm_retry_after)."""
+
+    def test_loaded_on_the_second_try(self):
+        loads = []
+
+        def loader():
+            loads.append(None)
+            if len(loads) == 1:
+                raise RuntimeError("too slow")
+            return object()
+
+        worker = LmWorker(loader, None, retry_after=lambda exc: 0.01)
+        self.assertTrue(worker.wait_until_loaded())
+        self.assertEqual(len(loads), 2)
+        worker.stop()
+        worker.thread.join(5)
+
+    def test_engine_exit_does_not_wait_out_the_delay(self):
+        def loader():
+            raise RuntimeError("too slow")
+
+        worker = LmWorker(loader, None, retry_after=lambda exc: 3600)
+        worker.stop()
+        worker.thread.join(5)  # engine.main joins it on exit
+        self.assertFalse(worker.thread.is_alive())
+
+
 class DeadlineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

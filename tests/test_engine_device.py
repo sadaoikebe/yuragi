@@ -7,13 +7,15 @@ typing: a restart drops what is being converted.
 from __future__ import annotations
 
 from argparse import Namespace
+import io
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 from yuragi import engine as engine_module
 from yuragi.engine import Engine
-from yuragi.ime import power
+from yuragi.ime import power, server
+from yuragi.ime.zenz import CALIBRATION_LIMIT_MS
 
 
 def worker(device=None, failures=0, state="ready"):
@@ -52,6 +54,22 @@ class DeviceChangeTest(unittest.TestCase):
         # small too slow on battery: no LM; on AC the GPU may do.
         disabled = self.make(device=None, battery_at_load=True, state="disabled")
         self.assertIsNotNone(self.change(disabled, battery=False))
+
+
+class LmRetryTest(unittest.TestCase):
+    """An LM too slow at a busy moment (sign-in) is calibrated once more; a far slower PC
+    is not loaded again and again."""
+
+    def retry(self, engine, fastest_ms):
+        with mock.patch("sys.stderr", io.StringIO()):
+            return engine.lm_retry_after(server.LmTooSlow("too slow", fastest_ms))
+
+    def test_once_more_only_near_the_limit(self):
+        engine = Engine(None, Namespace())
+        self.assertIsNone(self.retry(engine, 3 * CALIBRATION_LIMIT_MS))
+        self.assertIsNotNone(self.retry(engine, 351))  # the sign-in of 2026-11-20
+        self.assertIsNone(self.retry(engine, 351))
+        self.assertIsNone(engine.lm_retry_after(RuntimeError("no kernel image")))
 
 
 class IdleTest(unittest.TestCase):

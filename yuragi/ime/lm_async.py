@@ -62,11 +62,14 @@ class Job:
 class LmWorker:
     """One daemon thread; the only user of the model."""
 
-    def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None, timing=False):
-        """The loader returns a warmed converter. on_disabled() is called once
-        on the worker thread if startup fails."""
+    def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None, retry_after=None,
+                 timing=False):
+        """The loader returns a warmed converter. If it raises, retry_after(exc) gives the
+        seconds to wait before loading again, or None: then on_disabled() is called once
+        on the worker thread. Conversions go without the LM until it is loaded."""
         self.loader = loader
         self.on_disabled = on_disabled
+        self.retry_after = retry_after
         self.lex = lex
         self.timing = timing
         self.clock = clock
@@ -158,17 +161,25 @@ class LmWorker:
 
     # -- worker thread ------------------------------------------------------
     def _run(self) -> None:
-        try:
-            template = self.loader()
-        except Exception as exc:
-            print(f"LM unavailable ({type(exc).__name__})",
-                  file=sys.stderr, flush=True)
+        while True:
+            try:
+                template = self.loader()
+                break
+            except Exception as exc:
+                delay = self.retry_after(exc) if self.retry_after is not None else None
+                if delay is None:
+                    print(f"LM unavailable ({type(exc).__name__})",
+                          file=sys.stderr, flush=True)
+                    with self._cond:
+                        self.state = "disabled"
+                        self._cond.notify_all()
+                    if self.on_disabled is not None:
+                        self.on_disabled()
+                    return
+            # Still "loading" while waiting; stop() ends the wait (engine exit joins this thread).
             with self._cond:
-                self.state = "disabled"
-                self._cond.notify_all()
-            if self.on_disabled is not None:
-                self.on_disabled()
-            return
+                if self._cond.wait_for(lambda: self._stopped, delay):
+                    return
         gc.freeze()  # the model's objects must not be traversed by full GC
         with self._cond:
             self.template = template

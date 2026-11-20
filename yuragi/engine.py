@@ -44,6 +44,13 @@ RESTART_CODE = 75
 IDLE_BEFORE_RESTART_S = 60
 POWER_POLL_S = 15
 GPU_FAILURES_BEFORE_RESTART = 2
+# CONVERSION「装置とモデル」: an LM found too slow is calibrated once more, this long
+# after, if it was within LM_RETRY_FACTOR times the limit (a busy moment at sign-in,
+# 2026-11-20: 351 ms there, 186 ms on the same PC when it was quiet). A PC far
+# slower is not tried again.
+LM_RETRY_DELAY_S = 300
+LM_RETRY_FACTOR = 2
+LM_RETRIES = 1
 DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
 # Warm-up input (DESIGN「暖機」): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
@@ -193,6 +200,7 @@ class Engine:
         self.lock = threading.Lock()  # one request at a time, or the restart
         self.last_request = time.monotonic()
         self.lm_on_battery = False  # the power source when the LM device was chosen
+        self.lm_retries = 0
 
     # -- startup -----------------------------------------------------------------
     def load(self, args: argparse.Namespace) -> None:
@@ -283,6 +291,19 @@ class Engine:
         return server.build_converter(settings, warm_conversion=warm_conversion,
                                       calibration=calibration, log=log)
 
+    def lm_retry_after(self, exc: Exception) -> float | None:
+        """Seconds until the LM is loaded and calibrated again, or None (given up)."""
+        from yuragi.ime.server import LmTooSlow
+        from yuragi.ime.zenz import CALIBRATION_LIMIT_MS
+        if (not isinstance(exc, LmTooSlow) or exc.fastest_ms is None
+                or exc.fastest_ms > LM_RETRY_FACTOR * CALIBRATION_LIMIT_MS
+                or self.lm_retries >= LM_RETRIES):
+            return None
+        self.lm_retries += 1
+        log(f"LM too slow for now ({exc.fastest_ms:.0f} ms); "
+            f"calibrating again in {LM_RETRY_DELAY_S} s")
+        return LM_RETRY_DELAY_S
+
     def lm_disabled(self) -> None:
         log("LM not used (it could not be loaded)")
         self.channel.warning("lm")
@@ -311,7 +332,7 @@ class Engine:
             settings = self.settings
             self.worker = LmWorker(loader=lambda: self.load_lm(server, settings, warm),
                                    lex=self.loaded._lex, on_disabled=self.lm_disabled,
-                                   timing=settings.lm_timing)
+                                   retry_after=self.lm_retry_after, timing=settings.lm_timing)
 
     # -- sessions ----------------------------------------------------------------
     def new_session(self):

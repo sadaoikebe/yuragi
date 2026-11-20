@@ -160,7 +160,13 @@ def argument_parser() -> argparse.ArgumentParser:
 
 
 class LmTooSlow(RuntimeError):
-    """Every device/model took longer than the calibration limit: convert without the LM."""
+    """Every device/model took longer than the calibration limit: convert without the LM.
+
+    fastest_ms: the best calibration time among them (None if none got that far)."""
+
+    def __init__(self, message: str, fastest_ms: float | None = None):
+        super().__init__(message)
+        self.fastest_ms = fastest_ms
 
 
 def lm_candidates(args) -> list[tuple[str, str]]:
@@ -212,6 +218,7 @@ def build_converter(args, *, warm_conversion=None, calibration=None, log=None):
         return converter
 
     candidates = lm_candidates(args)
+    fastest = None
     for index, (device, model) in enumerate(candidates):
         last = index == len(candidates) - 1
         name = Path(model).name or model
@@ -229,10 +236,11 @@ def build_converter(args, *, warm_conversion=None, calibration=None, log=None):
             if ms <= CALIBRATION_LIMIT_MS or (keep_last and last):
                 return converter
             log(f"LM too slow: {name} on {device} (limit {CALIBRATION_LIMIT_MS} ms)")
+            fastest = ms if fastest is None else min(fastest, ms)
             converter = None
         # Collect cycles from the failed or rejected model before trying a fresh one.
         gc.collect()
-    raise LmTooSlow("no device and model within the calibration limit")
+    raise LmTooSlow("no device and model within the calibration limit", fastest)
 
 
 def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
