@@ -1,6 +1,6 @@
 # リリース作成 (DESIGN「インストール・更新・アンインストール」): タグ v* を push すると、Windows ランナーで
-# TIP とブローカーをタグ入りの Release でビルド・試験し、依存ピン留めを実地検証し、setup が
-# 取得するアセット (DLL・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
+# TIP (64・32 ビット) とブローカーをタグ入りの Release でビルド・試験し、依存ピン留めを実地検証し、setup が
+# 取得するアセット (DLL 2 つ・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
 # と、アンインストールの入口 uninstall.ps1 を公開する。検証が1つでも失敗すればリリースは出ない。
 name: release
 
@@ -54,6 +54,7 @@ jobs:
         run: |
           git archive --format=zip -o yuragi-source.zip HEAD
           Copy-Item dist/yuragi_tip.dll .
+          Copy-Item dist/yuragi_tip32.dll .
           Copy-Item dist/yuragi-broker.exe .
           $pyVersion = (Select-String -Path packaging/setup.ps1 -Pattern '^\$EmbedPythonVersion = "([0-9.]+)"').Matches[0].Groups[1].Value
           # 設定ウィンドウ用の tkinter 一式。埋め込み版には無いので、同じ版の通常版
@@ -70,7 +71,7 @@ jobs:
           Get-ChildItem $tkDir -File | ForEach-Object { Write-Host "tkinter asset: $($_.Name)" }
           $tkName = "python-$pyVersion-tkinter-amd64.zip"
           Compress-Archive -Path (Join-Path $tkDir "*") -DestinationPath $tkName
-          foreach ($name in @("yuragi_tip.dll", "yuragi-broker.exe", "yuragi-source.zip", $tkName)) {
+          foreach ($name in @("yuragi_tip.dll", "yuragi_tip32.dll", "yuragi-broker.exe", "yuragi-source.zip", $tkName)) {
             (Get-FileHash $name -Algorithm SHA256).Hash.ToLower() | Set-Content "$name.sha256" -Encoding ASCII -NoNewline
           }
           # setup.ps1 にタグと、同梱 Python の公式ハッシュを刻む。
@@ -109,6 +110,8 @@ jobs:
             uninstall.ps1
             yuragi_tip.dll
             yuragi_tip.dll.sha256
+            yuragi_tip32.dll
+            yuragi_tip32.dll.sha256
             yuragi-broker.exe
             yuragi-broker.exe.sha256
             yuragi-source.zip
@@ -141,6 +144,7 @@ jobs:
           $local = Join-Path $env:LOCALAPPDATA "yuragi-ime"
           $userData = Join-Path $env:USERPROFILE ".yuragi-ime"
           $inproc = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}\InprocServer32"
+          $inproc32 = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Classes\CLSID\{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}\InprocServer32"
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           $startupMarker = "$env:SystemRoot\System32\cmd.exe /c exit 0"
 
@@ -167,10 +171,11 @@ jobs:
             return $state
           }
           function Assert-Installed {
-            foreach ($f in @("yuragi_tip.dll", "yuragi-broker.exe", "elevated.ps1")) {
+            foreach ($f in @("yuragi_tip.dll", "yuragi_tip32.dll", "yuragi-broker.exe", "elevated.ps1")) {
               if (-not (Test-Path (Join-Path $program $f))) { throw "missing $f in Program Files" }
             }
             if ((Get-ItemProperty $inproc).'(default)' -ne (Join-Path $program "yuragi_tip.dll")) { throw "TIP is not registered to Program Files" }
+            if ((Get-ItemProperty $inproc32).'(default)' -ne (Join-Path $program "yuragi_tip32.dll")) { throw "32-bit TIP is not registered to Program Files" }
             if ((Get-ItemProperty "HKCU:\Software\yuragi-ime").Tag -ne $env:TAG) { throw "HKCU Tag is not $env:TAG" }
             $startup = Get-ItemProperty -LiteralPath $runKey
             if (-not $startup."yuragi-ime") { throw "no yuragi-ime Run entry" }
@@ -225,6 +230,7 @@ jobs:
           $uninstallArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $uninstall, "-Yes")
           Invoke-Logged "uninstall" $uninstallArgs
           if (Test-Path $inproc) { throw "TIP registration remains after uninstall" }
+          if (Test-Path $inproc32) { throw "32-bit TIP registration remains after uninstall" }
           if (Test-Path $local) { throw "$local remains after uninstall" }
           if (Test-Path (Join-Path $env:ProgramFiles "yuragi-ime")) { throw "Program Files\yuragi-ime remains (nothing had the DLL loaded)" }
           if ((Get-ItemProperty "HKCU:\Software\yuragi-ime" -ErrorAction SilentlyContinue).Tag) { throw "HKCU Tag remains" }

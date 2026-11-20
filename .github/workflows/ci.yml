@@ -95,6 +95,16 @@ jobs:
           ctest --test-dir build/tip -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "TIP tests failed" }
 
+      - name: 32 ビットの TIP のビルド (MSVC, Release) と判断の試験
+        shell: pwsh
+        run: |
+          cmake -S src/tip -B build/tip32 -A Win32
+          if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+          cmake --build build/tip32 --config Release
+          if ($LASTEXITCODE -ne 0) { throw "32-bit TIP build failed" }
+          ctest --test-dir build/tip32 -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "32-bit TIP tests failed" }
+
       - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験)
         shell: pwsh
         env:

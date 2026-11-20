@@ -16,7 +16,7 @@
 
 | 部品 | 実体 | 数 | 誰が起動するか | 役目 |
 |---|---|---|---|---|
-| TIP | `yuragi_tip.dll`（C++） | アプリのスレッドごと | Windows | 打鍵を送り、返事を画面に書く。プロセス管理・再試行・ファイルの読み書きは持たない |
+| TIP | `yuragi_tip.dll`（C++。32 ビットのアプリには `yuragi_tip32.dll`） | アプリのスレッドごと | Windows | 打鍵を送り、返事を画面に書く。プロセス管理・再試行・ファイルの読み書きは持たない |
 | ブローカー | `yuragi-broker.exe`（C++、ウィンドウなし） | サインインごとに 1 | サインイン時（Run キー）。無ければ TIP が条件付きで | エンジンを起動し、見張り、落ちたら起動し直す。打鍵と返事を配る |
 | エンジン | 同梱 Python で `python -m yuragi.engine` | ブローカーごとに 1 | ブローカーだけ | 辞書・学習・LM を抱えて変換する |
 | 設定ウィンドウ | `pythonw -m yuragi.ime.admin_ui` | 利用者が開いたとき | ブローカー（TIP のメニューから依頼） | 単語登録・学習・設定・状態 |
@@ -39,7 +39,7 @@
 
 ```
 %ProgramFiles%\yuragi-ime\<tag>\          管理者だけが書ける。全アプリに読み込まれるものはここ
-    yuragi_tip.dll  yuragi-broker.exe  elevated.ps1
+    yuragi_tip.dll  yuragi_tip32.dll  yuragi-broker.exe  elevated.ps1
 
 %LOCALAPPDATA%\yuragi-ime\                 利用者の権限で動くものだけ。管理者権限では決して実行しない
     versions\<tag>\app\                     Python のソース
@@ -55,7 +55,7 @@
     learning.jsonl  personal_lexicon.jsonl
     logs\broker.log  logs\engine.log  logs\notices.log（それぞれ前の世代 *.prev.log）
 
-HKLM  CLSID・TIP 登録 → %ProgramFiles%\yuragi-ime\<tag>\yuragi_tip.dll
+HKLM  CLSID → %ProgramFiles%\yuragi-ime\<tag>\yuragi_tip.dll（32 ビット側の CLSID は yuragi_tip32.dll）、TIP 登録（共通）
 HKCU\Software\yuragi-ime   Tag = <tag>     「この利用者には、この版が入っている」の唯一の印
 HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 ```
@@ -365,6 +365,19 @@ TSF とのやりとり（キーの受け取り、変換中の文字の描画、�
   タイマーを掛け直すたびに新しい ID を使い、取り消したタイマーの通知が届いても無視する。
 - 候補ウィンドウの位置は、TSF の配置変更通知（`ITfTextLayoutSink::OnLayoutChange`）で直す。
 
+### 32 ビットのアプリ
+
+アプリは自分と同じビット数の DLL しか読み込めない。64 ビット版だけだと、32 ビットのアプリ
+（サクラエディタの公式版など）ではゆらぎを選んでも TIP が読み込まれず、キーがそのまま英字で入る。
+そこで同じソースを x86 でもビルドし（`yuragi_tip32.dll`）、64 ビット版と同じフォルダに置く
+（どちらも隣の `yuragi-broker.exe` を起動できる。ブローカーは 64 ビットの 1 つだけ）。
+
+- CLSID は同じ。COM の登録（`InprocServer32`）はレジストリの 32/64 ビットの側にそれぞれある。
+  TSF の登録（`HKLM\SOFTWARE\Microsoft\CTF\TIP`）は両方に共通で 1 つ。MS-IME と同じ形。
+- 登録は 32 ビット版を先に、64 ビット版を後に `regsvr32` する（共通の TSF 登録のアイコンが 64 ビット版を指す）。
+- 解除は、TSF の登録が既に無ければ COM の登録だけを消す（2 つ目の解除が失敗にならないように）。
+- hello の `bits` は 32 になる。ブローカーとの通信は同じ。
+
 ### パスワード欄
 
 入力欄の種類（`IS_PASSWORD`・`IS_NUMERIC_PASSWORD` ならパスワード欄）は、フォーカスが移ったときに 1 回
@@ -409,7 +422,7 @@ README の 1 行で `setup.ps1` を取得して実行する。管理者ではな
 | 2 | `staging\<tag>\` に取得・照合・展開。足りない共有物（ランタイム・辞書・モデル）だけ `shared\` に作る。共有物は「作りかけの名前で作って、完成したら改名」。ランタイムは Python の埋め込み版に、リリースに添えた同じ版の tkinter 一式（`python-<版>-tkinter-amd64.zip`）を重ね、torch・依存・tkinter とあわせて読み込めることを確かめる。torch は、`nvidia-smi` で CUDA 対応の GPU とドライバが見つかれば GPU 版（`cu128`／`cu126`。ディスクの空きが 10GB 以上のとき）、無ければ CPU 版。GPU 版のランタイムは名前に `-cu128` などが付く別の共有物。言語モデルは CPU 用の zenz-v2.5-small を常に、GPU 版 torch なら GPU 用の zenz-v2.5-medium も取る（どれを使うかはエンジンが起動のたびに実測で決める）。`-Cpu` を付けると GPU があっても CPU 版 | 何も変わっていない。旧版が動き続ける。やり直せば続きから |
 | 3 | **本物のブローカーで試運転**: `yuragi-broker.exe --selftest <staging の engine.json>`。エンジンを実際に起動し、変換を 1 回行って終了コードを返す。利用者のデータは使わない | 同上 |
 | 4 | `staging\<tag>` を `versions\<tag>` へ改名（一瞬）。`versions\<tag>` が既にあれば脇へ寄せる。それが入っている版（Tag が同じ）なら同じ版の入れ直しで、先にそのブローカーを止める。違えば前回の途中の残りで、動いている版には触らない | 同上 |
-| 5 | 管理者権限: `Program Files\yuragi-ime\<tag>\` に配置、登録を新しい DLL に付け替え、読み返して確認 | 旧版の登録のまま。旧版が動き続ける |
+| 5 | 管理者権限: `Program Files\yuragi-ime\<tag>\` に配置、登録を新しい DLL（64・32 ビット）に付け替え、読み返して確認 | 旧版の登録のまま。旧版が動き続ける |
 | 6 | 旧ブローカーに `quit`。`HKCU\…\Tag` と Run キーを新しい版に書き換え、言語一覧に追加 | — |
 | 7 | 印を下ろし、新ブローカーを起動して `ready` を待って確認（最大 120 秒） | 理由を表示。次のサインインでも起動を試みる |
 | 8 | 旧版の片付け: `versions\` と `shared\` の使われていないもの。`Program Files` 側の旧版は 5 の管理者権限の中で消す（使用中のものは残す） | 片付けの失敗はインストールの失敗にしない。次回の setup がまた試す |
@@ -444,8 +457,8 @@ Tag が無ければ「インストールされていません」と表示して�
 
 ### 開発時（`dev-build.ps1`・`dev-register.ps1`）
 
-- `src\tip\dev-build.ps1`: TIP とブローカーを Release でビルドして試験し、`dist\yuragi_tip.dll` と
-  `dist\yuragi-broker.exe` を作る（管理者権限・登録なし）。リリースのワークフローもこれを使う（CI は cmake を直接呼ぶ）。
+- `src\tip\dev-build.ps1`: TIP（64・32 ビット）とブローカーを Release でビルドして試験し、`dist\yuragi_tip.dll`・
+  `dist\yuragi_tip32.dll` と `dist\yuragi-broker.exe` を作る（管理者権限・登録なし）。リリースのワークフローもこれを使う（CI は cmake を直接呼ぶ）。
 - `src\tip\dev-register.ps1 [-Python <python.exe>]`: タグ `dev` として登録する（UAC 1 回）。
   `HKCU\…\Tag = dev`、`versions\dev\engine.json` はリポジトリを指し、エンジンは指定の Python で動く。
   開発登録は `--require-lm` を付けて起動する。設定が `lm_rescore: false` でも zenz を暖機し、成功してから
@@ -453,6 +466,7 @@ Tag が無ければ「インストールされていません」と表示して�
   DLL とブローカーは `dist\` から読み込む（開発機に限り `Program Files` 配置を省く）。DLL は
   `dist\yuragi_tip-a.dll`、`-b.dll`、… のうち、登録中でも使用中でもない最初のものにコピーして登録するので、
   古い DLL を読み込んだアプリを閉じなくても入れ直せる。
+- 開発登録は 64 ビット版だけ（32 ビットのアプリでは動かない）。32 ビットを試すときは `setup.ps1 -AssetDir` で入れる。
 - 外すときは、製品版と同じ `packaging\uninstall.ps1`（`dev-register.ps1` が `dist\` に置く `elevated.ps1` を使う）。
 
 ---
@@ -515,11 +529,11 @@ Tag が無ければ「インストールされていません」と表示して�
 ## 9. 実地試験
 
 Windows サンドボックスか仮想マシンで、各操作の間、新しく生まれたプロセスと新しく現れた最上位ウィンドウを記録する。
-メモ帳・ブラウザ・エクスプローラを開き、IME を選んで打鍵した状態から始める。
+メモ帳・ブラウザ・エクスプローラ・32 ビットのアプリ（サクラエディタ）を開き、IME を選んで打鍵した状態から始める。
 
 | # | 操作 | 期待 |
 |---|---|---|
-| 1 | インストール → IME を選ぶ → かなを打って変換 | 変換できる。常駐はブローカー 1・エンジン 1。ウィンドウ 0 |
+| 1 | インストール → IME を選ぶ → かなを打って変換（32 ビットのアプリでも） | 変換できる。常駐はブローカー 1・エンジン 1。ウィンドウ 0 |
 | 2 | 変換の途中でエンジンをタスクマネージャーで終了し、打ち続ける | 見えていた文字が残る。起動し直す間の打鍵はそのまま（英字で）入り、数秒後から変換される。ウィンドウ 0 |
 | 3 | エンジンを 10 分以内に 3 回終了 | 3 回目で「!」と通知 1 回。以後、起動 0 回 |
 | 4 | メニューの「もう一度試す」 | 戻る |

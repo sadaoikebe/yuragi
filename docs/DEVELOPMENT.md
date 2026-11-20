@@ -48,7 +48,8 @@ cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release && cmake --build build/
 ```
 
 - ブローカーと TIP の CMake は、Linux では単体試験（`broker_core_test`、`tip_logic_test`、`tip_json_test`）だけを
-  ビルドする。Windows では `yuragi-broker.exe` と `yuragi_tip.dll` もできる（TIP のタグは `-DYURAGI_TAG=<tag>`）。
+  ビルドする。Windows では `yuragi-broker.exe` と `yuragi_tip.dll` もできる（TIP のタグは `-DYURAGI_TAG=<tag>`。
+  x86 の開発者環境でビルドすると、32 ビットのアプリ用の `yuragi_tip32.dll` になる）。
 - ブローカーを実プロセスで動かす試験は Windows だけ:
   `python -m unittest tests.test_broker`（`YURAGI_BROKER=dist\yuragi-broker.exe`）。
 
