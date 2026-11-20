@@ -138,6 +138,8 @@ jobs:
           $local = Join-Path $env:LOCALAPPDATA "yuragi-ime"
           $userData = Join-Path $env:USERPROFILE ".yuragi-ime"
           $inproc = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}\InprocServer32"
+          $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          $startupMarker = "$env:SystemRoot\System32\cmd.exe /c exit 0"
 
           function Invoke-Logged([string]$label, [string[]]$argv) {
             Write-Host "::group::$label"
@@ -167,12 +169,16 @@ jobs:
             }
             if ((Get-ItemProperty $inproc).'(default)' -ne (Join-Path $program "yuragi_tip.dll")) { throw "TIP is not registered to Program Files" }
             if ((Get-ItemProperty "HKCU:\Software\yuragi-ime").Tag -ne $env:TAG) { throw "HKCU Tag is not $env:TAG" }
-            if (-not (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run")."yuragi-ime") { throw "no Run key" }
+            $startup = Get-ItemProperty -LiteralPath $runKey
+            if (-not $startup."yuragi-ime") { throw "no yuragi-ime Run entry" }
+            if ($startup."yuragi-ci-startup" -cne $startupMarker) { throw "existing Run entry changed during setup" }
             if (-not (Test-Path (Join-Path $local "versions\$env:TAG\engine.json"))) { throw "no engine.json" }
             $state = Get-BrokerState
             if ($state -ne "ready") { throw "broker state is $state, not ready" }
           }
 
+          if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
+          Set-ItemProperty -LiteralPath $runKey -Name "yuragi-ci-startup" -Value $startupMarker
           $setupArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setup, "-Yes")
           Invoke-Logged "install" $setupArgs
           Assert-Installed
