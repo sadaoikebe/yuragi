@@ -377,7 +377,10 @@ Say "== 新しい版への切り替え"
 Stop-Broker
 New-Item -Force $ProductKey | Out-Null
 Set-ItemProperty -LiteralPath $ProductKey -Name "Tag" -Value $Tag
-New-Item -Force $RunKey | Out-Null
+# Run は他のアプリと共有するため、キーが無いときだけ作る。
+if (-not (Test-Path -LiteralPath $RunKey)) {
+    New-Item -Path $RunKey | Out-Null
+}
 Set-ItemProperty -LiteralPath $RunKey -Name "yuragi-ime" -Value "`"$BrokerFinal`""
 if ((Get-ItemProperty -LiteralPath $ProductKey).Tag -ne $Tag) { Fail "HKCU\Software\yuragi-ime に Tag を書き込めませんでした。" }
 Add-Type -Namespace YuragiSetup -Name Input -MemberDefinition @'
