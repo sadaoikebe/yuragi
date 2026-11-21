@@ -182,17 +182,19 @@ def _parse_connection() -> tuple[array, int]:
 
 def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
     """Overlay personal entries. Does not rewrite the Mozc cache."""
-    import json
-
     p = path or USER_LEX
     if not p.exists():
         return 0
     n = 0
-    for line in p.read_text(encoding="utf-8").splitlines():
+    for line_no, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        row = json.loads(line)
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"{p}:{line_no}: invalid JSON; skipping entry", file=sys.stderr, flush=True)
+            continue
         reading = row["reading"]
         surface = row["surface"]
         cost = int(row["cost"])
