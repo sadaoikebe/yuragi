@@ -76,6 +76,21 @@ TIP が自分のスレッドに `SetWindowsHookEx(WH_KEYBOARD, …, nullptr, Get
 - ただし、すべての down で呼ばれるとは限らない。Alt+F の down を 3 回続けて送ると、3 回目はフックが呼ばれずに `OnPreservedKey` だけが呼ばれた（実測。2 回の測定で同じ）。
 - 押し続けた繰り返しは bit 30 が 1、押し直しの down は bit 30 が 0 で、その前に up が来る。キーの呼び出しに届かない Alt 付きの up も届く。
 
+### 1.7 メッセージを取り出す順序
+
+`GetMessage`・`PeekMessage` は、絞り込みを指定しなければ、次の順でメッセージを処理する（[GETMSG]）。
+
+1. 送られたメッセージ（`SendMessage`）
+2. 投函されたメッセージ（`PostMessage`）
+3. 入力（キーボード・マウス）のメッセージと、システム内部の出来事
+4. 送られたメッセージ（もう一度）
+5. `WM_PAINT`
+6. `WM_TIMER`
+
+- したがって、TIP がキーの呼び出しの中で自分のウィンドウに投函したメッセージは、そのあとに届く入力のメッセージより先に取り出される。
+- この順序は絞り込みが無いときのもの。資料は「入力のメッセージを投函されたメッセージより先に取り出すには、`wMsgFilterMin`・`wMsgFilterMax` を使う」と書いている。
+  `PeekMessage` には、入力だけ（`PM_QS_INPUT`）や投函だけ（`PM_QS_POSTMESSAGE`）を処理する指定もある（[GETMSG]）。そういう取り出し方をするアプリでは、この順序は成り立たない。
+
 ---
 
 ## 2. 押しっぱなしの繰り返し
@@ -243,6 +258,12 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 - `SendInput` で送ったキーの `dwExtraInfo` を、TIP のキーの呼び出しの中で `GetMessageExtraInfo` で読めるか。
 - `VK_KANJI` が押されたままのとき、何をきっかけにシステム全体の状態（`GetAsyncKeyState`）が戻るか。
 - Electron のアプリ（Chromium の Edge とは別に）。
+- アプリが Tab などでフォーカスを移すとき、そのキーのメッセージの処理の中で TSF のフォーカスの通知（`ITfThreadMgrEventSink::OnSetFocus` など）が届くか、処理が終わったあとで届くか。
+  アプリごとに（Win32 のダイアログ、Word、Chromium、WPF・WinUI）。
+- §1.7 の順序が成り立たない取り出し方（入力だけを選んで取り出す）をするアプリがあるか。
+- フォーカスが移った直後に、同期の読み取り専用の編集セッション（`TF_ES_SYNC | TF_ES_READ`）が通るアプリと通らないアプリ。通らないとき、非同期のセッションが呼ばれるまでの時間。
+- パスワード欄（Win32 の `ES_PASSWORD`、ブラウザの `type=password`、Windows の資格情報の入力）が、`SendInput` で送ったキーを受け付けるか。
+- フォーカスが TSF の文書を持たないコントロール（ボタンなど）にあるとき、キーの呼び出しが来るか。
 
 ---
 
@@ -277,3 +298,4 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 | SENDINPUT | `SendInput` | https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput |
 | KBDLLHOOK | `KBDLLHOOKSTRUCT` | https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-kbdllhookstruct |
 | CHEN-SENDINPUT | Raymond Chen「GetAsyncKeyState immediately after SendInput」 | https://devblogs.microsoft.com/oldnewthing/20140213-00/?p=1773 |
+| GETMSG | `GetMessage`・`PeekMessage`（Remarks の取り出し順、`PM_QS_*`） | https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessagew 、https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-peekmessagew |
