@@ -1,12 +1,15 @@
 """Prediction (推測変換): Tab opens the predictions and Enter commits one."""
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import unittest
+from unittest.mock import patch
 
 from yuragi.chord.fsm import Plain
 from yuragi.ime import predict as P
 from yuragi.ime.server import dispatch
-from yuragi.ime.session import ImeSession
+from yuragi.ime.session import ConversionRequest, ImeSession
 from tests.real_dictionary import real_lex
 
 VK_TAB, VK_RETURN = 0x09, 0x0D
@@ -60,6 +63,49 @@ class TabGestureTest(Fixture):
         commit = press(s, VK_RETURN)
         self.assertEqual(commit["commit"], reply["candidates"][1])
         self.assertFalse(commit["predicting"])
+
+    def test_tab_can_start_a_prediction_inside_a_clause(self):
+        s = self.session()
+        type_reading(s, "そらのてん")
+        tokens = s.tokens
+        self.assertEqual([(segment.start, segment.end) for segment in s.segments], [(0, 5)])
+
+        reply = press(s, VK_TAB)
+
+        self.assertTrue(reply["predicting"])
+        self.assertIs(s.tokens, tokens)
+        self.assertEqual([(segment.start, segment.end) for segment in s.segments], [(0, 2), (2, 5)])
+        self.assertEqual(s.segments[0].selected.reading, "そら")
+        self.assertEqual(press(s, VK_RETURN)["commit"], reply["composition"])
+
+    def test_no_prediction_keeps_the_original_clauses(self):
+        s = self.session()
+        type_reading(s, "このてん")
+        original = s.segments
+        with patch("yuragi.ime.session.predict", return_value=[]) as predict:
+            reply = press(s, VK_TAB)
+
+        self.assertEqual([len(call.args[0]) for call in predict.call_args_list], [4, 2])
+        self.assertFalse(reply["predicting"])
+        self.assertIs(s.segments, original)
+
+    def test_failure_to_decode_the_head_keeps_the_input(self):
+        s = self.session()
+        type_reading(s, "このてん")
+        tokens = list(s.tokens)
+        original = s.segments
+        composition = s.composition
+        errors = StringIO()
+        with (patch("yuragi.ime.session.predict", return_value=[]),
+              patch.object(ConversionRequest, "decode", side_effect=RuntimeError),
+              redirect_stderr(errors)):
+            reply = press(s, VK_TAB)
+
+        self.assertFalse(reply["predicting"])
+        self.assertEqual(reply["composition"], composition)
+        self.assertEqual(s.tokens, tokens)
+        self.assertIs(s.segments, original)
+        self.assertIn("Prediction failed (RuntimeError)", errors.getvalue())
 
 
 if __name__ == "__main__":

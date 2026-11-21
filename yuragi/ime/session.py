@@ -656,28 +656,31 @@ class ImeSession:
         for start in starts[-MAX_TAILS:]:  # longest tail first
             index = next(i for i, s in enumerate(self.segments) if s.end > start)
             head = self.segments[:index]
-            redecoded = self.segments[index].start != start
-            if redecoded:
-                # Inside a clause (いい|天気): the typed head before it, decoded alone.
-                tokens = self.tokens
-                # Lattice offsets skip tokens with no kana; cut the raw list there.
-                kept = [i for i, t in enumerate(tokens)
-                        if to_lattice_token(t, self._table) is not None]
-                self.tokens = tokens[:kept[start]]
-                self._refresh()
-                head = self.segments
-                self.tokens = tokens
-            # A press crossing into the tail keeps the head's direction.
-            tail = restrict(lattice, start, len(lattice),
-                            press_pins(lattice, start, len(lattice), head))
-            found = predict(tail, self._lex, self.predict_index, learning,
-                            self.personal.revision if self.personal is not None else None)
+            head_request = None
+            try:
+                if self.segments[index].start != start:
+                    # Inside a clause (いい|天気): decode the typed head alone.
+                    head_request = self._conversion_input(self._parts(lattice[:start]))
+                    head_picks = head_request.decode(self._lex)
+                    head = display_segments(head_request.parts, head_picks)
+                    for segment in head:
+                        segment.mark_shown()
+                # A press crossing into the tail keeps the head's direction.
+                tail = restrict(lattice, start, len(lattice),
+                                press_pins(lattice, start, len(lattice), head))
+                found = predict(tail, self._lex, self.predict_index, learning,
+                                self.personal.revision if self.personal is not None else None)
+            except Exception as exc:
+                print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
+                return False
             if not found:
-                if redecoded:
-                    self._refresh()  # restore the clauses exactly as shown
                 continue
             stream = CandidateStream(iter(found))
             stream.ensure(0)
+            if head_request is not None:
+                self._display_key = head_request.key
+                self._learning_view = head_request.learning
+                self._word_starts = {start for run in head_picks or () for start in run.word_starts}
             self.segments = head + [Segment(start, len(lattice), found[0], fixed=True,
                                             choices=stream, context=PREDICTION)]
             self.segments[-1].mark_shown()
@@ -1086,12 +1089,14 @@ class ImeSession:
             out.append(d)
         return out
 
-    def _parts(self) -> list[str | list[dict]]:
+    def _parts(self, lattice: list[dict] | None = None) -> list[str | list[dict]]:
         """Literal texts and kana runs; a literal ends the press (ChordFsm.reset,
         or a new press number after a symbol chord), so no press crosses one."""
+        if lattice is None:
+            lattice = self._lattice()
         parts: list[str | list[dict]] = []
         run: list[dict] = []
-        for token in self._lattice():
+        for token in lattice:
             if token["kind"] == "literal":
                 if run:
                     parts.append(run)
@@ -1179,8 +1184,7 @@ class ImeSession:
         # The directions the committed reading gives each press (the thumbs
         # of one press alternate); the remaining chords of a press keep it.
         chosen = Plan(self._lattice()).directions(head.start, head.end, head.selected.reading)
-        # Lattice offsets skip tokens with no kana; cut the raw list there (as
-        # _predict_key does).
+        # Lattice offsets skip tokens with no kana; cut the raw list there.
         kept = [i for i, t in enumerate(self.tokens)
                 if to_lattice_token(t, self._table) is not None]
         del self.tokens[:kept[end]]
