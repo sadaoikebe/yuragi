@@ -46,7 +46,7 @@ public:
     virtual void WriteClient(ClientId client, const std::string& line) = 0;
     virtual void NotifyStopped(Stop reason) = 0;  // the one notice (DESIGN「通知」), once per stop
     virtual void ClearStopped() = 0;  // the stop the user was told about is over
-    virtual void OpenAdmin() = 0;
+    virtual void OpenAdmin(bool words) = 0;
     virtual void Log(const std::string& line) = 0;
     virtual void Quit() = 0;
 };
@@ -91,6 +91,7 @@ private:
     void Broadcast(const std::string& line);
     void Kill(Stop reason);
     void Warn(const std::string& code);
+    void UpdateKeymap(const std::string& json);
     void Log(const std::string& line) { platform_.Log(line); }
 
     Platform& platform_;
@@ -103,6 +104,7 @@ private:
     Stop kill_reason_ = Stop::None;
     std::string last_fatal_;  // the engine's last "fatal ..." stderr line
     std::vector<std::string> warnings_;  // of this engine, in the hello reply (the management window shows them)
+    std::string keymap_;  // retained across engine restarts
 };
 
 }  // namespace broker

@@ -540,6 +540,7 @@ def main(argv=None) -> int:
     parser.add_argument("--runtime-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--dict-dir", type=Path, default=None)
+    parser.add_argument("--tab", choices=("words",), default=None)
     args = parser.parse_args(argv)
     if args.dict_dir is not None:
         from yuragi.lattice import mozc_dict
@@ -551,7 +552,9 @@ def main(argv=None) -> int:
         return 1
     declare_dpi_aware()
     root = tk.Tk()
-    AdminWindow(root, AdminModel(args.runtime_dir, args.config))
+    window = AdminWindow(root, AdminModel(args.runtime_dir, args.config))
+    if args.tab == "words":
+        window.notebook.select(0)
     root.mainloop()
     return 0
 

@@ -191,4 +191,24 @@ inline std::string Quote(const std::string& s) {
     }
     return out + '"';
 }
+inline std::string Stringify(const Value& v) {
+    switch (v.kind) {
+        case Value::Null: return "null";
+        case Value::Boolean: return v.boolean ? "true" : "false";
+        case Value::Number: return v.text;
+        case Value::String: return Quote(v.text);
+        case Value::Array: {
+            std::string out = "[";
+            for (const auto& x : v.array) out += (out.size() == 1 ? "" : ",") + Stringify(x);
+            return out + "]";
+        }
+        case Value::Object: {
+            std::string out = "{";
+            for (const auto& [key, x] : v.object)
+                out += (out.size() == 1 ? "" : ",") + Quote(key) + ":" + Stringify(x);
+            return out + "}";
+        }
+    }
+    return "null";
+}
 }  // namespace tip_json

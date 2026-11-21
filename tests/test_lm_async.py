@@ -369,6 +369,21 @@ class DeadlineTest(unittest.TestCase):
         self.assertNotIn("eat", released)
         self.assertEqual((released["composition"], released["timer"]), ("", next_key["timer"]))
 
+    def test_poll_returns_the_final_eat_for_each_deferred_down(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        keys = Typist().kana("きしゃ").space()
+        for event in keys.events:
+            pipe.handle(event)
+        for seq in (11, 12):
+            reply = pipe.handle({"op": "down", "vk": VK_RETURN, "seq": seq, "t": keys.t + seq})
+            self.assertTrue(reply["eat_pending"])
+        worker.complete(pipe.job)
+        reply = pipe.handle({"op": "timeout", "t": keys.t + 20, "seq": 13})
+        self.assertTrue(reply["commit"])
+        self.assertNotIn("eat", reply)
+        self.assertEqual(reply["resolved_keys"], [{"seq": 11, "eat": True}, {"seq": 12, "eat": False}])
+        self.assertNotIn("resolved_keys", pipe.handle({"op": "timeout", "t": keys.t + 30}))
+
     def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
         keys = Typist().kana("きしゃ").key("down", VK_SPACE, 150)

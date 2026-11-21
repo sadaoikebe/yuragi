@@ -115,13 +115,16 @@ class Channel:
         log(f"warning {code}")
         self.send({"event": "warning", "warning": code})
 
-    def ready(self) -> None:
+    def ready(self, keymap: dict | None = None) -> None:
         with self._lock:
             self._ready = True
             warnings = list(self._warnings)
         for code in warnings:
             log(f"warning {code}")
-        self.send({"ready": True, "proto": PROTO, "warnings": warnings})
+        reply = {"ready": True, "proto": PROTO, "warnings": warnings}
+        if keymap is not None:
+            reply["keymap"] = keymap
+        self.send(reply)
 
 
 def argument_parser() -> argparse.ArgumentParser:
@@ -168,18 +171,20 @@ class Connection:
             # DESIGN「入力の長さ」: the key is taken silently, the input stays as it was.
             del sess.tokens[MAX_TOKENS:]
             sess._refresh()
-            commit = reply["commit"]
-            reply = snapshot(sess, msg.get("op"), eat=reply.get("eat"))
-            reply.update(commit=commit, pending=False)
+            adjusted = snapshot(sess, msg.get("op"), eat=reply.get("eat"))
+            adjusted["commit"] = reply["commit"]
+            reply.update(adjusted)
         return reply
 
     def recover(self) -> dict:
         """DESIGN「要求 1 件ごとの防壁」: drop the session that raised; continue from a clean one."""
         from yuragi.ime.server import snapshot
         direct = self.sess.direct
+        mode = self.sess.input_mode
         self.close()
         self.sess = self.engine.new_session()
         self.sess.direct = direct
+        self.sess.input_mode = mode
         self.pipeline = self.engine.new_pipeline(self.sess)
         reply = snapshot(self.sess, None)
         reply.update(commit="", pending=False)
@@ -215,7 +220,9 @@ class Engine:
                 mozc_dict.CACHE = args.cache_dir / mozc_dict.CACHE.name
             # Imported after the directories are set: some modules read them at import.
             from yuragi.ime import config, server
+            from yuragi.ime.keymap import startup_keymap
             import yuragi.ime.lm_async  # noqa: F401  (its worker starts after the warm-up)
+            self.keymap = startup_keymap(args.data_dir)
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
             fatal("program-files-unreadable")
@@ -462,7 +469,7 @@ def main(argv=None) -> int:
         engine.worker.thread.join()
         fatal("lm-unavailable")
     gc.freeze()  # the dictionary must not be traversed by full collections while typing
-    channel.ready()
+    channel.ready(engine.keymap.eat_table())
     log(f"ready in {time.perf_counter() - started:.2f} s")
     if engine.worker is not None and not args.require_lm:
         threading.Thread(target=engine.watch_device, name="lm-device", daemon=True).start()

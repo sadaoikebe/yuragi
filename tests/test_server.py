@@ -58,14 +58,26 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(previous["cand_index"], 1)
 
     def test_pass_through_and_commit_then_pass(self):
-        numeral = self.send("down", vk=0x61)  # Numpad1
+        numeral = self.send("down", vk=0x61, t=10)  # Numpad1
         self.assertEqual((numeral["eat"], numeral["composition"]), (True, "1"))
-        through = self.send("down", vk=0x75, mods=["shift"])
+        self.send("down", vk=ord("K"), t=100)
+        self.assertEqual(self.send("up", vk=ord("K"), t=130)["composition"], "1き")
+        through = self.send("down", vk=0x75, t=160, mods=["shift"])
         self.assertEqual((through["eat"], through["phase"], through["commit"]),
                          (False, "composing", ""))
-        committed = self.send("down", vk=ord("C"), mods=["ctrl"])
+        committed = self.send("down", vk=ord("C"), t=190, mods=["ctrl"])
         self.assertEqual((committed["eat"], committed["phase"], committed["commit"]),
-                         (False, "empty", "1"))
+                         (False, "empty", "1き"))
+
+    def test_mode_shortcuts_preserve_or_commit_pending_composition(self):
+        self.send("down", vk=ord("K"), t=10)
+        self.assertEqual(self.send("set_mode", mode="katakana")["commit"], "き")
+        self.send("down", vk=ord("K"), t=100)
+        self.assertEqual(self.send("up", vk=ord("K"), t=130)["composition"], "キ")
+        hiragana = self.send("set_mode", mode="hiragana")
+        self.assertEqual((hiragana["commit"], hiragana["composition"]), ("", "き"))
+        direct = self.send("set_direct", direct=True, commit=True)
+        self.assertEqual((direct["phase"], direct["commit"]), ("direct", "き"))
 
     def test_alt_down_flushes_pending_input_and_remains_held(self):
         self.send("down", vk=ord("K"), t=10)

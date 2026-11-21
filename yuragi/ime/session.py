@@ -45,6 +45,7 @@ PREDICTION = "predict"  # Segment.context of the predictions' segment
 @dataclass(frozen=True, slots=True)
 class Literal:
     text: str
+    alnum: bool = False
 
     def __post_init__(self) -> None:
         if len(self.text) != 1:
@@ -346,6 +347,7 @@ class ImeSession:
     keymap: Keymap = field(default_factory=default_keymap)
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
+    input_mode: str = "hiragana"
 
     @property
     def phase(self) -> str:
@@ -424,11 +426,36 @@ class ImeSession:
         if self._last_commit is not None:
             self._last_commit.seq = seq
 
-    def set_direct(self, direct: bool) -> None:
+    def set_direct(self, direct: bool, *, commit: bool = False) -> str | None:
         """Change input mode, discarding unfinished input on a transition."""
         if direct != self.direct:
+            if direct and commit:
+                return self._then(self._finish_pending(), self._commit_direct)
             self.reset()
             self.direct = direct
+        return None
+
+    def _commit_direct(self) -> str:
+        text = self._commit()
+        self.direct = True
+        return text
+
+    def set_mode(self, mode: str) -> str | None:
+        if mode not in ("hiragana", "katakana"):
+            return None
+        if self.direct:
+            self.set_direct(False)
+        if mode == "katakana":
+            return self._then(self._finish_pending(), self._commit_katakana)
+        self.input_mode = mode
+        if not self.converted and self.tokens:
+            self._refresh()
+        return None
+
+    def _commit_katakana(self) -> str:
+        text = self._commit()
+        self.input_mode = "katakana"
+        return text
 
     def on_key(
         self, down: bool, vk: int, now_ms: int, mods: list[str] | None = None,
@@ -503,7 +530,8 @@ class ImeSession:
         if literal is not None:
             pending = self._finish_pending()
             self._forget_fsm_down(chord.vk)
-            return self._then(pending, lambda: self._ingest([Literal(literal)]))
+            continues = alnum or (kind == "M" and literal.isascii() and literal.isalpha())
+            return self._then(pending, lambda: self._ingest([Literal(literal, alnum=continues)]))
 
         assert key is not None
         insert = ""
@@ -534,7 +562,7 @@ class ImeSession:
         """
         return (not self.converted and self._await is None and bool(self.tokens)
                 and isinstance(self.tokens[-1], Literal)
-                and half_width_ascii(self.tokens[-1].text))
+                and self.tokens[-1].alnum)
 
     def _then(self, text: str | None, rest: Callable[[], str | None]) -> str | None:
         """Run the rest of a key event now, or after the awaited conversion resolves."""
@@ -1009,7 +1037,9 @@ class ImeSession:
                     tok = AmbShift(tok.key, self._press_alias[tok.press], tok.turn)
             if self.converted:
                 insert += self._commit(reset_input=False)
-            self.tokens.append(Literal(mapped["text"]) if mapped["kind"] == "literal" else tok)
+            if mapped["kind"] == "literal" and not isinstance(tok, Literal):
+                tok = Literal(mapped["text"])
+            self.tokens.append(tok)
             self.converted = False
             self._clear_cands()
             self._refresh()
@@ -1071,6 +1101,11 @@ class ImeSession:
             picks = request.decode(self._lex)
         self.segments = display_segments(request.parts, picks)
         for segment in self.segments:
+            if not self.converted and self.input_mode == "katakana" and not segment.literal:
+                surface = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c
+                                  for c in segment.selected.surface)
+                segment.selected = replace(segment.selected, surface=surface)
+                self._display_key = None  # conversion must compute the regular candidates
             segment.mark_shown()
         self._word_starts = {start for run in picks or () for start in run.word_starts}
         self.focus = _first_stop(self.segments)

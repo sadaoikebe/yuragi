@@ -56,11 +56,6 @@ static const GUID GUID_YuragiProfile = {
 // {A7C4E206-0B3A-4F11-9E61-0C1A0B7E0A01}
 static const GUID GUID_YuragiToggle = {
     0xa7c4e206, 0x0b3a, 0x4f11, {0x9e, 0x61, 0x0c, 0x1a, 0x0b, 0x7e, 0x0a, 0x01}};
-// {A7C4E207-0B3A-4F11-9E61-0C1A0B7E0A01}
-// Alt+` down on kbd101.dll reaches TSF as VK_KANJI.
-static const GUID GUID_YuragiToggleKanji = {
-    0xa7c4e207, 0x0b3a, 0x4f11, {0x9e, 0x61, 0x0c, 0x1a, 0x0b, 0x7e, 0x0a, 0x01}};
-
 static const GUID kCats[] = {
     GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
@@ -125,9 +120,6 @@ static tip_logic::Mods HeldMods() {
     m.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     m.win = ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) != 0;
     return m;
-}
-static unsigned ModMask(tip_logic::Mods m) {
-    return (m.shift ? 1u : 0u) | (m.ctrl ? 2u : 0u) | (m.alt ? 4u : 0u) | (m.win ? 8u : 0u);
 }
 
 static bool CompartmentSet(ITfCompartmentMgr* cm, REFGUID guid) {
@@ -697,6 +689,7 @@ struct CompositionState {
     ITfComposition* composition = nullptr;
     ITfRange* commit_end = nullptr;
     long long commit_seq = 0;
+    long long applied_seq = 0;
     bool track_commit;
     bool disconnected = false;
     bool active = true, ending = false, position_pending = false, show_candidates = false;
@@ -766,13 +759,15 @@ static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, H
 }
 
 using RetiredStates = std::vector<std::shared_ptr<CompositionState>>;
+static constexpr UINT kKeysMessage = WM_APP + 2;
 
 class EditSession final : public ITfEditSession {
 public:
     enum Kind { Apply, Finalize, Position };
     EditSession(Kind kind, std::shared_ptr<CompositionState> state, ITfCompositionSink* sink,
-                const TfGuidAtom* atoms, HWND* candidate, RetiredStates* retired)
-        : kind_(kind), state_(std::move(state)), sink_(sink), candidate_(candidate), retired_(retired) {
+                const TfGuidAtom* atoms, HWND* candidate, RetiredStates* retired, HWND keys)
+        : kind_(kind), state_(std::move(state)), sink_(sink), candidate_(candidate), retired_(retired),
+          keys_(keys) {
         sink_->AddRef();
         for (int i = 0; i < 3; ++i) atoms_[i] = atoms[i];
     }
@@ -829,6 +824,8 @@ public:
             HRESULT hr = S_OK;
             if (!r.commit.empty()) hr = Write(ec, Utf8ToWide(r.commit), true, r);
             if (SUCCEEDED(hr)) hr = Write(ec, Utf8ToWide(r.composition), false, r);
+            state_->applied_seq = r.seq;
+            PostMessageW(keys_, kKeysMessage, 0, 0);
             if (FAILED(hr)) {
                 state_->BreakContinuity();
                 return hr;
@@ -963,6 +960,7 @@ private:
     TfGuidAtom atoms_[3];
     HWND* candidate_;
     RetiredStates* retired_;
+    HWND keys_;
 };
 
 // -- the taskbar glyph (DESIGN「状態」) --------------------------------------------------------
@@ -1077,6 +1075,26 @@ class Tip final : public ITfTextInputProcessorEx,
             public ITfSource,
             public ITfTextLayoutSink,
             public ITfTextEditSink {
+    enum class Action { Pass, Send, ObserveAlt, Global, Buffer };
+    struct Decision {
+        Action action = Action::Pass;
+        tip_logic::GlobalCommand command = tip_logic::GlobalCommand::None;
+        bool Eats() const { return action == Action::Send || action == Action::Global || action == Action::Buffer; }
+    };
+    struct Stroke {
+        UINT raw;
+        LPARAM flags;
+        LONG message_time;
+        ULONGLONG time;
+        tip_logic::Chord chord;
+        bool down;
+        tip_logic::GlobalCommand command = tip_logic::GlobalCommand::None;
+    };
+    struct TestedKey { Stroke key; Decision decision; };
+    struct SentKey { Stroke key; long long replay_after = 0; };
+    struct Registration { GUID guid; TF_PRESERVEDKEY key; unsigned code; };
+    static constexpr LPARAM kReplayMarker = 0x59555247; // YURG, in KEYBDINPUT.dwExtraInfo
+
 public:
     Tip() { InterlockedIncrement(&g_locks); }
     ~Tip() { InterlockedDecrement(&g_locks); }
@@ -1126,6 +1144,16 @@ public:
         tm_->AddRef();
         client_ = tid;
         settings_.Load();
+        keymap_ = tip_logic::DefaultKeyTable();
+        const unsigned toggle = settings_.toggle_vk | (settings_.toggle_mods << 8);
+        constexpr unsigned default_toggle = VK_OEM_3 | (4 << 8);
+        const auto mods = settings_.toggle_mods;
+        if (toggle != default_toggle && !(mods & 8) && !tip_logic::ModifierVk(settings_.toggle_vk) &&
+            !tip_logic::Typing({settings_.toggle_vk, {(mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, false}})) {
+            keymap_.rev.clear(); // the broker's copy takes precedence when received
+            keymap_.global.erase(default_toggle);
+            keymap_.global[toggle] = tip_logic::GlobalCommand::Toggle;
+        }
         g_log = settings_.log;
         ITfSource* src = nullptr;
         if (SUCCEEDED(tm_->QueryInterface(IID_ITfSource, (void**)&src))) {
@@ -1145,7 +1173,7 @@ public:
         }
         EnsureWindow();
         SetKeyboardOpen(tm_, client_, TRUE);
-        PreserveToggle();
+        PreserveKeys();
         ITfLangBarItemMgr* lbm = nullptr;
         if (SUCCEEDED(tm_->QueryInterface(IID_ITfLangBarItemMgr, (void**)&lbm))) {
             if (SUCCEEDED(lbm->AddItem(this))) langbar_ = true;
@@ -1183,7 +1211,7 @@ public:
             }
             ITfKeystrokeMgr* km = nullptr;
             if (SUCCEEDED(tm_->QueryInterface(IID_ITfKeystrokeMgr, (void**)&km))) {
-                UnpreserveToggle(km);
+                UnpreserveKeys(km);
                 km->UnadviseKeyEventSink(client_);
                 km->Release();
             }
@@ -1254,80 +1282,99 @@ public:
     }
 
     // -- keys (DESIGN「打鍵の処理」) ----------------------------------------------------------------------
-    HRESULT STDMETHODCALLTYPE OnTestKeyDown(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
+    HRESULT STDMETHODCALLTYPE OnTestKeyDown(ITfContext*, WPARAM w, LPARAM l, BOOL* e) override {
         if (!e) return E_INVALIDARG;
-        ReleaseToggleLatch();
-        *e = CanEat(VkOf(w)) ? TRUE : FALSE;
+        auto key = ReadStroke(w, l);
+        if (IsReplay(key)) { *e = FALSE; return S_OK; }
+        bool tested = SameTest(key);
+        auto decision = tested ? tested_->decision : Decide(key);
+        if (decision.action == Action::ObserveAlt && !tested)
+            Buffer(key); // no pipe I/O in OnTestKeyDown
+        tested_ = TestedKey{key, decision};
+        *e = decision.Eats() ? TRUE : FALSE;
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE OnTestKeyUp(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
-        if (!e) return E_INVALIDARG;
-        UINT vk = VkOf(w);
-        *e = Eligible() && ((toggle_down_ && ToggleVk(vk) == toggle_active_vk_ && toggle_eaten_) ||
-                            (!direct_ && down_eaten_[vk])) ? TRUE : FALSE;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext* ctx, WPARAM w, LPARAM, BOOL* e) override {
+    HRESULT STDMETHODCALLTYPE OnTestKeyUp(ITfContext*, WPARAM w, LPARAM l, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
-        UINT vk = VkOf(w);
-        ReleaseToggleLatch();
-        if (!Eligible()) return S_OK;
-        if (FocusChanged()) FocusMoved();
-        if (ToggleKey(vk)) {
-            bool eaten = Toggle();
-            toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = ToggleVk(vk);
-            *e = eaten ? TRUE : FALSE;
-            return S_OK;
-        }
-        Mode mode = CurrentMode();
-        bool kana = !direct_ && !HeldMods().Shortcut() &&
-                    (tip_logic::CharacterVk(vk) || vk == VK_SPACE);
-        if (kana && !link_.Connected()) TryConnect();  // DESIGN「接続」
-        if (kana && mode == Mode::Stopped && !stopped_told_) {
-            stopped_told_ = true;  // once per focus (DESIGN「小さな表示」)
-            ShowNotice(Notice::Stopped);
-        }
-        if (!CanEat(vk)) return S_OK;
-        ULONGLONG start = NowMs();
-        bool eaten = SendKey(true, vk, start, ctx);
-        Log(L"keydown return t=%llu elapsed=%llu eaten=%d", start, NowMs() - start, eaten);
-        if (eaten) {
-            down_mods_[vk] = HeldMods();
-            down_eaten_[vk] = true;
-        }
-        *e = eaten ? TRUE : FALSE;
+        auto key = ReadStroke(w, l, false);
+        if (GetMessageExtraInfo() != kReplayMarker && !SameEvent(tested_up_, key))
+            QueueRelease(key);
+        tested_up_ = key;
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE OnKeyUp(ITfContext*, WPARAM w, LPARAM, BOOL* e) override {
+    HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext* ctx, WPARAM w, LPARAM l, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
-        UINT vk = VkOf(w);
-        if (toggle_down_ && ToggleVk(vk) == toggle_active_vk_) {
-            *e = Eligible() && toggle_eaten_ ? TRUE : FALSE;
-            toggle_down_ = toggle_eaten_ = false;
-            return S_OK;
+        auto key = ReadStroke(w, l);
+        if (IsReplay(key)) return S_OK;
+        const bool tested = SameTest(key);
+        if (tested) key = tested_->key; // the modifier snapshot of this event
+        Decision decision = tested ? tested_->decision : Decide(key);
+        tested_.reset();
+        *e = decision.Eats() ? TRUE : FALSE;
+        if (FocusChanged()) {
+            FocusMoved();
+            if (ctx != scope_ctx_) return S_OK;
         }
-        if (!Eligible()) return S_OK;
-        bool promised = down_eaten_[vk];
-        down_eaten_[vk] = false;
-        if (!promised || direct_ || !link_.Connected()) return S_OK;
-        // The release carries the consumed down's modifiers, so a Ctrl pressed
-        // meanwhile cannot hide it from the FSM.
-        *e = SendKey(false, vk, NowMs()) ? TRUE : FALSE;
+        if (!Eligible() || scope_ != Scope::Allowed) return S_OK;
+        FlushReleases();
+        if (!direct_ && tip_logic::Typing(key.chord)) {
+            if (!link_.Connected()) TryConnect();
+            if (CurrentMode() == Mode::Stopped && !stopped_told_) {
+                stopped_told_ = true;
+                ShowNotice(Notice::Stopped);
+            }
+        }
+        switch (decision.action) {
+            case Action::Buffer: Buffer(key); break;
+            case Action::Global: RunGlobal(decision.command); break;
+            case Action::Send:
+                if (!SendKey(key, true, ctx, true) && ctx == scope_ctx_) Replay(key);
+                break;
+            case Action::ObserveAlt:
+                if (tested && !buffered_.empty() && SameEvent(buffered_.front(), key) && !KeysWaiting()) {
+                    buffered_.pop_front();
+                    SendKey(key, false, ctx, true);
+                } else if (!tested) {
+                    if (KeysWaiting() || !buffered_.empty()) Buffer(key);
+                    else SendKey(key, false, ctx, true);
+                }
+                break;
+            case Action::Pass:
+                down_sent_[key.raw].reset();
+                break;
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnKeyUp(ITfContext*, WPARAM w, LPARAM l, BOOL* e) override {
+        if (!e) return E_INVALIDARG;
+        *e = FALSE;
+        auto key = ReadStroke(w, l, false);
+        if (GetMessageExtraInfo() == kReplayMarker) return S_OK;
+        tested_.reset();
+        if (!SameEvent(tested_up_, key)) QueueRelease(key);
+        tested_up_.reset();
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnPreservedKey(ITfContext*, REFGUID guid, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
-        bool alias = guid == GUID_YuragiToggleKanji;
-        if (guid != GUID_YuragiToggle && !alias) return S_OK;
-        if (!Eligible()) return S_OK;
-        UINT vk = alias ? preserved_alias_.uVKey : settings_.toggle_vk;
-        if (!ToggleKey(vk)) return S_OK;
-        bool eaten = Toggle();
-        toggle_down_ = true; toggle_eaten_ = eaten; toggle_active_vk_ = ToggleVk(vk);
-        *e = toggle_eaten_ ? TRUE : FALSE;
+        if (GetMessageExtraInfo() == kReplayMarker || HeldMods().win || !Eligible() ||
+            scope_ != Scope::Allowed || FocusChanged()) return S_OK;
+        for (const auto& key : preserved_) {
+            if (key.guid != guid) continue;
+            auto command = GlobalFor(key.code);
+            if (command != tip_logic::GlobalCommand::None) {
+                *e = TRUE;
+                if (KeysWaiting() || !buffered_.empty()) {
+                    auto event = ReadStroke(key.key.uVKey, 0);
+                    event.command = command;
+                    Buffer(event);
+                } else RunGlobal(command);
+            }
+            break;
+        }
         return S_OK;
     }
 
@@ -1480,14 +1527,18 @@ private:
     friend class ReadSession;
     enum class Scope { Unknown, Allowed, Password };
     static const UINT kLinkMessage = WM_APP + 1;
-    static const UINT_PTR kTimerNotice = 3;
+    static const UINT_PTR kTimerNotice = 3, kTimerReplay = 4;
     static const DWORD kLangBarCookie = 0x6f79;
 
     // -- the TIP's window: link messages and its one-shot timers ---------------------------
     static LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         auto* self = (Tip*)GetWindowLongPtrW(h, GWLP_USERDATA);
         if (self && m == kLinkMessage) {
-            self->Drain(false, 0, nullptr);
+            self->Drain(false, 0);
+            return 0;
+        }
+        if (self && m == kKeysMessage) {
+            self->PumpKeys();
             return 0;
         }
         if (self && m == WM_TIMER) {
@@ -1521,6 +1572,13 @@ private:
             if (!direct_) SendRequest("timeout", "\"t\":" + std::to_string(NowMs()));
         } else if (id == kTimerNotice) {
             HideNotice();
+        } else if (id == kTimerReplay) {
+            if (retry_replay_) {
+                auto key = *retry_replay_;
+                retry_replay_.reset();
+                Replay(key);
+            } else replay_.reset();
+            PumpKeys();
         }
     }
 
@@ -1544,10 +1602,8 @@ private:
 
     Mode CurrentMode() const { return tip_logic::ModeFor(link_state_, broker_state_); }
 
-    // Lines and link changes, in order. sync: inside a key event (edits may
-    // be synchronous). Returns whether the reply for `wanted` was handled;
-    // that reply is copied to *reply (the caller decides the key with it).
-    bool Drain(bool sync, long long wanted, Message* reply) {
+    // Apply link changes and replies in order, synchronously when TSF allows it.
+    bool Drain(bool sync, long long wanted) {
         bool found = false;
         BrokerLink::Item item;
         Mode before = CurrentMode();
@@ -1577,12 +1633,11 @@ private:
                     if (!tip_logic::ParseMessage(item.line, m)) break;
                     if (Handle(m, sync, wanted)) {
                         found = true;
-                        if (reply) *reply = m;
                     }
                     break;
                 }
             }
-            if (found) break;  // the caller applies the wanted reply itself
+            if (found) break;
         }
         if (CurrentMode() != before) UpdateLangBar();
         return found;
@@ -1593,9 +1648,16 @@ private:
         // The hello reply, a state event, or {"seq","state"}: a request the
         // engine did not get (it is starting, or down).
         bool was_ready = broker_state_ == "ready";
+        if (m.keymap && m.keymap->rev != keymap_.rev) {
+            keymap_ = *m.keymap;
+            PreserveKeys();
+        }
         if (m.hello || m.event == "state" || (m.has_seq && !m.engine)) broker_state_ = m.state;
         // DESIGN「使えない間の打鍵」: a ready engine has opened a new session, in kana input.
-        if (!was_ready && broker_state_ == "ready" && direct_) SendRequest("set_direct", "\"direct\":true");
+        if (!was_ready && broker_state_ == "ready") {
+            if (katakana_) pending_mode_seq_ = SendRequest("set_mode", "\"mode\":\"katakana\"");
+            if (direct_) pending_mode_seq_ = SendRequest("set_direct", "\"direct\":true");
+        }
         if (!m.has_seq) {
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
             return false;
@@ -1608,51 +1670,60 @@ private:
             FocusMoved();
             return false;
         }
-        if (tip_logic::CommitsVisibleText(m)) FinishLocal(!m.engine);
-        if (!m.engine) return false;  // {"seq","state"}: not processed; handled above
+        if (!m.engine) {
+            std::optional<Stroke> missed;
+            auto sent = sent_keys_.find(m.seq);
+            if (sent != sent_keys_.end()) missed = sent->second.key;
+            if (tip_logic::CommitsVisibleText(m)) FinishLocal();
+            if (missed) Replay(*missed);
+            return m.seq == wanted;
+        }
+        if (tip_logic::CommitsVisibleText(m)) FinishLocal(false);
         if (m.error) {
+            sent_keys_.clear();
+            pending_mode_seq_ = mode_edit_seq_ = 0;
             NoteReply(m);  // the engine started a clean session; the text stays (DESIGN「見えている文字の確定」)
-            return false;
+            PostMessageW(hwnd_, kKeysMessage, 0, 0);
+            return m.seq == wanted;
         }
         Log(L"reply client=%p seq=%lld t=%llu pending=%d",
             static_cast<void*>(this), m.seq, NowMs(), m.pending);
-        if (m.seq == wanted) return true;
+        if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.seq);
+        for (const auto& [seq, eat] : m.resolved_keys) KeyResult(seq, eat, m.seq);
+        if (pending_mode_seq_ && m.seq >= pending_mode_seq_ && !m.pending) {
+            pending_mode_seq_ = 0;
+            mode_edit_seq_ = m.seq;
+        }
         NoteReply(m);
         ApplyReply(m, sync);
-        return false;
+        return m.seq == wanted;
     }
 
     // -- sending ---------------------------------------------------------------------------
     // A numbered request whose reply is applied when it comes (timer polls,
     // resets). Only while keys go to the broker at all.
-    void SendRequest(const std::string& op, const std::string& extra = "") {
-        if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return;
+    long long SendRequest(const std::string& op, const std::string& extra = "") {
+        if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return 0;
         long long seq = in_flight_.Next(NowMs());
-        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), tip_logic::KEY_BUDGET_MS))
+        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), tip_logic::KEY_BUDGET_MS)) {
             in_flight_.Answer(seq);
+            return 0;
+        }
+        return seq;
     }
     // A request to the broker itself (retry, open_admin): no reply.
     void SendOp(const char* op) {
         link_.Write(std::string("{\"op\":\"") + op + "\"}", tip_logic::KEY_BUDGET_MS);
     }
 
-    // One key: sent with its number; its reply is awaited at most KEY_BUDGET_MS.
-    // In time, it is applied at once and decides the key. Late, the key is
-    // eaten as OnTestKeyDown said, nothing on screen changes, the connection
-    // stays, and the reply is applied when it arrives (DESIGN「打鍵の処理」).
-    bool SendKey(bool down, UINT vk, ULONGLONG start, ITfContext* ctx = nullptr) {
-        tip_logic::Local before = LocalState();
-        bool before_timer = timer_pending_;
-        int before_tokens = n_tokens_;
-        tip_logic::Mods mods = down ? HeldMods() : down_mods_[vk];
-        ULONGLONG deadline = start + tip_logic::KEY_BUDGET_MS;
+    bool SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
+        if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return false;
+        const ULONGLONG start = NowMs(), deadline = start + tip_logic::KEY_BUDGET_MS;
         std::optional<tip_logic::KeyContext> context;
         bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
-        if (settings_.document_context && down && !mods.Shortcut()
-                && (tip_logic::CharacterVk(vk) || vk == VK_SPACE)
+        if (settings_.document_context && key.down && tip_logic::Typing(key.chord)
                 && ((!composing_ && fsm_idle_) || awaiting)) {
             context.emplace();
-            // An outstanding reply may commit text before this key starts input.
             context->disconnected = !awaiting && state_ && state_->disconnected;
             if (CanReadContext(ctx)) {
                 uint64_t generation = focus_generation_;
@@ -1665,72 +1736,57 @@ private:
             }
         }
         long long seq = in_flight_.Next(start);
-        auto request = tip_logic::KeyRequest(seq, down, vk, start, mods, context ? &*context : nullptr);
+        auto request = tip_logic::KeyRequest(seq, key.down, key.chord.vk, key.time, key.chord.mods,
+                                            context ? &*context : nullptr);
         ULONGLONG now = NowMs();
         DWORD budget = now < deadline ? (DWORD)(deadline - now) : 0;
         if (!link_.Write(request, budget)) {
             in_flight_.Answer(seq);
-            return false;  // not sent: the key goes to the application
+            return false;
         }
-        Log(L"key sent client=%p seq=%lld t=%llu space=%d down=%d",
-            static_cast<void*>(this), seq, start, vk == VK_SPACE, down);
-        Message r;
-        for (;;) {
-            if (Drain(true, seq, &r)) break;
-            // Answered without the engine (starting, down): the key goes to the
-            // application. With an error: it was taken as OnTestKeyDown said;
-            // the visible text was committed.
-            if (!in_flight_.Waiting(seq)) return tip_logic::SendsKeys(CurrentMode());
-            ULONGLONG now = NowMs();
-            if (now >= deadline) return true;
-            WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
+        if (capture) sent_keys_.emplace(seq, SentKey{key});
+        if (key.down && capture) down_sent_[key.raw] = key.chord;
+        if (sync) {
+            while (in_flight_.Waiting(seq) && !Drain(true, seq)) {
+                now = NowMs();
+                if (now >= deadline || !in_flight_.Waiting(seq)) break;
+                WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
+            }
         }
-        if (r.seq <= stale_upto_) return true;
-        bool eat = tip_logic::EatAfterReply(down, vk, mods, before, before_timer, before_tokens, r);
-        NoteReply(r);
-        if (settings_.log_text)
-            Log(L"%s vk=%u comp=%s commit=%s", down ? L"down" : L"up", vk,
-                Utf8ToWide(r.composition).c_str(), Utf8ToWide(r.commit).c_str());
-        ApplyReply(r, true);
-        return eat;
-    }
-
-    bool Toggle() {
-        Mode mode = CurrentMode();
-        if (!tip_logic::Toggles(mode)) return false;
-        direct_ = !direct_;  // shown at once; the engine follows in order
-        FinishLocal();
-        UpdateLangBar();
-        if (!tip_logic::SendsKeys(mode)) return true;  // preparing: told once ready (Handle)
-        long long seq = in_flight_.Next(NowMs());
-        std::string request = tip_logic::OpRequest(seq, "set_direct",
-                                                   direct_ ? "\"direct\":true" : "\"direct\":false");
-        if (!link_.Write(request, tip_logic::KEY_BUDGET_MS)) in_flight_.Answer(seq);
         return true;
     }
 
-    // -- replies ------------------------------------------------------------------------------
+    void SendKeyUp(Stroke key) {
+        auto& sent = down_sent_[key.raw];
+        if (!sent) return;
+        key.chord = *sent;
+        sent.reset();
+        SendKey(key, false, nullptr, false);
+    }
+
+    bool Toggle() { return RunGlobal(tip_logic::GlobalCommand::Toggle); }
+
+    // -- replies --------------------------------------------------------------------------
     tip_logic::Local LocalState() const {
-        tip_logic::Local l;
-        l.composing = composing_;
-        l.converted = converted_;
-        l.candidates = !cands_.empty() || pending_;
-        l.awaiting = in_flight_.Waiting();
-        return l;
+        return {phase_, timer_pending_ || pending_ || in_flight_.Waiting()};
     }
 
     void NoteReply(const Message& r) {
         bool mode_changed = direct_ != r.direct;
         direct_ = r.direct;
+        if (!r.input_mode.empty()) katakana_ = r.input_mode == "katakana";
+        phase_ = r.phase.value_or(r.direct ? tip_logic::Phase::Direct :
+                 r.predicting ? tip_logic::Phase::Predicting :
+                 r.converted ? tip_logic::Phase::Selecting :
+                 r.n_tokens > 0 || !r.composition.empty() ? tip_logic::Phase::Composing :
+                 tip_logic::Phase::Empty);
         if (mode_changed) {
             if (state_) state_->BreakContinuity();
             UpdateLangBar();
         }
         pending_ = r.pending;
         fsm_idle_ = r.fsm_idle;
-        n_tokens_ = r.n_tokens;
-        composing_ = !r.composition.empty() || r.n_tokens > 0 || r.has_timer;
-        converted_ = r.converted || r.pending;
+        composing_ = phase_ != tip_logic::Phase::Empty && phase_ != tip_logic::Phase::Direct;
         timer_pending_ = r.has_timer && !r.direct;
         cands_.clear();
         for (const auto& c : r.candidates) cands_.push_back(Utf8ToWide(c));
@@ -1775,7 +1831,7 @@ private:
     }
 
     void RequestEdit(EditSession::Kind kind, std::shared_ptr<CompositionState> state, bool sync) {
-        auto* es = new EditSession(kind, state, this, atoms_, &cand_hwnd_, &retired_);
+        auto* es = new EditSession(kind, state, this, atoms_, &cand_hwnd_, &retired_, hwnd_);
         HRESULT result = S_OK;
         DWORD flags = (kind == EditSession::Position ? TF_ES_READ : TF_ES_READWRITE) |
                       (sync ? TF_ES_SYNC : TF_ES_ASYNCDONTCARE);
@@ -1787,8 +1843,10 @@ private:
         // is done about it; the connection is the broker's business, not the app's.
         if (FAILED(hr) || FAILED(result)) {
             if (kind == EditSession::Apply) {
+                if (!state->pending.empty()) state->applied_seq = state->pending.back().seq;
                 state->pending.clear();
                 state->BreakContinuity();
+                PostMessageW(hwnd_, kKeysMessage, 0, 0);
             }
             Log(L"edit refused hr=%08lx result=%08lx", hr, result);
         }
@@ -1806,6 +1864,15 @@ private:
         if (invalidate_replies) {
             stale_upto_ = in_flight_.Last();
             in_flight_.Clear();
+            sent_keys_.clear();
+            buffered_.clear();
+            releases_.clear();
+            tested_.reset();
+            tested_up_.reset();
+            replay_.reset();
+            retry_replay_.reset();
+            KillTimer(hwnd_, kTimerReplay);
+            pending_mode_seq_ = mode_edit_seq_ = 0;
         }
         CancelReplyTimer();
         auto old = state_;
@@ -1822,11 +1889,10 @@ private:
         }
         retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
             [](const std::shared_ptr<CompositionState>& o) { return !o->composition; }), retired_.end());
-        composing_ = converted_ = pending_ = timer_pending_ = false;
+        composing_ = pending_ = timer_pending_ = false;
         fsm_idle_ = true;
-        n_tokens_ = 0;
-        for (bool& eaten : down_eaten_) eaten = false;
-        toggle_down_ = toggle_eaten_ = false;
+        phase_ = direct_ ? tip_logic::Phase::Direct : tip_logic::Phase::Empty;
+        for (auto& sent : down_sent_) sent.reset();
         HideCands();
     }
 
@@ -1876,52 +1942,238 @@ private:
         edit_cookie_ = TF_INVALID_COOKIE;
     }
 
-    // -- eating ------------------------------------------------------------------------------
+    // -- keys and replay -------------------------------------------------------------------
     bool Eligible() { return tm_ && !KeyboardDisabled(tm_) && !KeyboardClosed(tm_); }
-    bool CanEat(UINT vk) {
-        if (!Eligible() || scope_ != Scope::Allowed) return false;
-        if (ToggleKey(vk)) return tip_logic::Toggles(CurrentMode());
-        if (direct_ || !link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return false;
-        return tip_logic::WantKey(vk, HeldMods(), LocalState());
+    Stroke ReadStroke(WPARAM w, LPARAM l, bool down = true) {
+        UINT vk = VkOf(w);
+        return {vk, l, GetMessageTime(), NowMs(), tip_logic::NormalizeKey(vk, HeldMods()), down};
+    }
+    bool SameTest(const Stroke& key) const {
+        return tested_ && SameEvent(tested_->key, key);
+    }
+    static bool SameEvent(const std::optional<Stroke>& event, const Stroke& key) {
+        constexpr LPARAM scan = 0x01FF0000;
+        return event && key.raw == event->raw && (key.flags & scan) == (event->flags & scan) &&
+               key.message_time == event->message_time;
+    }
+    bool KeysWaiting() const {
+        return !sent_keys_.empty() || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_;
+    }
+    tip_logic::GlobalCommand GlobalFor(unsigned code) const {
+        using tip_logic::GlobalCommand;
+        auto command = keymap_.GlobalAt(phase_, code);
+        if (command == GlobalCommand::Settings) return command;
+        if (command == GlobalCommand::Words)
+            return tip_logic::SendsKeys(CurrentMode()) ? command : GlobalCommand::None;
+        return tip_logic::Toggles(CurrentMode()) ? command : GlobalCommand::None;
     }
 
-    // -- the toggle key ------------------------------------------------------------------------
-    static UINT ToggleAlias(UINT vk, unsigned mods) {
-        return vk == VK_OEM_3 && (mods & 4) ? VK_KANJI : 0;
+    Decision Decide(const Stroke& key, bool buffer = true) {
+        using namespace tip_logic;
+        if (!Eligible() || scope_ != Scope::Allowed || key.chord.mods.win) return {};
+        auto local = LocalState();
+        bool ready = link_.Connected() && SendsKeys(CurrentMode());
+        if (AltVk(key.raw)) {
+            if (!direct_ && ready && (local.phase != Phase::Empty || local.unsettled))
+                return {Action::ObserveAlt};
+            return {};
+        }
+        if (ModifierVk(key.raw)) return {};
+        // kbd101 has already changed the system's kana lock on this event.
+        if (key.raw == VK_KANA && ((key.flags >> 16) & 0xFF) == 0x3A) return {};
+        auto global = GlobalFor(key.chord.Code());
+        if (buffer && (KeysWaiting() || !buffered_.empty()) &&
+            (global != GlobalCommand::None || !key.chord.mods.alt || key.chord.mods.ctrl))
+            return {Action::Buffer};
+        if (global != GlobalCommand::None) return {Action::Global, global};
+        if (ready && !direct_ && WantKey(key.chord, local, keymap_) == Take::Send)
+            return {Action::Send};
+        return {};
     }
-    UINT ToggleVk(UINT vk) const {
-        return vk && vk == ToggleAlias(settings_.toggle_vk, settings_.toggle_mods) ? settings_.toggle_vk : vk;
+
+    void Buffer(const Stroke& key) {
+        buffered_.push_back(key);
+        PostMessageW(hwnd_, kKeysMessage, 0, 0);
     }
-    bool ToggleKey(UINT vk) const {
-        return ToggleVk(vk) == settings_.toggle_vk && ModMask(HeldMods()) == settings_.toggle_mods;
-    }
-    void ReleaseToggleLatch() {
-        if (toggle_down_ && !(GetKeyState(toggle_active_vk_) & 0x8000)) {
-            toggle_down_ = toggle_eaten_ = false;
+    void QueueRelease(const Stroke& key) {
+        if (!Eligible() || scope_ != Scope::Allowed || FocusChanged()) return;
+        auto stroke = std::find_if(buffered_.rbegin(), buffered_.rend(),
+                                  [&](const Stroke& queued) { return queued.raw == key.raw; });
+        if (stroke != buffered_.rend() && stroke->down) {
+            Buffer(key);
+        } else if (down_sent_[key.raw]) {
+            auto release = key;
+            release.chord = *down_sent_[key.raw];
+            down_sent_[key.raw].reset();
+            releases_.push_back(release);
+            PostMessageW(hwnd_, kKeysMessage, 0, 0);
         }
     }
-    void PreserveToggle() {
+    void KeyResult(long long seq, bool eat, long long reply_seq) {
+        auto key = sent_keys_.find(seq);
+        if (key == sent_keys_.end()) return;
+        if (eat) sent_keys_.erase(key);
+        else key->second.replay_after = reply_seq;
+    }
+    void FlushReleases() {
+        while (!releases_.empty()) {
+            auto release = releases_.front();
+            releases_.pop_front();
+            SendKey(release, false, nullptr, false);
+        }
+    }
+    void PumpKeys() {
+        if (!tm_) return;
+        if (FocusChanged()) { FocusMoved(); return; }
+        FlushReleases();
+        if (replay_ || retry_replay_ || pending_mode_seq_) return;
+        if (mode_edit_seq_) {
+            if (!state_ || state_->applied_seq < mode_edit_seq_) return;
+            mode_edit_seq_ = 0;
+        }
+        if (!sent_keys_.empty()) {
+            auto sent = sent_keys_.begin();
+            auto after = sent->second.replay_after;
+            if (!after || !state_ || state_->applied_seq < after) return;
+            auto key = sent->second.key;
+            sent_keys_.erase(sent);
+            Replay(key);
+            if (replay_ || retry_replay_) return;
+        }
+        if (state_ && !state_->pending.empty()) return;
+        while (!buffered_.empty() && !KeysWaiting()) {
+            auto key = buffered_.front();
+            buffered_.pop_front();
+            if (!key.down) { SendKeyUp(key); continue; }
+            if (tip_logic::AltVk(key.raw)) { SendKey(key, false, nullptr, false); continue; }
+            auto decision = key.command == tip_logic::GlobalCommand::None
+                          ? Decide(key, false) : Decision{Action::Global, key.command};
+            if (decision.action == Action::Global) RunGlobal(decision.command);
+            else if (decision.action != Action::Send || !SendKey(key, true, scope_ctx_, false)) Replay(key);
+        }
+    }
+
+    bool IsReplay(const Stroke& key) {
+        const bool marked = GetMessageExtraInfo() == kReplayMarker;
+        // Some TSF hosts do not expose GetMessageExtraInfo to the key sink.
+        // In that case the one outstanding replay matches the key once.
+        bool same = replay_ && (key.raw == replay_->raw || key.chord.vk == replay_->chord.vk)
+                    && key.chord.mods.Bits() == replay_->chord.mods.Bits();
+        if (same) {
+            replay_.reset();
+            KillTimer(hwnd_, kTimerReplay);
+            tested_ = TestedKey{key, {}};
+            PostMessageW(hwnd_, kKeysMessage, 0, 0);
+        }
+        return marked || same;
+    }
+
+    void Replay(const Stroke& key) {
+        DWORD foreground = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &foreground);
+        if (foreground != GetCurrentProcessId() || FocusChanged() || scope_ != Scope::Allowed) return;
+        if ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) {
+            retry_replay_ = key;
+            SetTimer(hwnd_, kTimerReplay, 25, nullptr);
+            return;
+        }
+        replay_ = key;
+        // SendInput uses the keyboard state at injection time; restore any
+        // modifiers the user changed while this key was waiting for its reply.
+        std::vector<INPUT> input;
+        auto add = [&](UINT vk, bool up, bool extended = false) {
+            INPUT event{};
+            event.type = INPUT_KEYBOARD;
+            event.ki.wVk = (WORD)vk;
+            event.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) | (extended ? KEYEVENTF_EXTENDEDKEY : 0);
+            event.ki.dwExtraInfo = (ULONG_PTR)kReplayMarker;
+            input.push_back(event);
+        };
+        const auto mods = key.chord.mods;
+        const std::pair<UINT, bool> wanted[] = {{VK_LSHIFT, mods.shift}, {VK_LCONTROL, mods.ctrl},
+                                               {VK_LMENU, mods.alt}};
+        std::vector<std::pair<UINT, bool>> restore;
+        for (auto [left, need] : wanted) {
+            bool left_held = (GetAsyncKeyState(left) & 0x8000) != 0;
+            bool right_held = (GetAsyncKeyState(left + 1) & 0x8000) != 0;
+            if (need && !left_held && !right_held) {
+                add(left, false);
+                restore.emplace_back(left, true);
+            } else if (!need) {
+                if (left_held) {
+                    add(left, true);
+                    restore.emplace_back(left, false);
+                }
+                if (right_held) {
+                    add(left + 1, true, left != VK_LSHIFT);
+                    restore.emplace_back(left + 1, false);
+                }
+            }
+        }
+        const bool extended = (key.flags & (1L << 24)) != 0;
+        const bool released = !(GetAsyncKeyState(key.raw) & 0x8000);
+        add(key.raw, false, extended);
+        if (released) add(key.raw, true, extended);
+        for (auto it = restore.rbegin(); it != restore.rend(); ++it)
+            add(it->first, it->second, it->first == VK_RCONTROL || it->first == VK_RMENU);
+        if (SendInput((UINT)input.size(), input.data(), sizeof(INPUT)) != input.size()) {
+            Log(L"key replay failed vk=%u", key.raw);
+            replay_.reset();
+            PostMessageW(hwnd_, kKeysMessage, 0, 0);
+        } else {
+            SetTimer(hwnd_, kTimerReplay, tip_logic::KEY_BUDGET_MS, nullptr);
+        }
+    }
+
+    bool RunGlobal(tip_logic::GlobalCommand command) {
+        using tip_logic::GlobalCommand;
+        if (command == GlobalCommand::Settings || command == GlobalCommand::Words) {
+            if (!link_.Connected()) TryConnect(true);
+            if (command == GlobalCommand::Settings) SendOp("open_admin");
+            else link_.Write("{\"op\":\"open_admin\",\"tab\":\"words\"}", tip_logic::KEY_BUDGET_MS);
+            return true;
+        }
+        if (!tip_logic::Toggles(CurrentMode())) return false;
+        bool mode = command == GlobalCommand::Hiragana || command == GlobalCommand::Katakana;
+        bool direct = command == GlobalCommand::Toggle ? !direct_ : command == GlobalCommand::Off;
+        if (mode) {
+            bool katakana = command == GlobalCommand::Katakana;
+            pending_mode_seq_ = SendRequest("set_mode", katakana ? "\"mode\":\"katakana\"" : "\"mode\":\"hiragana\"");
+            if (!pending_mode_seq_) katakana_ = katakana;
+        } else {
+            pending_mode_seq_ = SendRequest("set_direct", direct ? "\"direct\":true,\"commit\":true" :
+                                                                  "\"direct\":false");
+        }
+        if (!pending_mode_seq_) {
+            direct_ = direct;
+            FinishLocal();
+            UpdateLangBar();
+        }
+        return true;
+    }
+
+    void PreserveKeys() {
         ITfKeystrokeMgr* km = nullptr;
         if (FAILED(tm_->QueryInterface(IID_ITfKeystrokeMgr, (void**)&km))) return;
-        preserved_toggle_ = {settings_.toggle_vk, 0};
-        // tip.json uses shift=1/ctrl=2/alt=4, unlike TSF's modifier flags.
-        if (settings_.toggle_mods & 1) preserved_toggle_.uModifiers |= TF_MOD_SHIFT;
-        if (settings_.toggle_mods & 2) preserved_toggle_.uModifiers |= TF_MOD_CONTROL;
-        if (settings_.toggle_mods & 4) preserved_toggle_.uModifiers |= TF_MOD_ALT;
-        // TSF has no Win modifier flag; ToggleKey checks the full mask.
-        toggle_preserved_ = SUCCEEDED(km->PreserveKey(client_, GUID_YuragiToggle,
-                                                      &preserved_toggle_, nullptr, 0));
-        if (UINT alias = ToggleAlias(settings_.toggle_vk, settings_.toggle_mods)) {
-            preserved_alias_ = {alias, preserved_toggle_.uModifiers};
-            alias_preserved_ = SUCCEEDED(km->PreserveKey(client_, GUID_YuragiToggleKanji,
-                                                         &preserved_alias_, nullptr, 0));
+        UnpreserveKeys(km);
+        for (const auto& [code, command] : keymap_.global) {
+            unsigned mods = code >> 8;
+            if ((mods & 6) != 4 || preserved_.size() == 40) continue;  // Alt without Ctrl
+            GUID guid = GUID_YuragiToggle;
+            guid.Data1 += (ULONG)preserved_.size();
+            UINT vk = code & 0xFF;
+            UINT flags = TF_MOD_ALT | ((mods & 1) ? TF_MOD_SHIFT : 0);
+            if (vk == VK_OEM_3 && mods == 4) { vk = VK_KANJI; flags = TF_MOD_IGNORE_ALL_MODIFIER; }
+            if (vk == VK_CAPITAL && mods == 4) { vk = 0xF1; flags = TF_MOD_IGNORE_ALL_MODIFIER; }
+            TF_PRESERVEDKEY preserved{vk, flags};
+            if (SUCCEEDED(km->PreserveKey(client_, guid, &preserved, nullptr, 0)))
+                preserved_.push_back({guid, preserved, code});
         }
         km->Release();
     }
-    void UnpreserveToggle(ITfKeystrokeMgr* km) {
-        if (alias_preserved_) km->UnpreserveKey(GUID_YuragiToggleKanji, &preserved_alias_);
-        if (toggle_preserved_) km->UnpreserveKey(GUID_YuragiToggle, &preserved_toggle_);
-        alias_preserved_ = toggle_preserved_ = false;
+    void UnpreserveKeys(ITfKeystrokeMgr* km) {
+        for (const auto& key : preserved_) km->UnpreserveKey(key.guid, &key.key);
+        preserved_.clear();
     }
 
     // -- the candidate list and the notice --------------------------------------------------------
@@ -2067,7 +2319,7 @@ private:
     std::string broker_state_;
     tip_logic::InFlight in_flight_;
     long long stale_upto_ = 0;  // last sequence issued before local composition was retired
-    UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerNotice;
+    UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerReplay;
     tip_logic::ConnectGate connect_gate_;
     HWND hwnd_ = nullptr, cand_hwnd_ = nullptr, notice_hwnd_ = nullptr;
     Scope scope_ = Scope::Unknown;
@@ -2078,18 +2330,20 @@ private:
     DWORD layout_cookie_ = TF_INVALID_COOKIE;
     Notice notice_ = Notice::None;
     bool stopped_told_ = false;
-    bool direct_ = false;
-    bool composing_ = false, converted_ = false, pending_ = false, timer_pending_ = false;
+    bool direct_ = false, katakana_ = false;
+    bool composing_ = false, pending_ = false, timer_pending_ = false;
     bool fsm_idle_ = true;
-    int n_tokens_ = 0;
     std::vector<std::wstring> cands_;
     int cand_index_ = 0;
-    bool down_eaten_[256]{};
-    tip_logic::Mods down_mods_[256]{};
-    bool toggle_down_ = false, toggle_eaten_ = false;
-    UINT toggle_active_vk_ = 0;
-    TF_PRESERVEDKEY preserved_toggle_{}, preserved_alias_{};
-    bool toggle_preserved_ = false, alias_preserved_ = false;
+    tip_logic::KeyTable keymap_ = tip_logic::DefaultKeyTable();
+    tip_logic::Phase phase_ = tip_logic::Phase::Empty;
+    std::optional<TestedKey> tested_;
+    std::optional<Stroke> tested_up_, replay_, retry_replay_;
+    std::array<std::optional<tip_logic::Chord>, 256> down_sent_{};
+    std::map<long long, SentKey> sent_keys_;
+    std::deque<Stroke> buffered_, releases_;
+    std::vector<Registration> preserved_;
+    long long pending_mode_seq_ = 0, mode_edit_seq_ = 0;
     bool langbar_ = false;
     ITfLangBarItemSink* lb_sink_ = nullptr;
 };

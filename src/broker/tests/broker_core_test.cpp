@@ -30,7 +30,7 @@ struct Fake : Platform {
     void WriteClient(ClientId c, const std::string& line) override { to_client.push_back({c, line}); }
     void NotifyStopped(Stop reason) override { stops.push_back(reason); }
     void ClearStopped() override { ++cleared; }
-    void OpenAdmin() override {}
+    void OpenAdmin(bool) override {}
     void Log(const std::string& line) override { log.push_back(line); }
     void Quit() override {}
 
@@ -114,7 +114,9 @@ void ExitWhileReadyResetsAndRestarts() {
     Broker b(f);
     b.Start();
     Hello(b, 1);
-    Ready(b);
+    const std::string table = R"({"future":[true,17,"x"],"rev":"preset"})";
+    b.OnEngineLine("{\"ready\":true,\"keymap\":" + table + "}");
+    assert(Contains(f.Client(1), "{\"event\":\"keymap\",\"keymap\":" + table + "}"));
     b.OnClientLine(1, R"({"seq":5,"op":"down","vk":74,"t":0,"mods":[]})");
     b.OnEngineExit(1);
     auto lines = f.Client(1);
@@ -122,6 +124,8 @@ void ExitWhileReadyResetsAndRestarts() {
     assert(Contains(lines, R"({"event":"reset"})"));
     assert(lines.back() == R"({"event":"state","state":"starting"})");
     assert(f.starts == 2 && f.stops.empty() && b.State() == EngineState::Starting);
+    Hello(b, 2);
+    assert(f.Client(2).back().find("\"keymap\":" + table) != std::string::npos);
 }
 
 // Three exits within ten minutes: down, told once; "もう一度試す" starts it again.

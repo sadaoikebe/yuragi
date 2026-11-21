@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <iostream>
 
 using namespace tip_logic;
 
@@ -85,64 +86,38 @@ static void StatesAndWhatTheUserSees() {
 }
 
 static void EatingKeys() {
-    Mods none, shift, ctrl;
-    shift.shift = true;
-    ctrl.ctrl = true;
-    Local idle;
-    assert(WantKey('J', none, idle) && WantKey(VK_SPACE_, none, idle));
-    assert(!WantKey('J', ctrl, idle));  // shortcuts belong to the application
-    assert(!WantKey(VK_RETURN_, none, idle) && !WantKey(VK_BACK_, none, idle));
-    // DESIGN「打鍵の処理」: a character whose reply has not come yet makes Enter ours.
-    Local awaiting;
-    awaiting.awaiting = true;
-    assert(WantKey(VK_RETURN_, none, awaiting) && WantKey(VK_BACK_, none, awaiting));
-    assert(!WantKey(VK_LEFT_, none, awaiting));
-    Local converted;
-    converted.composing = converted.converted = converted.candidates = true;
-    assert(WantKey(VK_LEFT_, none, converted) && WantKey(VK_DOWN_, none, converted));
-    assert(!WantKey(VK_DOWN_, shift, converted) && WantKey(VK_RIGHT_, shift, converted));
-    assert(!WantKey(VK_F8_, shift, converted) && WantKey(VK_F8_, none, converted));
-    // 部分確定: Ctrl+↓ is ours while composing (awaiting included), Ctrl alone.
-    Mods ctrl_alt = ctrl, ctrl_shift = ctrl, ctrl_win = ctrl;
-    ctrl_alt.alt = true;
-    ctrl_shift.shift = true;
-    ctrl_win.win = true;
-    Local typing;
-    typing.composing = true;
-    assert(WantKey(VK_DOWN_, ctrl, converted) && WantKey(VK_DOWN_, ctrl, typing));
-    assert(WantKey(VK_DOWN_, ctrl, awaiting) && !WantKey(VK_DOWN_, ctrl, idle));
-    assert(!WantKey(VK_DOWN_, ctrl_alt, converted) && !WantKey(VK_DOWN_, ctrl_shift, converted));
-    assert(!WantKey(VK_DOWN_, ctrl_win, converted) && !WantKey(VK_UP_, ctrl, converted));
+    const auto table = DefaultKeyTable();
+    auto take = [&](uint32_t vk, Mods mods, Phase phase, bool unsettled = false) {
+        return WantKey(NormalizeKey(vk, mods), {phase, unsettled}, table);
+    };
+    Mods none, shift, ctrl, alt, win;
+    shift.shift = ctrl.ctrl = alt.alt = win.win = true;
+    assert(take(VK_RETURN_, none, Phase::Empty) == Take::Pass);
+    assert(take(VK_RETURN_, none, Phase::Empty, true) == Take::Send);
+    assert(take(VK_LEFT_, none, Phase::Empty, true) == Take::Send);
+    assert(take(0x61, none, Phase::Empty) == Take::Send);  // numpad
+    assert(take(VK_SPACE_, shift, Phase::Empty) == Take::Send);
+    assert(take('C', ctrl, Phase::Composing) == Take::Send); // commit, then replay
+    assert(take(VK_F6_, shift, Phase::Selecting, true) == Take::Pass);
+    assert(take(0x12, alt, Phase::Composing) == Take::Pass); // Alt is observed separately
+    assert(take('C', win, Phase::Composing) == Take::Pass);
+    assert(take('A', none, Phase::Direct) == Take::Pass);
 
-    Message reply = Parse(R"({"seq":1,"composition":"x","n_tokens":1})");
-    assert(EatAfterReply(true, 'J', none, idle, false, 0, reply));
-    Message passed = Parse(R"({"seq":1,"pass_through":true})");
-    assert(!EatAfterReply(true, 'J', none, idle, false, 0, passed));
-    Message empty = Parse(R"({"seq":1})");
-    assert(!EatAfterReply(true, VK_RETURN_, none, idle, false, 0, empty));
-    assert(EatAfterReply(false, 'J', none, idle, false, 0, empty));  // a consumed down's up
-    Message tab = Parse(R"({"seq":1,"predicting":true})");
-    Local composing;
-    composing.composing = true;
-    assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, tab));
-    // Tab with no prediction stays ours while composing; with no input it is the app's.
-    Message typed = Parse(R"({"seq":1,"composition":"x","n_tokens":1})");
-    assert(EatAfterReply(true, VK_TAB_, none, composing, false, 1, typed));
-    assert(!EatAfterReply(true, VK_TAB_, none, idle, false, 0, empty));
-    // F6/F7 with no input are the application's, Shift or not.
-    assert(!WantKey(VK_F7_, none, idle) && !WantKey(VK_F6_, none, idle));
-    assert(WantKey(VK_F7_, none, typing) && !WantKey(VK_F7_, shift, idle));
-    assert(!WantKey(VK_F7_, shift, typing) && WantKey(VK_F6_, shift, typing));  // the engine has no Shift+F7
-    assert(!EatAfterReply(true, VK_F7_, none, idle, false, 0, empty));
-    assert(EatAfterReply(true, VK_F7_, none, composing, false, 1, typed));
-    // Ctrl+↓ as Enter: eaten after input, whether the rest stays or not.
-    Message rest = Parse(R"({"seq":1,"composition":"y","commit":"x","n_tokens":1,"converted":true})");
-    Message whole = Parse(R"({"seq":1,"commit":"x"})");
-    assert(EatAfterReply(true, VK_DOWN_, ctrl, converted, false, 2, rest));
-    assert(EatAfterReply(true, VK_DOWN_, ctrl, composing, false, 1, whole));
-    assert(!EatAfterReply(true, VK_DOWN_, ctrl, idle, false, 0, empty));
-    assert(!EatAfterReply(true, VK_DOWN_, ctrl_alt, converted, false, 2, rest));
-    assert(EatAfterReply(false, VK_DOWN_, ctrl, converted, false, 2, rest));  // its up
+    auto kanji = NormalizeKey(0x19, none);
+    assert(kanji.vk == 0xC0 && kanji.mods.alt);
+    assert(table.global.at(kanji.Code()) == GlobalCommand::Toggle);
+    assert(NormalizeKey(0xF3, none).Code() == NormalizeKey(0xF4, none).Code());
+    assert(take(0xF3, none, Phase::Composing) == Take::Pass);
+    assert(take(0xC0, none, Phase::Composing) == Take::Send);  // repeats after Alt up
+    auto caps = NormalizeKey(0xF0, none);
+    assert(table.Overrides(Phase::Composing, caps.Code()));
+    assert(!table.Overrides(Phase::Empty, caps.Code()));
+
+    auto final = Parse(R"({"seq":3,"phase":"empty","commit":"x","resolved_keys":[{"seq":2,"eat":false}]})");
+    assert(final.phase == Phase::Empty && !final.eat && final.commit == "x");
+    assert((final.resolved_keys == std::vector<std::pair<long long, bool>>{{2, false}}));
+    auto pending = Parse(R"({"seq":2,"eat":true,"eat_pending":true,"pending":true})");
+    assert(pending.eat_pending && pending.eat == true);
 }
 
 static void OrderOfReplies() {
@@ -237,7 +212,28 @@ static void LeftContextTail() {
     assert(astral.size() == CONTEXT_UNITS && ContextTail(astral, true) == astral);
 }
 
-int main() {
+static int CompareEngineKeys() {
+    const auto table = DefaultKeyTable();
+    std::string name;
+    unsigned vk, flags;
+    bool sends;
+    size_t checked = 0;
+    while (std::cin >> name >> vk >> flags >> sends) {
+        auto it = std::find(kPhaseNames.begin(), kPhaseNames.end(), name);
+        assert(it != kPhaseNames.end());
+        auto phase = static_cast<Phase>(it - kPhaseNames.begin());
+        Mods mods{bool(flags & 1), bool(flags & 2), bool(flags & 4), bool(flags & 8)};
+        if ((WantKey({vk, mods}, {phase, false}, table) == Take::Send) != sends) {
+            std::fprintf(stderr, "%s vk=%u mods=%u disagrees with engine\n", name.c_str(), vk, flags);
+            return 1;
+        }
+        ++checked;
+    }
+    return std::cin.eof() && checked > 0 ? 0 : 1;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--key-cases") return CompareEngineKeys();
     ReadingReplies();
     ReadingBrokerMessages();
     CommittingVisibleText();

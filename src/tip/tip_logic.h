@@ -3,6 +3,8 @@
 // the order of replies, and what the user sees for each state.
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -11,6 +13,7 @@
 #include <vector>
 
 #include "tip_json.h"
+#include "default_keymap.h"
 
 namespace tip_logic {
 
@@ -54,6 +57,90 @@ struct Segment {
     int display_start = 0, display_end = 0;
 };
 
+enum class Phase { Empty, Composing, Converting, Selecting, Resizing, Predicting, Direct };
+inline constexpr std::array<const char*, 7> kPhaseNames = {
+    "empty", "composing", "converting", "selecting", "resizing", "predicting", "direct"
+};
+
+enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, Settings, Words };
+inline GlobalCommand ParseGlobal(const std::string& id) {
+    if (id == "ime_toggle") return GlobalCommand::Toggle;
+    if (id == "ime_on") return GlobalCommand::On;
+    if (id == "ime_off") return GlobalCommand::Off;
+    if (id == "mode_hiragana") return GlobalCommand::Hiragana;
+    if (id == "mode_katakana") return GlobalCommand::Katakana;
+    if (id == "open_settings") return GlobalCommand::Settings;
+    if (id == "open_word_register") return GlobalCommand::Words;
+    return GlobalCommand::None;
+}
+
+struct KeyTable {
+    struct Row {
+        std::vector<unsigned> eat, pass;
+        bool rest = false;
+        bool Has(const std::vector<unsigned>& codes, unsigned code) const {
+            return std::find(codes.begin(), codes.end(), code) != codes.end();
+        }
+    };
+    std::string rev;
+    std::array<Row, 6> phases;
+    std::map<unsigned, GlobalCommand> global;
+
+    bool Overrides(Phase phase, unsigned code) const {
+        if (phase == Phase::Direct) return false;
+        const auto& row = phases[(size_t)phase];
+        return row.Has(row.eat, code) || row.Has(row.pass, code);
+    }
+    bool Sends(Phase phase, unsigned code) const {
+        if (phase == Phase::Direct) return false;
+        const auto& row = phases[(size_t)phase];
+        return row.Has(row.eat, code) || (row.rest && !row.Has(row.pass, code));
+    }
+    GlobalCommand GlobalAt(Phase phase, unsigned code) const {
+        auto found = global.find(code);
+        return found == global.end() || Overrides(phase, code) ? GlobalCommand::None : found->second;
+    }
+};
+
+inline std::optional<KeyTable> ParseKeyTable(const tip_json::Value& json) {
+    const auto& phases = json.Get("phases");
+    const auto& global = json.Get("global");
+    if (json.kind != tip_json::Value::Object || json.Get("rev").kind != tip_json::Value::String ||
+        phases.kind != tip_json::Value::Object || global.kind != tip_json::Value::Array) return {};
+    KeyTable table;
+    table.rev = json.Get("rev").text;
+    for (size_t i = 0; i < table.phases.size(); ++i) {
+        const auto& from = phases.Get(kPhaseNames[i]);
+        auto& row = table.phases[i];
+        const auto& eat = from.Get("eat");
+        const auto& pass = from.Get("pass");
+        if (eat.kind != tip_json::Value::Array || pass.kind != tip_json::Value::Array) return {};
+        auto read_codes = [](const auto& list, auto& out) {
+            for (const auto& item : list.array) {
+                long long code;
+                if (item.Int(code) && code > 0 && code <= 0x7FF) out.push_back((unsigned)code);
+            }
+        };
+        read_codes(eat, row.eat);
+        read_codes(pass, row.pass);
+        row.rest = from.Get("rest").text == "eat";
+    }
+    for (const auto& entry : global.array) {
+        long long code;
+        auto command = ParseGlobal(entry.Get("command").text);
+        if (command != GlobalCommand::None && entry.Get("code").Int(code) && code > 0 && code <= 0x7FF)
+            table.global[(unsigned)code] = command;
+    }
+    return table;
+}
+
+inline KeyTable DefaultKeyTable() {
+    const std::string text(kDefaultKeyTable);
+    tip_json::Value json;
+    tip_json::Parser(text).Parse(json);
+    return ParseKeyTable(json).value(); // generated from the engine preset at build time
+}
+
 // One line from the broker. Every field has a default; a field that is absent
 // or of another type takes it (DESIGN「互換の規則」: unknown fields are ignored, missing ones
 // default, nothing is counted or rejected).
@@ -66,10 +153,16 @@ struct Message {
     bool has_seq = false;
     long long seq = 0;
     std::vector<std::string> warnings;
+    std::optional<KeyTable> keymap;
     // The engine's reply (yuragi.ime.server.snapshot).
     bool engine = false;  // carries the engine's state (not just {"seq","state"})
     std::string composition, commit;  // UTF-8
     bool direct = false, pass_through = false, converted = false, pending = false;
+    bool eat_pending = false;
+    std::optional<bool> eat;
+    std::vector<std::pair<long long, bool>> resolved_keys;
+    std::optional<Phase> phase;
+    std::string input_mode;
     bool predicting = false, error = false, has_next_page = false;
     bool fsm_idle = true;
     int n_tokens = 0, focus = -1, page = 0, cand_index = 0;
@@ -103,6 +196,7 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadInt(v, "proto", m.proto);
     ReadText(v, "event", m.event);
     ReadText(v, "state", m.state);
+    m.keymap = ParseKeyTable(v.Get("keymap"));
     m.has_seq = v.Get("seq").Int(m.seq);
     for (const auto& w : v.Get("warnings").array)
         if (w.kind == tip_json::Value::String) m.warnings.push_back(w.text);
@@ -113,6 +207,16 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadBool(v, "pass_through", m.pass_through);
     ReadBool(v, "converted", m.converted);
     ReadBool(v, "pending", m.pending);
+    ReadBool(v, "eat_pending", m.eat_pending);
+    if (v.Get("eat").kind == tip_json::Value::Boolean) m.eat = v.Get("eat").boolean;
+    for (const auto& result : v.Get("resolved_keys").array) {
+        long long seq;
+        if (result.Get("seq").Int(seq) && result.Get("eat").kind == tip_json::Value::Boolean)
+            m.resolved_keys.emplace_back(seq, result.Get("eat").boolean);
+    }
+    for (size_t i = 0; i < kPhaseNames.size(); ++i)
+        if (v.Get("phase").text == kPhaseNames[i]) m.phase = (Phase)i;
+    ReadText(v, "input_mode", m.input_mode);
     ReadBool(v, "predicting", m.predicting);
     ReadBool(v, "error", m.error);
     ReadBool(v, "has_next_page", m.has_next_page);
@@ -207,19 +311,41 @@ enum class Notice { None, Stopped };
 struct Mods {
     bool shift = false, ctrl = false, alt = false, win = false;
     bool Shortcut() const { return ctrl || alt || win; }
-    bool CtrlOnly() const { return ctrl && !shift && !alt && !win; }
+    unsigned Bits() const { return shift + 2u * ctrl + 4u * alt + 8u * win; }
 };
 
-// What the TIP knows locally, from the last applied reply and the requests
-// still in flight.
-struct Local {
-    bool composing = false, converted = false, candidates = false;
-    bool awaiting = false;  // a request has no reply yet (DESIGN「打鍵の処理」)
+struct Chord {
+    uint32_t vk;
+    Mods mods;
+    unsigned Code() const { return vk | (mods.Bits() << 8); }
 };
 
-// session.py and chord/keys.py: the keys the session acts on.
+inline bool AltVk(uint32_t vk) { return vk == 0x12 || vk == 0xA4 || vk == 0xA5; }
+inline bool ModifierVk(uint32_t vk) {
+    return (vk >= 0x10 && vk <= 0x12) || vk == 0x5B || vk == 0x5C ||
+           (vk >= 0xA0 && vk <= 0xA5);
+}
+
+inline Chord NormalizeKey(uint32_t vk, Mods mods) {
+    // kbd101 reports the translated virtual key even if GetKeyState
+    // has moved on. Recover the modifiers from that event's VK.
+    Mods shift{}, ctrl{}, alt{};
+    shift.shift = ctrl.ctrl = alt.alt = true;
+    shift.win = ctrl.win = alt.win = mods.win;
+    switch (vk) {
+        case 0x19: return {0xC0, alt};   // VK_KANJI
+        case 0xF0: return {0x14, shift}; // VK_DBE_ALPHANUMERIC
+        case 0xF1: return {0x14, alt};   // VK_DBE_KATAKANA
+        case 0xF2: return {0x14, ctrl};  // VK_DBE_HIRAGANA
+        case 0xF3: case 0xF4: return {0xC0, ctrl}; // VK_DBE_SBCSCHAR / DBCSCHAR
+        default: return {vk, mods};
+    }
+}
+
+// session.py and chord/keys.py: the keys that enter the typing layer.
 inline bool CharacterVk(uint32_t vk) {
-    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return true;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') ||
+        (vk >= 0x60 && vk <= 0x6F && vk != 0x6C)) return true;
     switch (vk) {
         case 0xBA: case 0xBB: case 0xBC: case 0xBD: case 0xBE: case 0xBF: case 0xC0:
         case 0xDB: case 0xDC: case 0xDD: case 0xDE: return true;
@@ -227,47 +353,32 @@ inline bool CharacterVk(uint32_t vk) {
     }
 }
 
-// OnTestKeyDown: whether this key is ours, from local state only (no I/O).
-// A request still waiting for its reply counts as composing: once its
-// character arrives the input is composing, so a following Enter or
-// Backspace must not slip past it to the application.
-inline bool WantKey(uint32_t vk, Mods mods, const Local& local) {
-    bool composing = local.composing || local.awaiting;
-    // 部分確定 (Ctrl+↓) is the one Ctrl key of ours, and only with input.
-    if (vk == VK_DOWN_ && mods.CtrlOnly()) return composing;
-    if (mods.Shortcut()) return false;
-    bool converted = local.converted;
-    if (CharacterVk(vk) || vk == VK_SPACE_) return true;
-    if (vk == VK_RETURN_ || vk == VK_BACK_ || vk == VK_ESCAPE_) return composing;
-    if (vk == VK_F6_) return composing;  // Shift+F6 forgets; with no input, the application's
-    if (vk == VK_F7_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_) return composing && !mods.shift;
-    if (vk == VK_TAB_) return composing && !mods.shift;
-    if (converted || (local.awaiting && local.candidates)) {
-        if (vk == VK_LEFT_ || vk == VK_RIGHT_) return true;
-        if (!mods.shift && (vk == VK_UP_ || vk == VK_DOWN_ || vk == VK_PRIOR_ || vk == VK_NEXT_))
-            return true;
-    }
-    return false;
+inline bool Typing(Chord chord) {
+    return !chord.mods.Shortcut() &&
+           (CharacterVk(chord.vk) || (chord.vk == VK_SPACE_ && !chord.mods.shift));
 }
 
-// After the reply came in time: whether the key was consumed.
-inline bool EatAfterReply(bool down, uint32_t vk, Mods mods, const Local& before,
-                          bool before_timer, int before_tokens, const Message& r) {
-    if (r.direct || r.pass_through) return false;
-    bool state_mask = before.composing || before_tokens > 0 || before_timer || r.n_tokens > 0 ||
-                      r.has_timer || r.converted || !r.candidates.empty() ||
-                      !r.composition.empty() || !r.commit.empty();
-    if (!down) return true;  // only consumed downs send their up
-    if (CharacterVk(vk) || vk == VK_SPACE_) return state_mask;
-    if (vk == VK_BACK_ || vk == VK_RETURN_ || vk == VK_ESCAPE_) return before.composing && state_mask;
-    if (vk == VK_DOWN_ && mods.CtrlOnly()) return before.composing && state_mask;  // as Enter
-    if (vk == VK_F6_ || vk == VK_F7_ || vk == VK_F8_ || vk == VK_F9_ || vk == VK_F10_)
-        return before.composing || before.converted;
-    // Tab while composing is ours even with no prediction: the input stays.
-    if (vk == VK_TAB_) return before.composing || r.predicting;
-    Local wanted = before;
-    wanted.awaiting = false;
-    return before.converted && WantKey(vk, mods, wanted);
+struct Local {
+    Phase phase = Phase::Empty;
+    bool unsettled = false;
+};
+
+enum class Take { Pass, Send };
+
+inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
+    if (local.phase == Phase::Direct || chord.mods.win || ModifierVk(chord.vk) ||
+        (chord.mods.alt && !chord.mods.ctrl)) return Take::Pass;
+    if (table.GlobalAt(local.phase, chord.Code()) != GlobalCommand::None) return Take::Pass;
+    if (Typing(chord)) return Take::Send;
+    auto sends = [&](Phase phase) { return table.Sends(phase, chord.Code()); };
+    if (sends(local.phase)) return Take::Send;
+    if (local.unsettled) {
+        for (Phase phase : {Phase::Composing, Phase::Converting, Phase::Selecting,
+                            Phase::Resizing, Phase::Predicting}) {
+            if (sends(phase)) return Take::Send;
+        }
+    }
+    return Take::Pass;
 }
 
 // -- order (DESIGN「打鍵の処理」) ---------------------------------------------------------------

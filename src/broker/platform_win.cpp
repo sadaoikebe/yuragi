@@ -549,9 +549,11 @@ public:
         if (ui_) ui_->ClearStopped();
     }
 
-    void OpenAdmin() override {
+    void OpenAdmin(bool words) override {
         if (config_.pythonw.empty()) return;
-        std::wstring command = CommandLine(config_.pythonw, config_.admin_args);
+        auto arguments = config_.admin_args;
+        if (words) arguments.insert(arguments.end(), {"--tab", "words"});
+        std::wstring command = CommandLine(config_.pythonw, arguments);
         std::vector<wchar_t> environment = EngineEnvironment();
         std::wstring app = Wide(config_.app);
         STARTUPINFOW si = {};

@@ -82,7 +82,9 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
     elif op == "reset":
         sess.reset()
     elif op == "set_direct":
-        sess.set_direct(msg["direct"])
+        commit = sess.set_direct(msg["direct"], commit=msg.get("commit") is True) or ""
+    elif op == "set_mode":
+        commit = sess.set_mode(msg.get("mode")) or ""
     return commit
 
 
@@ -90,6 +92,7 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None) -> dict:
     """The reply for the session's state; the caller fills in commit."""
     reply = {
         "direct": sess.direct,
+        "input_mode": sess.input_mode,
         "pass_through": ((sess.direct and op in ("down", "up"))
                          or (op == "down" and eat is False)),
         "phase": sess.phase,

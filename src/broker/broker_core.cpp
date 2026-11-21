@@ -121,7 +121,9 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
                             "\",\"warnings\":[";
         for (size_t i = 0; i < warnings_.size(); ++i)
             reply += (i ? "," : "") + tip_json::Quote(warnings_[i]);
-        platform_.WriteClient(id, reply + "]}");
+        reply += "]";
+        if (!keymap_.empty()) reply += ",\"keymap\":" + keymap_;
+        platform_.WriteClient(id, reply + "}");
         if (state_ == EngineState::Ready) {
             platform_.WriteEngine("{\"op\":\"open\",\"sid\":" + std::to_string(id) + "}");
             client.session = true;
@@ -134,7 +136,7 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     }
     if (op == "open_admin") {
         Log("opening the management window");
-        platform_.OpenAdmin();
+        platform_.OpenAdmin(msg.Get("tab").text == "words");
         return;
     }
     if (op == "quit") {
@@ -167,6 +169,8 @@ void Broker::OnEngineLine(const std::string& line) {
         if (state_ != EngineState::Starting) return;
         Log("engine ready");
         for (const Value& w : msg.Get("warnings").array) Warn(w.text);
+        if (msg.Get("keymap").kind == Value::Object)
+            UpdateKeymap(tip_json::Stringify(msg.Get("keymap")));
         state_ = EngineState::Ready;
         for (auto& [id, client] : clients_) {
             if (!client.hello) continue;
@@ -178,6 +182,11 @@ void Broker::OnEngineLine(const std::string& line) {
     }
     if (msg.Get("event").text == "warning") {
         Warn(msg.Get("warning").text);
+        return;
+    }
+    if (msg.Get("event").text == "keymap") {
+        if (msg.Get("keymap").kind == Value::Object)
+            UpdateKeymap(tip_json::Stringify(msg.Get("keymap")));
         return;
     }
     long long sid = 0, seq = 0;
@@ -196,6 +205,12 @@ void Broker::OnEngineLine(const std::string& line) {
     if (client == clients_.end()) return;
     Flag(msg, "direct", client->second.direct);
     platform_.WriteClient((ClientId)sid, line);
+}
+
+void Broker::UpdateKeymap(const std::string& json) {
+    if (keymap_ == json) return;
+    keymap_ = json;
+    Broadcast("{\"event\":\"keymap\",\"keymap\":" + keymap_ + "}");
 }
 
 void Broker::OnEngineStderrLine(const std::string& line) {

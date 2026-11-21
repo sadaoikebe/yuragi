@@ -5,6 +5,19 @@ project(yuragi_tip LANGUAGES CXX)
 # DLL whose tag is not HKCU\Software\yuragi-ime\Tag never starts anything.
 set(YURAGI_TAG "dev" CACHE STRING "the version tag compiled into the TIP")
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+get_filename_component(YURAGI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+set(KEY_TABLE "${CMAKE_CURRENT_BINARY_DIR}/default_keymap.h")
+add_custom_command(OUTPUT "${KEY_TABLE}"
+  COMMAND "${Python3_EXECUTABLE}" -m yuragi.ime.keymap "${KEY_TABLE}"
+  WORKING_DIRECTORY "${YURAGI_ROOT}"
+  DEPENDS "${YURAGI_ROOT}/yuragi/data/keymaps/ms-ime.json"
+          "${YURAGI_ROOT}/yuragi/ime/keymap.py"
+          "${YURAGI_ROOT}/yuragi/ime/commands.py"
+          "${YURAGI_ROOT}/yuragi/chord/keys.py"
+  VERBATIM)
+add_custom_target(tip_key_table DEPENDS "${KEY_TABLE}")
+
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 if(WIN32)
   add_library(yuragi_tip SHARED
@@ -17,6 +30,8 @@ if(WIN32)
   )
 
   target_compile_features(yuragi_tip PRIVATE cxx_std_17)
+  add_dependencies(yuragi_tip tip_key_table)
+  target_include_directories(yuragi_tip PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_definitions(yuragi_tip PRIVATE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00
     YURAGI_TAG="${YURAGI_TAG}")
@@ -56,6 +71,8 @@ if(TIP_BUILD_JSON_TESTS)
 
   # The TIP's decisions without TSF.
   add_executable(tip_logic_test tests/tip_logic_test.cpp tip_logic.h tip_json.h)
+  add_dependencies(tip_logic_test tip_key_table)
+  target_include_directories(tip_logic_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_features(tip_logic_test PRIVATE cxx_std_17)
   if(MSVC)
     target_compile_options(tip_logic_test PRIVATE /UNDEBUG /utf-8)
@@ -63,4 +80,7 @@ if(TIP_BUILD_JSON_TESTS)
     target_compile_options(tip_logic_test PRIVATE -UNDEBUG)
   endif()
   add_test(NAME tip_logic COMMAND tip_logic_test)
+  add_test(NAME tip_keymap_roundtrip
+    COMMAND "${Python3_EXECUTABLE}" -m tests.keymap_cases "$<TARGET_FILE:tip_logic_test>")
+  set_tests_properties(tip_keymap_roundtrip PROPERTIES WORKING_DIRECTORY "${YURAGI_ROOT}")
 endif()

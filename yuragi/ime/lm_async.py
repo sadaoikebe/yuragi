@@ -269,6 +269,7 @@ class ConnectionPipeline:
         self.prefetch_delay_ms = prefetch_delay_ms
         self.clock = clock
         self.queue: deque[dict] = deque()
+        self.deferred_down: dict | None = None
         self.last_t = 0
         self.job: Job | None = None  # the awaited conversion's job
         self.spec: Job | None = None  # the last prefetch
@@ -278,7 +279,8 @@ class ConnectionPipeline:
         op = msg.get("op")
         if "t" in msg:
             self.last_t = int(msg["t"])
-        if op == "reset" or (op == "set_direct" and msg["direct"] != self.sess.direct):
+        if op == "reset" or (op == "set_direct" and msg["direct"] != self.sess.direct
+                             and msg.get("commit") is not True):
             self._abandon()
         if (self.sess._await is not None and op == "timeout"
                 and self.queue and self.queue[-1].get("op") == "timeout"):
@@ -287,7 +289,20 @@ class ConnectionPipeline:
             self.queue.append(msg)
         commit, grace = "", False
         eat = None
-        current_continuation = False
+        resolved_keys = []
+
+        def key_result(m: dict) -> None:
+            nonlocal eat
+            if m.get("op") != "down":
+                return
+            result = self.sess.key_eat
+            if result is None:
+                self.deferred_down = m
+            elif m is msg:
+                eat = result
+            elif type(m.get("seq")) is int:
+                resolved_keys.append({"seq": m["seq"], "eat": result})
+
         while True:
             if self.sess._await is not None:
                 outcome = self._outcome(wait=grace)
@@ -295,9 +310,9 @@ class ConnectionPipeline:
                 if outcome is PENDING:
                     break
                 commit += self.sess.finish_conversion(outcome)
-                if current_continuation:
-                    eat = self.sess.key_eat
-                    current_continuation = False
+                if self.deferred_down is not None:
+                    m, self.deferred_down = self.deferred_down, None
+                    key_result(m)
                 self.job = None
                 continue
             if not self.queue:
@@ -305,18 +320,21 @@ class ConnectionPipeline:
             m = self.queue.popleft()
             self.sess.lm_deferred = self.worker.available()
             commit += apply_op(self.sess, m)
-            if m is msg and op == "down":
-                eat = self.sess.key_eat
-                current_continuation = eat is None
+            key_result(m)
             if self.sess._await is not None:
                 self._submit_convert()
                 grace = True
         self._prefetch()
-        if op == "down" and eat is None:
+        deferred = op == "down" and eat is None
+        if deferred:
             # A pending reply reserves the down. The eventual phase is used
             # when it runs, even if preceding queued keys changed the input.
             eat = self.sess.pending_key_eat(int(msg["vk"]), msg.get("mods"))
         reply = snapshot(self.sess, op, eat=eat)
+        if deferred:
+            reply["eat_pending"] = True
+        if resolved_keys:
+            reply["resolved_keys"] = resolved_keys
         set_reply_commit(self.sess, msg, reply, commit)
         reply["pending"] = self.sess._await is not None
         if reply["pending"]:
@@ -331,6 +349,7 @@ class ConnectionPipeline:
     def _abandon(self) -> None:
         self.worker.cancel_owner(self)
         self.queue.clear()
+        self.deferred_down = None
         self.sess._await = None
         self.sess._continuation = None
         self.job = self.spec = None
