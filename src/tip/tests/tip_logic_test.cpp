@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
+#include <tuple>
 
 using namespace tip_logic;
 
@@ -138,6 +139,94 @@ static void OrderOfReplies() {
     assert(f.Answer(current));
 }
 
+static void CarryFollowsOnlyTheReplayAndItsRoot() {
+    constexpr uintptr_t form = 11, another_window = 22;
+    Carry carry;
+    assert(!carry.OnFocusMoved(form, false, 90));  // ordinary focus change
+    carry.ReplayPassed(form);
+    carry.Pumped();
+    assert(!carry.OnFocusMoved(form, false, 95));  // focus moved after the pump
+
+    carry.ReplayPassed(form);
+    assert(carry.OnFocusMoved(form, false, 100));
+    carry.Pumped();
+    assert(carry.OnFocusMoved(form, false, 175));  // another notification for the move
+    assert(carry.Started() == 100);
+    assert(!carry.OnFocusMoved(another_window, false, 180));
+    assert(!carry.Active());
+
+    carry.ReplayPassed(form);
+    assert(!carry.OnFocusMoved(form, true, 200));
+    carry.ReplayPassed(0);
+    assert(!carry.OnFocusMoved(0, false, 210));
+
+    carry.Adopt(form, 220); // Windows delivered a promised down to the new field
+    assert(carry.Active() && carry.Started() == 220);
+    carry.Finished();
+    assert(!carry.OnFocusMoved(form, false, 230));
+}
+
+static void HeldKeysRespectScopeAndSystemKeys() {
+    constexpr uint64_t start = 100, deadline = start + KEY_BUDGET_MS;
+    assert(DeliverHeld({true, true, Scope::Allowed}, start, start) == Deliver::Decide);
+    assert(DeliverHeld({true, true, Scope::Password}, start, start) == Deliver::Raw);
+    assert(DeliverHeld({true, false, Scope::Unknown}, start, start) == Deliver::Raw);
+    assert(DeliverHeld({false, true, Scope::Unknown}, start, start) == Deliver::Raw);
+    assert(DeliverHeld({true, true, Scope::Unknown}, deadline - 1, start) == Deliver::Wait);
+    assert(DeliverHeld({true, true, Scope::Unknown}, deadline, start) == Deliver::Raw);
+    assert(DeliverHeld({true, true, Scope::Unavailable}, deadline - 1, start) == Deliver::Wait);
+    assert(DeliverHeld({true, true, Scope::Unavailable}, deadline, start) == Deliver::Raw);
+    assert(DeliverHeld({true, true, Scope::Unavailable}, start, std::nullopt) == Deliver::Decide);
+
+    Mods alt{}, ctrl_alt{}, win{};
+    alt.alt = ctrl_alt.alt = ctrl_alt.ctrl = win.win = true;
+    assert(HoldDuringCarry({'A', {}}, 'A', 0, false));
+    assert(!HoldDuringCarry({'A', win}, 'A', 0, false));
+    assert(!HoldDuringCarry({0x12, alt}, 0x12, 0, false));
+    assert(!HoldDuringCarry({0xA0, {}}, 0xA0, 0, false));
+    assert(!HoldDuringCarry({0x15, {}}, 0x15, 0x3A << 16, false));
+    assert(!HoldDuringCarry({'F', alt}, 'F', 0, false));
+    assert(HoldDuringCarry({'F', ctrl_alt}, 'F', 0, false));
+    assert(HoldDuringCarry({0xC0, alt}, 0x19, 0, true));
+}
+
+static void HeldKeysDrainInOrderAfterTab() {
+    constexpr uintptr_t form = 11;
+    for (auto [first, second, when, expected_a, expected_b] : {
+        std::tuple{Scope::Allowed, Scope::Allowed, 120u, Deliver::Decide, Deliver::Decide},
+        std::tuple{Scope::Password, Scope::Password, 120u, Deliver::Raw, Deliver::Raw},
+        std::tuple{Scope::Unknown, Scope::Unknown, 100u + KEY_BUDGET_MS, Deliver::Raw, Deliver::Raw},
+        std::tuple{Scope::Unknown, Scope::Allowed, 100u + KEY_BUDGET_MS, Deliver::Raw, Deliver::Decide},
+    }) {
+        Carry carry;
+        std::deque<uint32_t> held{'A'}; // Enter committed, then the replayed Tab passed
+        std::vector<std::pair<uint32_t, Deliver>> destinations;
+        carry.ReplayPassed(form);
+        if (!carry.OnFocusMoved(form, held.empty(), 100)) held.clear();
+        carry.Pumped();
+        auto down = [&](uint32_t vk) {
+            if (carry.Active() && HoldDuringCarry({vk, {}}, vk, 0, false)) held.push_back(vk);
+            else destinations.emplace_back(vk, Deliver::Raw);
+        };
+        auto pump = [&](Scope current, uint64_t now) {
+            auto started = carry.Active() ? std::optional{carry.Started()} : std::nullopt;
+            auto route = DeliverHeld({true, true, current}, now, started);
+            if (!held.empty() && route != Deliver::Wait) {
+                destinations.emplace_back(held.front(), route);
+                held.pop_front();
+            }
+        };
+        pump(Scope::Unknown, 105);
+        down('B'); // arrives before the destination has reported its scope
+        assert(destinations.empty());
+        pump(first, when);
+        pump(second, when + 1); // after the first down is delivered
+        assert((destinations == std::vector<std::pair<uint32_t, Deliver>>{
+            {'A', expected_a}, {'B', expected_b},
+        }));
+    }
+}
+
 static void ConnectingAndSpawning() {
     ConnectGate gate;
     assert(gate.Allow(5000));
@@ -240,6 +329,9 @@ int main(int argc, char** argv) {
     StatesAndWhatTheUserSees();
     EatingKeys();
     OrderOfReplies();
+    CarryFollowsOnlyTheReplayAndItsRoot();
+    HeldKeysRespectScopeAndSystemKeys();
+    HeldKeysDrainInOrderAfterTab();
     ConnectingAndSpawning();
     CandidatePlacement();
     Requests();

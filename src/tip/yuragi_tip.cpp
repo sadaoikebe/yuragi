@@ -637,29 +637,28 @@ public:
 
 // -- the input field's kind (DESIGN「パスワード欄」) -------------------------------------------------
 
-enum class InputScopeKind { Unknown, Allowed, Password };
-
-static InputScopeKind FieldScope(ITfContext* ctx, TfEditCookie ec, ITfRange* range) {
-    InputScopeKind kind = InputScopeKind::Unknown;
+static tip_logic::Scope FieldScope(ITfContext* ctx, TfEditCookie ec, ITfRange* range) {
+    using tip_logic::Scope;
+    Scope kind = Scope::Unavailable;
     ITfReadOnlyProperty* prop = nullptr;
     HRESULT property_hr = ctx->GetAppProperty(GUID_PROP_INPUTSCOPE, &prop);
-    if (property_hr == S_FALSE) return InputScopeKind::Allowed;
+    if (property_hr == S_FALSE) return Scope::Allowed;
     if (property_hr == S_OK) {
         VARIANT v;
         VariantInit(&v);
         HRESULT hr = prop->GetValue(ec, range, &v);
         if (SUCCEEDED(hr) && v.vt == VT_EMPTY) {
-            kind = InputScopeKind::Allowed;
+            kind = Scope::Allowed;
         } else if (SUCCEEDED(hr) && v.vt == VT_UNKNOWN && v.punkVal) {
             ITfInputScope* scope = nullptr;
             if (SUCCEEDED(v.punkVal->QueryInterface(IID_ITfInputScope, (void**)&scope))) {
                 InputScope* scopes = nullptr;
                 UINT count = 0;
                 if (SUCCEEDED(scope->GetInputScopes(&scopes, &count))) {
-                    kind = InputScopeKind::Allowed;
+                    kind = Scope::Allowed;
                     for (UINT i = 0; i < count; ++i)
                         if (scopes[i] == IS_PASSWORD || scopes[i] == IS_NUMERIC_PASSWORD)
-                            kind = InputScopeKind::Password;
+                            kind = Scope::Password;
                 }
                 CoTaskMemFree(scopes);
                 scope->Release();
@@ -671,15 +670,14 @@ static InputScopeKind FieldScope(ITfContext* ctx, TfEditCookie ec, ITfRange* ran
     return kind;
 }
 
-// Key handling continues to accept fields whose input scope cannot be queried.
-static bool PasswordField(ITfContext* ctx, TfEditCookie ec) {
+static tip_logic::Scope SelectionScope(ITfContext* ctx, TfEditCookie ec) {
     TF_SELECTION selection{};
     ULONG fetched = 0;
     if (FAILED(ctx->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &fetched)) || !fetched)
-        return false;
-    bool password = FieldScope(ctx, ec, selection.range) == InputScopeKind::Password;
+        return tip_logic::Scope::Unavailable;
+    auto scope = FieldScope(ctx, ec, selection.range);
     selection.range->Release();
-    return password;
+    return scope;
 }
 
 // -- composition and its edits ------------------------------------------------------
@@ -1076,6 +1074,8 @@ class Tip final : public ITfTextInputProcessorEx,
             public ITfTextLayoutSink,
             public ITfTextEditSink {
     enum class Action { Pass, Send, ObserveAlt, Global, Buffer };
+    enum class SendResult { Sent, Unavailable, FocusMoved };
+    enum class ReplayResult { Sent, Retry, FocusMoved, Foreground, Failed };
     struct Decision {
         Action action = Action::Pass;
         tip_logic::GlobalCommand command = tip_logic::GlobalCommand::None;
@@ -1088,9 +1088,10 @@ class Tip final : public ITfTextInputProcessorEx,
         ULONGLONG time;
         tip_logic::Chord chord;
         bool down;
-        tip_logic::GlobalCommand command = tip_logic::GlobalCommand::None;
+        bool windows_only = false;
+        bool preserved = false;
     };
-    struct TestedKey { Stroke key; Decision decision; };
+    struct TestedKey { Stroke key; Decision decision; uint64_t generation; };
     struct SentKey { Stroke key; long long replay_after = 0; };
     struct Registration { GUID guid; TF_PRESERVEDKEY key; unsigned code; };
     static constexpr LPARAM kReplayMarker = 0x59555247; // YURG, in KEYBDINPUT.dwExtraInfo
@@ -1186,6 +1187,8 @@ public:
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE Deactivate() override {
+        DropHeld(L"deactivate");
+        tested_.reset();
         FinishLocal();
         link_.Stop();
         UnadviseLayout();
@@ -1288,9 +1291,10 @@ public:
         if (IsReplay(key)) { *e = FALSE; return S_OK; }
         bool tested = SameTest(key);
         auto decision = tested ? tested_->decision : Decide(key);
-        if (decision.action == Action::ObserveAlt && !tested)
-            Buffer(key); // no pipe I/O in OnTestKeyDown
-        tested_ = TestedKey{key, decision};
+        if (!tested) {
+            if (decision.action == Action::ObserveAlt) Buffer(key); // no pipe I/O in OnTestKeyDown
+            tested_ = TestedKey{key, decision, focus_generation_};
+        }
         *e = decision.Eats() ? TRUE : FALSE;
         return S_OK;
     }
@@ -1308,16 +1312,24 @@ public:
         *e = FALSE;
         auto key = ReadStroke(w, l);
         if (IsReplay(key)) return S_OK;
-        const bool tested = SameTest(key);
-        if (tested) key = tested_->key; // the modifier snapshot of this event
-        Decision decision = tested ? tested_->decision : Decide(key);
+        auto tested = SameTest(key) ? tested_ : std::nullopt;
         tested_.reset();
+        if (tested) key = tested->key; // the modifier snapshot of this event
+        const bool moved = FocusChanged();
+        if (moved) FocusMoved();
+        Decision decision = tested ? tested->decision : Decide(key);
         *e = decision.Eats() ? TRUE : FALSE;
-        if (FocusChanged()) {
-            FocusMoved();
-            if (ctx != scope_ctx_) return S_OK;
+        if (tested && decision.Eats() && (moved || tested->generation != focus_generation_)) {
+            Buffer(key);
+            AdoptHeld();
+            return S_OK;
         }
-        if (!Eligible() || scope_ != Scope::Allowed) return S_OK;
+        if (decision.Eats() && (decision.action == Action::Buffer || carry_.Active() ||
+                               !buffered_.empty() || KeysWaiting() || !Eligible() || !ScopeAllowsInput())) {
+            Buffer(key);
+            return S_OK;
+        }
+        if (!Eligible() || !ScopeAllowsInput()) return S_OK;
         FlushReleases();
         if (!direct_ && tip_logic::Typing(key.chord)) {
             if (!link_.Connected()) TryConnect();
@@ -1327,11 +1339,11 @@ public:
             }
         }
         switch (decision.action) {
-            case Action::Buffer: Buffer(key); break;
-            case Action::Global: RunGlobal(decision.command); break;
-            case Action::Send:
-                if (!SendKey(key, true, ctx, true) && ctx == scope_ctx_) Replay(key);
+            case Action::Buffer: break; // queued above, even if the field is unresolved
+            case Action::Global:
+                if (!RunGlobal(decision.command)) ReplayHeld(key);
                 break;
+            case Action::Send: SendOrReplay(key, ctx, true); break;
             case Action::ObserveAlt:
                 if (tested && !buffered_.empty() && SameEvent(buffered_.front(), key) && !KeysWaiting()) {
                     buffered_.pop_front();
@@ -1352,7 +1364,7 @@ public:
         *e = FALSE;
         auto key = ReadStroke(w, l, false);
         if (GetMessageExtraInfo() == kReplayMarker) return S_OK;
-        tested_.reset();
+        if (tested_ && tested_->key.raw == key.raw) tested_.reset();
         if (!SameEvent(tested_up_, key)) QueueRelease(key);
         tested_up_.reset();
         return S_OK;
@@ -1360,18 +1372,26 @@ public:
     HRESULT STDMETHODCALLTYPE OnPreservedKey(ITfContext*, REFGUID guid, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
-        if (GetMessageExtraInfo() == kReplayMarker || HeldMods().win || !Eligible() ||
-            scope_ != Scope::Allowed || FocusChanged()) return S_OK;
+        if (!tm_ || HeldMods().win) return S_OK;
         for (const auto& key : preserved_) {
             if (key.guid != guid) continue;
+            auto event = ReadStroke(key.key.uVKey, 0);
+            event.preserved = true;
+            const unsigned mods = key.code >> 8;
+            event.chord = {key.code & 0xFF, {bool(mods & 1), bool(mods & 2), bool(mods & 4), false}};
+            if (IsReplay(event)) return S_OK;
+            if (FocusChanged()) FocusMoved();
+            if (carry_.Active() || !buffered_.empty() || retry_replay_) {
+                Buffer(event);
+                *e = TRUE;
+                return S_OK;
+            }
+            if (!Eligible() || !ScopeAllowsInput()) return S_OK;
             auto command = GlobalFor(key.code);
             if (command != tip_logic::GlobalCommand::None) {
                 *e = TRUE;
-                if (KeysWaiting() || !buffered_.empty()) {
-                    auto event = ReadStroke(key.key.uVKey, 0);
-                    event.command = command;
-                    Buffer(event);
-                } else RunGlobal(command);
+                if (KeysWaiting()) Buffer(event);
+                else RunGlobal(command);
             }
             break;
         }
@@ -1514,9 +1534,10 @@ public:
     }
 
     // Called by the scope and caret edit sessions.
-    void ScopeChecked(ITfContext* ctx, uint64_t generation, bool password) {
+    void ScopeChecked(ITfContext* ctx, uint64_t generation, tip_logic::Scope scope) {
         if (ctx != scope_ctx_ || generation != focus_generation_) return;
-        scope_ = password ? Scope::Password : Scope::Allowed;
+        scope_ = scope;
+        if (carry_.Active()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
     }
     void PlaceNotice(TfEditCookie ec, ITfContext* ctx, ITfRange* caret) {
         if (notice_ != Notice::None) PlaceCandidates(ec, ctx, caret, notice_hwnd_);
@@ -1525,9 +1546,9 @@ public:
 
 private:
     friend class ReadSession;
-    enum class Scope { Unknown, Allowed, Password };
+    using Scope = tip_logic::Scope;
     static const UINT kLinkMessage = WM_APP + 1;
-    static const UINT_PTR kTimerNotice = 3, kTimerReplay = 4;
+    static const UINT_PTR kTimerNotice = 3, kTimerReplay = 4, kTimerCarry = 5;
     static const DWORD kLangBarCookie = 0x6f79;
 
     // -- the TIP's window: link messages and its one-shot timers ---------------------------
@@ -1576,8 +1597,10 @@ private:
             if (retry_replay_) {
                 auto key = *retry_replay_;
                 retry_replay_.reset();
-                Replay(key);
+                if (!ReplayHeld(key)) return;
             } else replay_.reset();
+            PumpKeys();
+        } else if (id == kTimerCarry) {
             PumpKeys();
         }
     }
@@ -1671,11 +1694,15 @@ private:
             return false;
         }
         if (!m.engine) {
-            std::optional<Stroke> missed;
             auto sent = sent_keys_.find(m.seq);
-            if (sent != sent_keys_.end()) missed = sent->second.key;
+            if (sent != sent_keys_.end()) {
+                auto key = sent->second.key;
+                key.windows_only = true; // the broker explicitly did not process it
+                buffered_.push_front(key);
+                sent_keys_.erase(sent);
+            }
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
-            if (missed) Replay(*missed);
+            if (!buffered_.empty()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
             return m.seq == wanted;
         }
         if (tip_logic::CommitsVisibleText(m)) FinishLocal(false);
@@ -1716,8 +1743,8 @@ private:
         link_.Write(std::string("{\"op\":\"") + op + "\"}", tip_logic::KEY_BUDGET_MS);
     }
 
-    bool SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
-        if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return false;
+    SendResult SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
+        if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return SendResult::Unavailable;
         const ULONGLONG start = NowMs(), deadline = start + tip_logic::KEY_BUDGET_MS;
         std::optional<tip_logic::KeyContext> context;
         bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
@@ -1728,13 +1755,18 @@ private:
             if (CanReadContext(ctx)) {
                 uint64_t generation = focus_generation_;
                 *context = ReadContext(ctx);
-                if (generation != focus_generation_) return false;
+                if (generation != focus_generation_) return SendResult::FocusMoved;
                 if (FocusChanged()) {
                     FocusMoved();
-                    return false;
+                    return SendResult::FocusMoved;
                 }
             }
         }
+        if (FocusChanged()) {
+            FocusMoved();
+            return SendResult::FocusMoved;
+        }
+        if (!ScopeAllowsInput()) return SendResult::Unavailable;
         long long seq = in_flight_.Next(start);
         auto request = tip_logic::KeyRequest(seq, key.down, key.chord.vk, key.time, key.chord.mods,
                                             context ? &*context : nullptr);
@@ -1742,7 +1774,7 @@ private:
         DWORD budget = now < deadline ? (DWORD)(deadline - now) : 0;
         if (!link_.Write(request, budget)) {
             in_flight_.Answer(seq);
-            return false;
+            return SendResult::Unavailable;
         }
         if (capture) sent_keys_.emplace(seq, SentKey{key});
         if (key.down && capture) down_sent_[key.raw] = key.chord;
@@ -1753,7 +1785,7 @@ private:
                 WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
             }
         }
-        return true;
+        return SendResult::Sent;
     }
 
     void SendKeyUp(Stroke key) {
@@ -1861,17 +1893,14 @@ private:
 
     // DESIGN「見えている文字の確定」: the conversion ends with its text on screen; local state starts over.
     void FinishLocal(bool invalidate_replies = true) {
+        // The FIFO and any Windows replay belong to the input, which can
+        // continue even when the engine's session is reset.
         if (invalidate_replies) {
             stale_upto_ = in_flight_.Last();
             in_flight_.Clear();
             sent_keys_.clear();
-            buffered_.clear();
             releases_.clear();
-            tested_.reset();
             tested_up_.reset();
-            replay_.reset();
-            retry_replay_.reset();
-            KillTimer(hwnd_, kTimerReplay);
             pending_mode_seq_ = mode_edit_seq_ = 0;
         }
         CancelReplyTimer();
@@ -1894,11 +1923,18 @@ private:
         phase_ = direct_ ? tip_logic::Phase::Direct : tip_logic::Phase::Empty;
         for (auto& sent : down_sent_) sent.reset();
         HideCands();
+        if (!buffered_.empty()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
     }
 
     // A new field: what was being converted is kept as typed, the engine
     // forgets it, and the field's kind is looked up once (DESIGN「パスワード欄」).
     void FocusMoved() {
+        const bool was_carrying = carry_.Active();
+        if (!carry_.OnFocusMoved(RootOwner(), buffered_.empty() && !retry_replay_, NowMs())) {
+            DropHeld(L"focus");
+        } else if (!was_carrying) {
+            StartCarryTimer();
+        }
         FinishLocal();
         SendRequest("reset");
         stopped_told_ = false;
@@ -1944,6 +1980,39 @@ private:
 
     // -- keys and replay -------------------------------------------------------------------
     bool Eligible() { return tm_ && !KeyboardDisabled(tm_) && !KeyboardClosed(tm_); }
+    bool ScopeAllowsInput() const { return tip_logic::AllowsInput(scope_, carry_.Active()); }
+    static uintptr_t RootOwner() {
+        HWND foreground = GetForegroundWindow();
+        if (GetWindowThreadProcessId(foreground, nullptr) != GetCurrentThreadId()) return 0;
+        return reinterpret_cast<uintptr_t>(GetAncestor(foreground, GA_ROOTOWNER));
+    }
+    size_t HeldCount() const {
+        return (retry_replay_ ? 1 : 0) +
+            std::count_if(buffered_.begin(), buffered_.end(), [](const Stroke& key) {
+                return key.down && !tip_logic::AltVk(key.raw);
+            });
+    }
+    void StartCarryTimer() {
+        Log(L"carry start n=%zu", HeldCount());
+        ArmTimer(kTimerCarry, carry_.Started() + tip_logic::KEY_BUDGET_MS);
+    }
+    void AdoptHeld() {
+        const auto root = RootOwner();
+        const bool continuing = carry_.Active() && carry_.SameRoot(root);
+        carry_.Adopt(root, NowMs());
+        if (!continuing) StartCarryTimer();
+        PostMessageW(hwnd_, kKeysMessage, 0, 0);
+    }
+    void DropHeld(const wchar_t* reason, size_t extra = 0) {
+        const size_t count = HeldCount() + extra;
+        if (count) Log(L"held keys dropped n=%zu reason=%ls", count, reason);
+        buffered_.clear();
+        replay_.reset();
+        retry_replay_.reset();
+        carry_.Finished();
+        KillTimer(hwnd_, kTimerReplay);
+        KillTimer(hwnd_, kTimerCarry);
+    }
     Stroke ReadStroke(WPARAM w, LPARAM l, bool down = true) {
         UINT vk = VkOf(w);
         return {vk, l, GetMessageTime(), NowMs(), tip_logic::NormalizeKey(vk, HeldMods()), down};
@@ -1970,7 +2039,12 @@ private:
 
     Decision Decide(const Stroke& key, bool buffer = true) {
         using namespace tip_logic;
-        if (!Eligible() || scope_ != Scope::Allowed || key.chord.mods.win) return {};
+        if (!tm_ || key.chord.mods.win) return {};
+        const bool can_hold = HoldDuringCarry(key.chord, key.raw, (uint32_t)key.flags,
+                                              keymap_.global.count(key.chord.Code()) != 0);
+        if (buffer && carry_.Active()) return {can_hold ? Action::Buffer : Action::Pass};
+        if (buffer && (!buffered_.empty() || retry_replay_) && can_hold) return {Action::Buffer};
+        if (!Eligible() || !ScopeAllowsInput()) return {};
         auto local = LocalState();
         bool ready = link_.Connected() && SendsKeys(CurrentMode());
         if (AltVk(key.raw)) {
@@ -1978,12 +2052,9 @@ private:
                 return {Action::ObserveAlt};
             return {};
         }
-        if (ModifierVk(key.raw)) return {};
-        // kbd101 has already changed the system's kana lock on this event.
-        if (key.raw == VK_KANA && ((key.flags >> 16) & 0xFF) == 0x3A) return {};
+        if (ModifierVk(key.raw) || KanaLockKey(key.raw, (uint32_t)key.flags)) return {};
         auto global = GlobalFor(key.chord.Code());
-        if (buffer && (KeysWaiting() || !buffered_.empty()) &&
-            (global != GlobalCommand::None || !key.chord.mods.alt || key.chord.mods.ctrl))
+        if (buffer && KeysWaiting() && can_hold)
             return {Action::Buffer};
         if (global != GlobalCommand::None) return {Action::Global, global};
         if (ready && !direct_ && WantKey(key.chord, local, keymap_) == Take::Send)
@@ -1996,12 +2067,11 @@ private:
         PostMessageW(hwnd_, kKeysMessage, 0, 0);
     }
     void QueueRelease(const Stroke& key) {
-        if (!Eligible() || scope_ != Scope::Allowed || FocusChanged()) return;
         auto stroke = std::find_if(buffered_.rbegin(), buffered_.rend(),
                                   [&](const Stroke& queued) { return queued.raw == key.raw; });
         if (stroke != buffered_.rend() && stroke->down) {
             Buffer(key);
-        } else if (down_sent_[key.raw]) {
+        } else if (down_sent_[key.raw] && Eligible() && ScopeAllowsInput() && !FocusChanged()) {
             auto release = key;
             release.chord = *down_sent_[key.raw];
             down_sent_[key.raw].reset();
@@ -2024,11 +2094,15 @@ private:
     }
     void PumpKeys() {
         if (!tm_) return;
-        if (FocusChanged()) { FocusMoved(); return; }
+        if (FocusChanged() || (carry_.Active() && !carry_.SameRoot(RootOwner()))) {
+            FocusMoved();
+            return;
+        }
+        carry_.Pumped();
         FlushReleases();
         if (replay_ || retry_replay_ || pending_mode_seq_) return;
         if (mode_edit_seq_) {
-            if (!state_ || state_->applied_seq < mode_edit_seq_) return;
+            if (scope_ctx_ && (!state_ || state_->applied_seq < mode_edit_seq_)) return;
             mode_edit_seq_ = 0;
         }
         if (!sent_keys_.empty()) {
@@ -2037,19 +2111,42 @@ private:
             if (!after || !state_ || state_->applied_seq < after) return;
             auto key = sent->second.key;
             sent_keys_.erase(sent);
-            Replay(key);
+            if (!ReplayHeld(key)) return;
             if (replay_ || retry_replay_) return;
         }
         if (state_ && !state_->pending.empty()) return;
         while (!buffered_.empty() && !KeysWaiting()) {
+            auto started = CarryStarted();
+            const auto now = NowMs();
+            const auto delivery = tip_logic::DeliverHeld({scope_ctx_ != nullptr, Eligible(), scope_}, now, started);
+            if (delivery == tip_logic::Deliver::Wait) {
+                ArmTimer(kTimerCarry, *started + tip_logic::KEY_BUDGET_MS);
+                return;
+            }
             auto key = buffered_.front();
             buffered_.pop_front();
+            if (delivery == tip_logic::Deliver::Raw || key.windows_only) {
+                if (key.down && !tip_logic::AltVk(key.raw)) {
+                    if (key.preserved && scope_ == Scope::Password) {
+                        Log(L"held command suppressed reason=password n=1");
+                        continue;
+                    }
+                    if (!ReplayHeld(key)) return;
+                }
+                continue;
+            }
             if (!key.down) { SendKeyUp(key); continue; }
             if (tip_logic::AltVk(key.raw)) { SendKey(key, false, nullptr, false); continue; }
-            auto decision = key.command == tip_logic::GlobalCommand::None
-                          ? Decide(key, false) : Decision{Action::Global, key.command};
-            if (decision.action == Action::Global) RunGlobal(decision.command);
-            else if (decision.action != Action::Send || !SendKey(key, true, scope_ctx_, false)) Replay(key);
+            auto decision = Decide(key, false);
+            if (decision.action == Action::Global && RunGlobal(decision.command)) continue;
+            if (decision.action == Action::Send) {
+                if (!SendOrReplay(key, scope_ctx_, false)) return;
+            } else if (!ReplayHeld(key)) return;
+        }
+        if (carry_.Active() && buffered_.empty() && !KeysWaiting()) {
+            if (scope_ == Scope::Unavailable) scope_ = Scope::Unknown;
+            carry_.Finished();
+            KillTimer(hwnd_, kTimerCarry);
         }
     }
 
@@ -2062,20 +2159,67 @@ private:
         if (same) {
             replay_.reset();
             KillTimer(hwnd_, kTimerReplay);
-            tested_ = TestedKey{key, {}};
+            carry_.ReplayPassed(RootOwner());
+            tested_ = TestedKey{key, {}, focus_generation_};
             PostMessageW(hwnd_, kKeysMessage, 0, 0);
         }
         return marked || same;
     }
 
-    void Replay(const Stroke& key) {
+    std::optional<uint64_t> CarryStarted() const {
+        return carry_.Active() ? std::optional{carry_.Started()} : std::nullopt;
+    }
+    static void LogCarryDelivery(const wchar_t* kind, std::optional<uint64_t> started) {
+        if (started) Log(L"carry deliver kind=%ls waited=%llu", kind, NowMs() - *started);
+    }
+
+    bool SendOrReplay(const Stroke& key, ITfContext* ctx, bool sync) {
+        auto started = CarryStarted();
+        switch (SendKey(key, true, ctx, sync)) {
+            case SendResult::Sent:
+                LogCarryDelivery(L"engine", started);
+                return true;
+            case SendResult::FocusMoved:
+                buffered_.push_front(key);
+                AdoptHeld();
+                return false;
+            case SendResult::Unavailable: return ReplayHeld(key);
+        }
+        return false;
+    }
+
+    bool ReplayHeld(Stroke key) {
+        key.windows_only = true;
+        auto started = CarryStarted();
+        switch (Replay(key)) {
+            case ReplayResult::Sent:
+                LogCarryDelivery(L"raw", started);
+                return true;
+            case ReplayResult::Retry: return true;
+            case ReplayResult::FocusMoved:
+                buffered_.push_front(key);
+                FocusMoved();
+                return false;
+            case ReplayResult::Foreground:
+                DropHeld(L"foreground", 1);
+                return false;
+            case ReplayResult::Failed:
+                Log(L"held key replay failed reason=sendinput n=1");
+                return true;
+        }
+        return false;
+    }
+
+    ReplayResult Replay(const Stroke& key) {
         DWORD foreground = 0;
         GetWindowThreadProcessId(GetForegroundWindow(), &foreground);
-        if (foreground != GetCurrentProcessId() || FocusChanged() || scope_ != Scope::Allowed) return;
+        if (foreground != GetCurrentProcessId()) return ReplayResult::Foreground;
+        if (FocusChanged() || (carry_.Active() && !carry_.SameRoot(RootOwner())))
+            return ReplayResult::FocusMoved;
         if ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) {
             retry_replay_ = key;
             SetTimer(hwnd_, kTimerReplay, 25, nullptr);
-            return;
+            return ReplayResult::Retry;
         }
         replay_ = key;
         // SendInput uses the keyboard state at injection time; restore any
@@ -2117,12 +2261,11 @@ private:
         for (auto it = restore.rbegin(); it != restore.rend(); ++it)
             add(it->first, it->second, it->first == VK_RCONTROL || it->first == VK_RMENU);
         if (SendInput((UINT)input.size(), input.data(), sizeof(INPUT)) != input.size()) {
-            Log(L"key replay failed vk=%u", key.raw);
             replay_.reset();
-            PostMessageW(hwnd_, kKeysMessage, 0, 0);
-        } else {
-            SetTimer(hwnd_, kTimerReplay, tip_logic::KEY_BUDGET_MS, nullptr);
+            return ReplayResult::Failed;
         }
+        SetTimer(hwnd_, kTimerReplay, tip_logic::KEY_BUDGET_MS, nullptr);
+        return ReplayResult::Sent;
     }
 
     bool RunGlobal(tip_logic::GlobalCommand command) {
@@ -2319,7 +2462,7 @@ private:
     std::string broker_state_;
     tip_logic::InFlight in_flight_;
     long long stale_upto_ = 0;  // last sequence issued before local composition was retired
-    UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerReplay;
+    UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerCarry;
     tip_logic::ConnectGate connect_gate_;
     HWND hwnd_ = nullptr, cand_hwnd_ = nullptr, notice_hwnd_ = nullptr;
     Scope scope_ = Scope::Unknown;
@@ -2342,6 +2485,7 @@ private:
     std::array<std::optional<tip_logic::Chord>, 256> down_sent_{};
     std::map<long long, SentKey> sent_keys_;
     std::deque<Stroke> buffered_, releases_;
+    tip_logic::Carry carry_;
     std::vector<Registration> preserved_;
     long long pending_mode_seq_ = 0, mode_edit_seq_ = 0;
     bool langbar_ = false;
@@ -2373,7 +2517,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE DoEditSession(TfEditCookie ec) override {
         if (kind_ == Scope) {
-            tip_->ScopeChecked(ctx_, generation_, PasswordField(ctx_, ec));
+            tip_->ScopeChecked(ctx_, generation_, SelectionScope(ctx_, ec));
             return S_OK;
         }
         if (kind_ == Document) {
@@ -2416,7 +2560,7 @@ private:
         if (FAILED(selected->Clone(&clone))) return;
         std::unique_ptr<ITfRange, decltype(release)> left(clone, release);
         if (FAILED(left->Collapse(ec, TF_ANCHOR_START)) ||
-            FieldScope(ctx_, ec, left.get()) != InputScopeKind::Allowed ||
+            FieldScope(ctx_, ec, left.get()) != tip_logic::Scope::Allowed ||
             generation_ != tip_->focus_generation_ || !tip_->CanReadContext(ctx_)) return;
 
         auto state = tip_->State();

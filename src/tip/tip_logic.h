@@ -363,6 +363,73 @@ struct Local {
     bool unsettled = false;
 };
 
+enum class Scope { Unknown, Allowed, Password, Unavailable };
+enum class Deliver { Wait, Raw, Decide };
+struct FieldFacts {
+    bool has_document;
+    bool eligible;
+    Scope scope;
+};
+
+inline bool AllowsInput(Scope scope, bool carrying) {
+    return scope == Scope::Allowed || (scope == Scope::Unavailable && !carrying);
+}
+
+inline Deliver DeliverHeld(const FieldFacts& field, uint64_t now, std::optional<uint64_t> carry_started) {
+    if (!field.has_document || !field.eligible || field.scope == Scope::Password) return Deliver::Raw;
+    if (AllowsInput(field.scope, carry_started.has_value())) return Deliver::Decide;
+    return carry_started && now - *carry_started < KEY_BUDGET_MS ? Deliver::Wait : Deliver::Raw;
+}
+
+inline bool KanaLockKey(uint32_t vk, uint32_t flags) {
+    return vk == 0x15 && ((flags >> 16) & 0xFF) == 0x3A; // kbd101 already changed the lock
+}
+
+inline bool HoldDuringCarry(Chord chord, uint32_t raw_vk, uint32_t flags, bool is_global) {
+    return !chord.mods.win && !ModifierVk(raw_vk) && !KanaLockKey(raw_vk, flags) &&
+           (!chord.mods.alt || chord.mods.ctrl || is_global);
+}
+
+// A replay opens a window between the echoed down and the next pump. Once
+// the queue follows a focus change, subsequent notifications use its root.
+class Carry {
+public:
+    void ReplayPassed(uintptr_t root) { replay_root_ = root; }
+    void Pumped() { replay_root_ = 0; }
+
+    bool OnFocusMoved(uintptr_t root, bool held_empty, uint64_t now) {
+        if (!held_empty && root) {
+            if (Active() && SameRoot(root)) return true;
+            if (!Active() && root == replay_root_) {
+                Adopt(root, now);
+                return true;
+            }
+        }
+        Finished();
+        return false;
+    }
+
+    void Adopt(uintptr_t root, uint64_t now) {
+        if (!Active() || !SameRoot(root)) started_ = now;
+        root_ = root;
+        Pumped();
+    }
+
+    void Finished() {
+        started_.reset();
+        root_ = 0;
+        Pumped();
+    }
+
+    bool Active() const { return started_.has_value(); }
+    uint64_t Started() const { return started_.value(); }
+    bool SameRoot(uintptr_t root) const { return root && root == root_; }
+
+private:
+    uintptr_t replay_root_ = 0, root_ = 0;
+    std::optional<uint64_t> started_;
+};
+
 enum class Take { Pass, Send };
 
 inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
