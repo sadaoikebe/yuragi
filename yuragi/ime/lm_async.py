@@ -286,6 +286,8 @@ class ConnectionPipeline:
         else:
             self.queue.append(msg)
         commit, grace = "", False
+        eat = None
+        current_continuation = False
         while True:
             if self.sess._await is not None:
                 outcome = self._outcome(wait=grace)
@@ -293,6 +295,9 @@ class ConnectionPipeline:
                 if outcome is PENDING:
                     break
                 commit += self.sess.finish_conversion(outcome)
+                if current_continuation:
+                    eat = self.sess.key_eat
+                    current_continuation = False
                 self.job = None
                 continue
             if not self.queue:
@@ -300,11 +305,18 @@ class ConnectionPipeline:
             m = self.queue.popleft()
             self.sess.lm_deferred = self.worker.available()
             commit += apply_op(self.sess, m)
+            if m is msg and op == "down":
+                eat = self.sess.key_eat
+                current_continuation = eat is None
             if self.sess._await is not None:
                 self._submit_convert()
                 grace = True
         self._prefetch()
-        reply = snapshot(self.sess, op)
+        if op == "down" and eat is None:
+            # A pending reply reserves the down. The eventual phase is used
+            # when it runs, even if preceding queued keys changed the input.
+            eat = self.sess.pending_key_eat(int(msg["vk"]), msg.get("mods"))
+        reply = snapshot(self.sess, op, eat=eat)
         set_reply_commit(self.sess, msg, reply, commit)
         reply["pending"] = self.sess._await is not None
         if reply["pending"]:

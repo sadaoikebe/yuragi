@@ -13,7 +13,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_SPACE, VK_LEFT, VK_UP, VK_DOWN, VK_F6 = 0x0D, 0x20, 0x25, 0x26, 0x28, 0x75
+VK_RETURN, VK_SPACE, VK_LEFT, VK_UP, VK_DOWN, VK_DELETE = 0x0D, 0x20, 0x25, 0x26, 0x28, 0x2E
 
 
 class LearningTest(unittest.TestCase):
@@ -140,18 +140,18 @@ class LearningTest(unittest.TestCase):
             s.reset()
         self.assertEqual(self.path.read_bytes(), b"")
 
-    def test_shift_f6_forgets_the_choice(self):
+    def test_ctrl_delete_forgets_the_choice(self):
         s = self.session()
         chosen = self.choose_second(s, "こうせい")
         segment = self.convert(s, "こうせい")
         self.assertEqual(segment.selected.surface, chosen)
-        dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
+        dispatch(s, {"op": "down", "vk": VK_DELETE, "mods": ["ctrl"]})
         self.assertNotEqual(segment.selected.surface, chosen)
         self.assertFalse(LearningStore(self.path).has_pair("こうせい", chosen))
         # Nothing learned is left to forget: no line, and the selection stays.
         s._select(2)
         shown, size = segment.selected.surface, self.path.stat().st_size
-        dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
+        dispatch(s, {"op": "down", "vk": VK_DELETE, "mods": ["ctrl"]})
         self.assertEqual((segment.selected.surface, self.path.stat().st_size), (shown, size))
 
     def test_forgetting_in_the_window_reaches_a_running_session(self):

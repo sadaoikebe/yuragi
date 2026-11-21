@@ -169,7 +169,7 @@ class Connection:
             del sess.tokens[MAX_TOKENS:]
             sess._refresh()
             commit = reply["commit"]
-            reply = snapshot(sess, msg.get("op"))
+            reply = snapshot(sess, msg.get("op"), eat=reply.get("eat"))
             reply.update(commit=commit, pending=False)
         return reply
 
@@ -192,7 +192,10 @@ class Connection:
 
 class Engine:
     def __init__(self, channel: Channel, args: argparse.Namespace):
+        from yuragi.ime.keymap import default_keymap
+
         self.channel = channel
+        self.keymap = default_keymap()
         self.connections: dict[object, Connection] = {}
         self.loaded = None
         self.worker = None
@@ -341,7 +344,7 @@ class Engine:
         return ImeSession(
             _table=loaded._table, _lex=loaded._lex, _symbols=loaded._symbols,
             _learning=loaded._learning, personal=loaded.personal,
-            prediction=loaded.prediction, predict_index=loaded.predict_index)
+            prediction=loaded.prediction, predict_index=loaded.predict_index, keymap=self.keymap)
 
     def new_pipeline(self, sess):
         if self.worker is None:
@@ -439,6 +442,8 @@ class Engine:
                 log(f"request failed: {where(exc)}; session started afresh")
                 reply = connection.recover()
                 reply["error"] = True
+                if msg.get("op") == "down":
+                    reply["eat"] = not reply["direct"]
         reply["sid"] = sid
         reply["seq"] = seq
         return reply

@@ -14,7 +14,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime.symbol_readings import load_symbols
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_F6 = 0x0D, 0x75
+VK_RETURN, VK_DELETE = 0x0D, 0x2E
 
 
 class SymbolConversionTest(unittest.TestCase):
@@ -77,7 +77,7 @@ class SymbolConversionTest(unittest.TestCase):
         self.assertEqual(rows[0].kind, "symbol")
         self.assertEqual(rows[1:], [c for c in before if c.surface != "「」"])
 
-    def test_shift_f6_forgets_a_chosen_symbol(self):
+    def test_ctrl_delete_forgets_a_chosen_symbol(self):
         s = self.session("かっこ", learning=True)
         rows = self.rows(s, 200)
         s._select(next(i for i, c in enumerate(rows) if c.surface == "「」"))
@@ -86,7 +86,7 @@ class SymbolConversionTest(unittest.TestCase):
         rows = self.rows(s)
         s._select(0)
         self.assertEqual(s.segments[s.focus].selected.surface, "「」")
-        dispatch(s, {"op": "down", "vk": VK_F6, "mods": ["shift"]})
+        dispatch(s, {"op": "down", "vk": VK_DELETE, "mods": ["ctrl"]})
         self.assertEqual(s.segments[s.focus].selected, rows[1])  # the newly ranked first
         self.assertFalse(LearningStore(self.path).has_pair("かっこ", "「」"))
         rows = self.rows(self.session("かっこ", learning=True), 200)

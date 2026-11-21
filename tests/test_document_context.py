@@ -263,7 +263,7 @@ class PipelineContextTest(ContextCase):
         prefetch = self.pipeline.spec
         # Retain the old prefetch while preparing identical input with a
         # verified position, to isolate the POS component of the cache key.
-        self.sess._edit(ESC)
+        self.sess._cancel()
         k.tap("J")
         seq = k.commit()
         k.tap("W", left_context="語尾", after_commit_seq=seq)

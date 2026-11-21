@@ -27,7 +27,7 @@ from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID
 from yuragi.lattice.table import load_table
 
 ENTER, SPACE, ESC = 0x0D, 0x20, 0x1B
-LEFT, RIGHT, DOWN, NEXT, F6 = 0x25, 0x27, 0x28, 0x22, 0x75
+LEFT, RIGHT, DOWN, NEXT, DELETE = 0x25, 0x27, 0x28, 0x22, 0x2E
 
 
 class Review:
@@ -216,7 +216,7 @@ class ContextLearningTest(unittest.TestCase):
         self.assert_head(other, "資料構成が")
         keys, replayed = convert("げんこうこうせいが", "原稿構成が")
         self.assert_head(replayed, "原稿校正が")
-        self.assert_head(keys.tap(F6, mods=["shift"]), "原稿構成が")
+        self.assert_head(keys.tap(DELETE, mods=["ctrl"]), "原稿構成が")
         _, reopened = convert("げんこうこうせいが", "原稿構成が")
         self.assert_head(reopened, "原稿構成が")
 
@@ -284,7 +284,7 @@ class ContextLearningTest(unittest.TestCase):
         k.commit()
         self.assertEqual(self.rows()[-1]["prev"], "原稿")
 
-    def test_shift_f6_reselects_the_contextual_head_only_at_the_focus(self):
+    def test_ctrl_delete_reselects_the_contextual_head_only_at_the_focus(self):
         self.learn("原稿の", "校正")
         self.learn("原稿の", "構成")
         self.learn("会議の", "構成")
@@ -295,7 +295,7 @@ class ContextLearningTest(unittest.TestCase):
         self.pick(k, k.tap(SPACE), "原稿の")
         left = s.segments[0]
         self.assert_head(k.tap(RIGHT), "構成")
-        self.assert_head(k.tap(F6, mods=["shift"]), "校正")
+        self.assert_head(k.tap(DELETE, mods=["ctrl"]), "校正")
         self.assertIs(s.segments[0], left)
         self.assertTrue(left.fixed)
         self.assertFalse(s._learning.has_pair("こうせい", "構成"))

@@ -19,7 +19,8 @@ import unicodedata
 
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
 from yuragi.chord.keys import (
-    ANSI_SHIFTED, SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, classify, literal_character,
+    ALT_VKS, MODIFIER_VKS, SHIFT, SPACE, VK_BACK, VK_RETURN, Chord, alnum_character,
+    classify, literal_character, modifier_bits,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
@@ -28,6 +29,8 @@ from yuragi.lattice.table import load_table
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateOrder, CandidateStream,
                        Segment, arranged_candidates, candidates, dictionary_candidates,
                        normal_bunsetsu, without_heads, word_piece)
+from .commands import CONVERTED, KANA, Command
+from .keymap import Keymap, default_keymap
 from .learning import LearningStore, LearningView
 from .zenz import CONTEXT_CHARS, KanaRun, ZenzConverter, conversion_picks, prompt
 from .numbers import is_digit, number_spellings
@@ -36,22 +39,7 @@ from .symbols import symbol_spellings
 from .symbol_readings import load_symbols
 from .predict import DEFAULT_MODE as DEFAULT_PREDICTION, MAX_TAILS, ReadingIndex, predict
 
-VK_LEFT = 0x25
-VK_RIGHT = 0x27
-VK_PRIOR = 0x21
-VK_NEXT = 0x22
-VK_UP = 0x26
-VK_DOWN = 0x28
-VK_F6 = 0x75
-VK_F7 = 0x76
-VK_F8 = 0x77
-VK_F9 = 0x78
-VK_F10 = 0x79
-SCRIPT_VKS = (VK_F6, VK_F7, VK_F8, VK_F9, VK_F10)  # the one-shot spellings
-VK_TAB = 0x09
-CTRL_VKS = {0x11, 0xA2, 0xA3}  # Ctrl, left and right
 PREDICTION = "predict"  # Segment.context of the predictions' segment
-IDEOGRAPHIC_SPACE = "\u3000"  # Space with no input (全角の空白)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,16 +78,6 @@ def alnum_spelling(keys: str, current: str | None, *, full: bool) -> str:
     if current in forms:
         return forms[(forms.index(current) + 1) % len(forms)]
     return forms[0]
-
-
-def alnum_character(vk: int, key: str, shift: bool) -> str:
-    """A character key's engraving in half width (英数の続き): the key id is
-    the lower engraving; Shift gives the upper one (A-Z, ANSI_SHIFTED)."""
-    if not shift:
-        return key
-    if ord("A") <= vk <= ord("Z"):
-        return chr(vk)
-    return ANSI_SHIFTED[vk]
 
 
 def half_width_ascii(text: str) -> bool:
@@ -365,6 +343,21 @@ class ImeSession:
     # the presses whose chords remain. Keyed by the remaining tokens' press
     # number (presses are never renumbered or reused), cleared on reset.
     _carry: dict[int, frozenset[str]] = field(default_factory=dict)
+    keymap: Keymap = field(default_factory=default_keymap)
+    _fsm_down: set[int] = field(default_factory=set)
+    key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
+
+    @property
+    def phase(self) -> str:
+        if self.direct:
+            return "direct"
+        if not self.tokens:
+            return "empty"
+        if self.predicting:
+            return "predicting"
+        if not self.converted:
+            return "composing"
+        return "selecting" if self.candidates else "converting"
 
     def load(self) -> None:
         if not self._table:
@@ -376,6 +369,10 @@ class ImeSession:
 
     def reset(self) -> None:
         """Discard composition and input state after focus loss/termination."""
+        self._modifiers.clear()
+        self._cancel()
+
+    def _cancel(self) -> None:
         self._reset_input()
         self._clear_context()
 
@@ -383,7 +380,7 @@ class ImeSession:
         self._clear_input()
         self.fsm.reset()
         self.fsm.pressed_at.clear()
-        self._modifiers.clear()
+        self._fsm_down.clear()
         self._press_alias.clear()
         self._carry.clear()
         self._await = None
@@ -397,9 +394,11 @@ class ImeSession:
         self._repeat = False
 
     def starts_input(self, vk: int, mods: list[str] | None) -> bool:
-        return (not self.direct and not self.tokens and self._await is None
-                and self.fsm.state == "S1" and classify(vk)[0] in ("M", "O")
-                and not self._shortcut(mods))
+        if self.phase != "empty" or self._await is not None or self.fsm.state != "S1":
+            return False
+        chord = Chord(vk, modifier_bits(mods, self._modifiers))
+        command = self.keymap.lookup("empty", chord)
+        return chord.typing or (command is not None and command.id == "insert_alt_space")
 
     def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
         self._partial = False
@@ -425,10 +424,6 @@ class ImeSession:
         if self._last_commit is not None:
             self._last_commit.seq = seq
 
-    def _shortcut(self, mods: list[str] | None) -> bool:
-        return (bool(set(mods) & {"ctrl", "alt", "win"}) if mods is not None
-                else bool(self._modifiers & SHORTCUT_VKS))
-
     def set_direct(self, direct: bool) -> None:
         """Change input mode, discarding unfinished input on a transition."""
         if direct != self.direct:
@@ -438,109 +433,96 @@ class ImeSession:
     def on_key(
         self, down: bool, vk: int, now_ms: int, mods: list[str] | None = None,
     ) -> str | None:
-        """Return the text to insert for this event (never cumulative text).
+        """Return this event's committed text; record its consumption in key_eat.
 
-        mods is an optional snapshot: ["shift", "ctrl", "alt", "win"]. Without
-        it, modifier down/up events provide the state (also used by the host).
+        With no modifier snapshot, the raw host's modifier down/up events
+        provide the state.
         """
+        self.key_eat = None if down else False
         if self.direct:
+            self.key_eat = False
             return None
-        kind, key = classify(vk)
-        if kind == "MOD":
+        if vk in MODIFIER_VKS:
             if down:
                 self._modifiers.add(vk)
             else:
                 self._modifiers.discard(vk)
+            self.key_eat = False
+            if down and vk in ALT_VKS:
+                return self._then(self._finish_pending(), self._commit)
             return None
-        shift = "shift" in mods if mods is not None else bool(self._modifiers & SHIFT_VKS)
-        shortcut = self._shortcut(mods)
-        ctrl_only = (set(mods) == {"ctrl"} if mods is not None
-                     else bool(self._modifiers & CTRL_VKS)
-                     and not self._modifiers & (SHORTCUT_VKS - CTRL_VKS) and not shift)
-        if (down and vk == VK_DOWN and ctrl_only
-                and (self.tokens or self.fsm.timer_deadline is not None
-                     or self._await is not None)):
-            # 部分確定: Ctrl+↓ commits the first clause.
-            pending = self._finish_pending()
-
-            def commit_prefix() -> str | None:
-                if not self.tokens or self.predicting:
-                    if not self.tokens:
-                        self._clear_context()  # as the shortcut below
-                    return None
-                return self._commit_prefix()
-            return self._then(pending, commit_prefix)
-        if shortcut:
-            if down and not self.tokens:
-                self._clear_context()  # Ctrl/Alt/Win may move the caret or edit text.
-            return None
-        if down and (vk in SCRIPT_VKS and not shift or vk == VK_F6 and shift):
-            pending = self._finish_pending()
-            if shift:
-                # Shift+F6 forgets the candidate's learning; the plain keys
-                # carry the conventional script conversions below.
-                def forget_key() -> None:
-                    if self.converted and self.candidates:
-                        self.forget_candidate()
-                    return None
-                return self._then(pending, forget_key)
-
-            def script_key() -> None:
-                self._select_script(vk)
+        if not down:
+            if vk not in self._fsm_down:
                 return None
-            return self._then(pending, script_key)
-        if kind == "EDIT":
-            if not down:
-                return None
+            self._fsm_down.remove(vk)
+            kind, key = classify(vk)
+            return self._then(self.flush_timeout(now_ms),
+                              lambda: self._ingest(self.fsm.on_up(kind, key, now_ms)))
+
+        chord = Chord(vk, modifier_bits(mods, self._modifiers))
+        if chord.typing:
+            return self._then(self.flush_timeout(now_ms),
+                              lambda: self._type_key(chord, now_ms))
+        return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
+
+    def pending_key_eat(self, vk: int, mods: list[str] | None) -> bool:
+        """Reserve a queued down if it can be consumed after the LM resolves."""
+        if self.direct or vk in MODIFIER_VKS:
+            return False
+        chord = Chord(vk, modifier_bits(mods, self._modifiers))
+        if chord.typing:
+            return True
+        commands = (self.keymap.command_for(phase, chord) for phase in KANA)
+        return any(command.key == "eat" and command.where == "engine" for command in commands)
+
+    def _dispatch_chord(self, chord: Chord) -> str | None:
+        command = self.keymap.command_for(self.phase, chord)
+        self.key_eat = command.key == "eat" and command.where == "engine"
+        self._forget_fsm_down(chord.vk)
+        if command.key == "pass" and self.phase == "empty":
+            self._pass_empty_key(chord)
+        return self._run_command(command)
+
+    def _type_key(self, chord: Chord, now_ms: int) -> str | None:
+        # Plain Space is looked up only on ThumbTap. A Space that forms
+        # a NICOLA chord must keep its original timing in every phase.
+        if chord.character and (self.phase in CONVERTED or self.predicting):
+            if self.keymap.lookup(self.phase, chord) is not None:
+                return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
+
+        self.key_eat = True
+        kind, key = classify(chord.vk)
+        alnum = self._alnum_continues()
+        if alnum and chord == SPACE:
             pending = self._finish_pending()
-            return self._then(pending, lambda: self._edit(vk))
-        if (down and shift and self.converted and self.focus >= 0
-                and vk in (VK_LEFT, VK_RIGHT)):
-            pending = self._finish_pending()
-            self._resize(1 if vk == VK_RIGHT else -1)
-            return pending
-        # Candidate shortcuts precede the digit keys' faces; Shift+digits enter symbols.
-        if down and not shift and self.converted:
-            if vk in (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT) or (
-                    self.candidates and ord("1") <= vk <= ord("9")):
-                pending = self._finish_pending()
-            else:
-                pending = None
-            picked = self._on_cand_key(vk)
-            if picked is not None:
-                return (pending or "") + picked
-        if (down and vk == VK_TAB and not shift and self.prediction != "off"
-                and self._predict_key()):
-            return None
-        if down and kind in ("M", "O") and self._alnum_continues():
-            # 英数の続き: no chord FSM; keys type their engravings, Space converts.
-            pending = self._finish_pending()
-            if kind == "O":
-                return self._then(pending, lambda: self._ingest([ThumbTap()]))
-            return self._then(pending, lambda: self._ingest(
-                [Literal(alnum_character(vk, key, shift))]))
-        literal = literal_character(vk, shift)
+            self._forget_fsm_down(chord.vk)
+            return self._then(pending, lambda: self._ingest([ThumbTap()]))
+        literal = literal_character(chord.vk, bool(chord.mods & SHIFT))
+        if alnum and kind == "M":
+            literal = alnum_character(chord.vk, bool(chord.mods & SHIFT))
         if literal is not None:
-            if not down:
-                return None
             pending = self._finish_pending()
+            self._forget_fsm_down(chord.vk)
             return self._then(pending, lambda: self._ingest([Literal(literal)]))
-        if kind not in ("M", "O"):
-            if down and not self.tokens:
-                self._clear_context()  # Arrows/Home/Tab etc.: the caret may have moved.
-            return None
-        assert key is not None
-        due = self.flush_timeout(now_ms)
 
-        def chord_key() -> str | None:
-            insert = ""
-            if down and kind == "M" and self.converted:
-                # Preserve a pending Space chord: only composition is committed here.
-                insert += self._commit(reset_input=False)
-            raw = (self.fsm.on_down(kind, key, now_ms) if down
-                   else self.fsm.on_up(kind, key, now_ms))
-            return insert + (self._ingest(raw) or "") or None
-        return self._then(due, chord_key)
+        assert key is not None
+        insert = ""
+        if chord.character and self.converted:
+            # Preserve a pending Space chord while starting the next input.
+            insert = self._commit(reset_input=False)
+        self._fsm_down.add(chord.vk)
+        return insert + (self._ingest(self.fsm.on_down(kind, key, now_ms)) or "") or None
+
+    def _forget_fsm_down(self, vk: int) -> None:
+        if vk in self._fsm_down:
+            self._fsm_down.remove(vk)
+            _, key = classify(vk)
+            self.fsm.pressed_at.pop(key, None)
+
+    def _run_command(self, command: Command | None) -> str | None:
+        if command is not None and command.run is not None:
+            return command.run(self)
+        return None
 
     def _alnum_continues(self) -> bool:
         """英数の続き: the input ends in a half-width ASCII literal.
@@ -634,18 +616,10 @@ class ImeSession:
         self._clear_cands()
         self._refresh()
 
-    def _predict_key(self) -> bool:
-        """Tab: open predictions, or the next one; False leaves Tab as it was.
-
-        Only unconverted input with no chord or conversion in flight asks;
-        with no prediction nothing changes (the TIP eats Tab while composing).
-        """
-        if self.predicting:
-            self._cycle(1)
-            return True
-        if (not self.tokens or self.converted or self._await is not None
-                or self.fsm.timer_deadline is not None or self._lex is None):
-            return False
+    def _predict_key(self) -> None:
+        """Open the predictions for the trailing reading, if there are any."""
+        if self.prediction == "off" or not self.tokens or self.converted or self._lex is None:
+            return
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
         lattice = self._lattice()
@@ -672,7 +646,7 @@ class ImeSession:
                                 self.personal.revision if self.personal is not None else None)
             except Exception as exc:
                 print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
-                return False
+                return
             if not found:
                 continue
             stream = CandidateStream(iter(found))
@@ -689,10 +663,9 @@ class ImeSession:
             self.focus = len(head)
             self.composition = "".join(s.selected.surface for s in self.segments)
             self._open_cands()
-            return True
-        return False
+            return
 
-    def _select_script(self, vk: int) -> None:
+    def _to_script(self, script: str) -> None:
         """F6-F10: give the focused clause one fixed spelling (MS-IME's gestures).
 
         F6 hiragana, F7 katakana: the kana rows that close out every clause's
@@ -730,20 +703,20 @@ class ImeSession:
             i += 1
         if not rows:
             return
-        if vk in (VK_F6, VK_F7):
-            self._select(self._next_kana_row(segment, hiragana=vk == VK_F6,
-                                             default=rows[1] if vk == VK_F7 and len(rows) > 1
-                                             else rows[0]))
+        if script in ("hiragana", "katakana"):
+            hiragana = script == "hiragana"
+            default = rows[0] if hiragana or len(rows) == 1 else rows[1]
+            self._select(self._next_kana_row(segment, hiragana=hiragana, default=default))
             return
         hira = (segment.selected if segment.selected.kind == "kana"
                 else stream.cache[rows[0]])
-        if vk == VK_F8:
+        if script == "half_katakana":
             surface, kind = half_katakana(hira.reading), "kana"
         else:
             keys = [t.get("key", "") for t in self._lattice()[segment.start:segment.end]]
             surface = alnum_spelling("".join(keys), segment.selected.surface
                                      if segment.selected.kind == "alnum" else None,
-                                     full=vk == VK_F9)
+                                     full=script == "full_alnum")
             kind = "alnum"
         chosen = Candidate(surface, hira.reading, hira.score, hira.lid, hira.rid, kind)
         self._set_selection(self.focus, chosen)
@@ -778,77 +751,56 @@ class ImeSession:
             i += 1
         return default
 
-    def forget_candidate(self) -> bool:
+    def forget_candidate(self) -> None:
         """Suppress the highlighted pair, then choose the newly ranked first row."""
         if (self._learning is None or not self.converted or self.focus < 0
                 or not self.candidates or self.cand_index < 0):
-            return False
+            return
         segment = self.segments[self.focus]
         c = segment.selected
         if c.kind in ("literal", "number", "date") or not c.reading:
-            return False
+            return
         pairs = [(c.reading, c.surface)]
         if c.kind == "dictionary":
             pairs.extend((p.reading, p.surface) for p in c.words if word_piece(p, self._lex))
         if not self._learning.suppress_pairs(pairs):
-            return False
+            return
         if segment.context == PREDICTION:
             # The forgotten word leaves the list; back to the input if none remain.
             self._cancel_conversion()
             self._predict_key()
-            return True
+            return
         self._learning_view = self._learning.snapshot()
         segment.fixed = False
         self._prepare_cands(self.focus, reselect=True)
         segment.mark_shown()
         self._open_cands()
-        return True
 
-    def _edit(self, vk: int) -> str | None:
-        if vk == VK_BACK:
-            if self.converted:
-                self._cancel_conversion()
-            elif self.tokens:
-                self.tokens.pop()
-                self._refresh()
-            else:
-                self._committed_context = self._committed_context[:-1]
-                self._lm_context = self._committed_context
-                self._left_id = BOS_ID
-                self._last_commit = None
-                self._left_bunsetsu = None
-                self._repeat = False
-            return None
-        if vk == VK_ESCAPE:
-            if self.converted:
-                self._cancel_conversion()
-            else:
-                self.reset()
-            return None
-        if vk == VK_RETURN:
-            return self._commit()
-        return None
+    def _delete_before(self) -> None:
+        if self.tokens:
+            self.tokens.pop()
+            self._refresh()
 
-    def _on_cand_key(self, vk: int) -> str | None:
-        if vk in (VK_LEFT, VK_RIGHT):
-            # Every segment is a stop: a symbol or a run of digits has its own rows.
-            if self.focus >= 0:
-                at = self.focus + (1 if vk == VK_RIGHT else -1)
-                self.focus = max(0, min(at, len(self.segments) - 1))
-                self._open_cands()
-            return ""
-        if vk in (VK_DOWN, VK_UP):
-            self._cycle(1 if vk == VK_DOWN else -1)
-            return ""
-        if vk in (VK_NEXT, VK_PRIOR):
-            self._page(1 if vk == VK_NEXT else -1)
-            return ""
-        if self.candidates and ord("1") <= vk <= ord("9"):
-            row = vk - ord("1")
-            if self.focus >= 0 and row < len(self.candidates):
-                self._select(self.candidate_page * PAGE_SIZE + row)
-            return ""
-        return None
+    def _pass_empty_key(self, chord: Chord) -> None:
+        if chord.mods in (0, SHIFT):
+            if chord.vk == VK_RETURN:
+                return  # keep the context available to the next input
+            if chord.vk == VK_BACK:
+                tail = self._committed_context[:-1]
+                self._clear_context()
+                self._lm_context = self._committed_context = tail
+                return
+        self._clear_context()
+
+    def _move_segment(self, delta: int) -> None:
+        # Every segment is a stop: a symbol or a run of digits has its own rows.
+        if self.focus >= 0:
+            self.focus = max(0, min(self.focus + delta, len(self.segments) - 1))
+            self._open_cands()
+
+    def _select_row(self, row: int) -> None:
+        if self.focus >= 0 and row < len(self.candidates):
+            self._select(self.candidate_page * PAGE_SIZE + row)
 
     def _open_cands(self) -> None:
         self._clear_cands()
@@ -922,6 +874,8 @@ class ImeSession:
 
     def _resize(self, delta: int) -> None:
         """Override one automatic boundary, keeping all other intervals intact."""
+        if self.focus < 0:
+            return
         segment = self.segments[self.focus]
         if segment.literal or self.predicting:
             return  # a digit run keeps its interval; predictions span the input
@@ -1042,21 +996,7 @@ class ImeSession:
         insert = ""
         for tok in raw:
             if isinstance(tok, ThumbTap):
-                if self.tokens:
-                    if self.converted:
-                        self._cycle(1)
-                    else:
-                        request = self.conversion_request() if self.lm_deferred else None
-                        if request is not None:
-                            assert tok is raw[-1]  # the FSM emits at most one token per call
-                            self._await = request
-                            continue
-                        request = self._conversion_input(self._parts())
-                        self._show_conversion(request, converter=self.lm)
-                else:
-                    # No input: a space, full width as the kana mode's default.
-                    insert += IDEOGRAPHIC_SPACE
-                    self._note_commit(IDEOGRAPHIC_SPACE)
+                insert += self._run_command(self.keymap.lookup(self.phase, SPACE)) or ""
                 continue
             mapped = to_lattice_token(tok, self._table)
             if mapped is None:
@@ -1074,6 +1014,17 @@ class ImeSession:
             self._clear_cands()
             self._refresh()
         return insert or None
+
+    def _insert_space(self, text: str) -> str:
+        self._note_commit(text)
+        return text
+
+    def _convert(self) -> None:
+        request = self.conversion_request() if self.lm_deferred else None
+        if request is not None:
+            self._await = request
+            return
+        self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
 
     def _lattice(self) -> list[dict]:
         out = []

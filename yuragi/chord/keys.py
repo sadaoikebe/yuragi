@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 # Win32 VK
 VK_SPACE = 0x20
 VK_BACK = 0x08
@@ -68,26 +70,20 @@ VK_TO_M: dict[int, str] = {
     VK_OEM_7: "'",
 }
 
-MODIFIER_VKS = {
-    VK_SHIFT,
-    VK_CONTROL,
-    VK_MENU,
-    VK_LWIN,
-    VK_RWIN,
-    0xA0,
-    0xA1,
-    0xA2,
-    0xA3,
-    0xA4,
-    0xA5,  # L/R shift/ctrl/alt
-}
+SHIFT, CTRL, ALT, WIN = 1, 2, 4, 8
+SHIFT_VKS = {VK_SHIFT, 0xA0, 0xA1}
+CTRL_VKS = {VK_CONTROL, 0xA2, 0xA3}
+ALT_VKS = {VK_MENU, 0xA4, 0xA5}
+WIN_VKS = {VK_LWIN, VK_RWIN}
+SHORTCUT_VKS = CTRL_VKS | ALT_VKS | WIN_VKS
+MODIFIER_VKS = SHIFT_VKS | SHORTCUT_VKS
+_MODIFIERS = (("Ctrl", CTRL, CTRL_VKS), ("Alt", ALT, ALT_VKS),
+              ("Shift", SHIFT, SHIFT_VKS), ("Win", WIN, WIN_VKS))
+_MOD_BITS = {name.lower(): bit for name, bit, _ in _MODIFIERS}
 
 # Shift is the little-finger layer and never joins a chord:
 # Shift+letters are the native upper-case letters; Shift+digits/symbols give
-# the upper engraving in full width, with ' giving ”. Ctrl/Alt/Win shortcuts
-# bypass the session.
-SHIFT_VKS = {VK_SHIFT, 0xA0, 0xA1}
-SHORTCUT_VKS = MODIFIER_VKS - SHIFT_VKS
+# the upper engraving in full width, with ' giving ”.
 ANSI_SHIFTED = {
     VK_OEM_1: ":", VK_OEM_PLUS: "+", VK_OEM_COMMA: "<", VK_OEM_MINUS: "_",
     VK_OEM_PERIOD: ">", VK_OEM_2: "?", VK_OEM_3: "~", VK_OEM_4: "{",
@@ -103,14 +99,85 @@ def _full_width(ch: str) -> str:
 SHIFT_FACES: dict[int, str] = {vk: _full_width(ch) for vk, ch in ANSI_SHIFTED.items()}
 SHIFT_FACES[VK_OEM_7] = "\u201d"  # ”, not ＂
 
+NUMPAD = dict(zip(range(0x60, 0x6A), "0123456789"))
+NUMPAD.update({0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"})
+_NAMES = {
+    **{vk: name.upper() for vk, name in VK_TO_M.items()},
+    VK_SPACE: "Space", VK_RETURN: "Enter", VK_BACK: "Backspace", 0x09: "Tab",
+    VK_ESCAPE: "Esc", 0x2E: "Delete", 0x2D: "Insert", 0x24: "Home", 0x23: "End",
+    0x21: "PageUp", 0x22: "PageDown", 0x25: "Left", 0x27: "Right", 0x26: "Up",
+    0x28: "Down", 0x14: "CapsLock", **{0x6F + n: f"F{n}" for n in range(1, 25)},
+    **{0x60 + n: f"Numpad{n}" for n in range(10)},
+    0x6A: "NumpadMultiply", 0x6B: "NumpadAdd", 0x6D: "NumpadSubtract",
+    0x6E: "NumpadDecimal", 0x6F: "NumpadDivide",
+}
+_VKS = {name.lower(): vk for vk, name in _NAMES.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class Chord:
+    vk: int
+    mods: int = 0
+
+    @classmethod
+    def parse(cls, name: str) -> Chord:
+        *modifiers, key = name.lower().split("+")
+        if key not in _VKS or len(set(modifiers)) != len(modifiers):
+            raise ValueError(f"invalid chord: {name}")
+        bits = 0
+        for modifier in modifiers:
+            bit = _MOD_BITS.get(modifier, 0)
+            if not bit or bit == WIN:
+                raise ValueError(f"invalid chord: {name}")
+            bits |= bit
+        return cls(_VKS[key], bits)
+
+    def __str__(self) -> str:
+        return "+".join([name for name, bit, _ in _MODIFIERS if self.mods & bit]
+                        + [_NAMES.get(self.vk, f"VK_{self.vk:02X}")])
+
+    @property
+    def code(self) -> int:
+        return self.vk | self.mods << 8
+
+    @property
+    def alt_only(self) -> bool:
+        return self.mods & (CTRL | ALT) == ALT
+
+    @property
+    def character(self) -> bool:
+        return self.mods in (0, SHIFT) and (self.vk in VK_TO_M or self.vk in NUMPAD)
+
+    @property
+    def typing(self) -> bool:
+        return self.character or self == SPACE
+
+
+SPACE = Chord(VK_SPACE)
+
+
+def modifier_bits(mods: list[str] | None, held: set[int]) -> int:
+    if mods is None:
+        return sum(bit for _, bit, vks in _MODIFIERS if vks & held)
+    return sum({_MOD_BITS[mod] for mod in mods if mod in _MOD_BITS})
+
 
 def literal_character(vk: int, shift: bool) -> str | None:
-    """The character a key gives outside the chord FSM: the Shift layer only."""
+    """The character a key gives outside the chord FSM: numpad or Shift."""
+    if vk in NUMPAD:
+        return NUMPAD[vk]
     if not shift:
         return None
     if ord("A") <= vk <= ord("Z"):
         return chr(vk)
     return SHIFT_FACES.get(vk)
+
+
+def alnum_character(vk: int, shift: bool) -> str:
+    """A letter or symbol's half-width engraving in 英数の続き."""
+    if not shift:
+        return VK_TO_M[vk]
+    return ANSI_SHIFTED.get(vk, chr(vk))
 
 
 def classify(vk: int) -> tuple[str, str | None]:

@@ -15,7 +15,9 @@ One JSON object per line:
   {"op":"reset"}  # focus loss or application-terminated composition; no commit
   {"op":"set_direct","direct":true}
   {"op":"down","vk":9,"t":300}  # Tab: predictions for the input, if any
-Reply: {"composition":"...","commit":"...","converted":false,"fsm":"S1","pending":false}
+Reply: {"composition":"...","commit":"...","phase":"composing","fsm":"S1","pending":false}
+eat: whether the down was consumed (present on down replies). While the LM
+      is pending, a down that could be consumed is reserved for later dispatch.
 predicting: the candidates are predictions (Tab acted; the TIP eats that Tab).
 pending: the conversion awaits the LM (engine); poll with timeout at "timer".
 """
@@ -40,7 +42,7 @@ from yuragi.ime.zenz import CONTEXT_CHARS
 def dispatch(sess: ImeSession, msg: dict) -> dict:
     """Shared protocol path for the engine, the stdio host and transcript tests."""
     commit = apply_op(sess, msg)
-    reply = snapshot(sess, msg.get("op"))
+    reply = snapshot(sess, msg.get("op"), eat=sess.key_eat)
     set_reply_commit(sess, msg, reply, commit)
     if "seq" in msg:
         reply["seq"] = msg["seq"]
@@ -84,11 +86,13 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
     return commit
 
 
-def snapshot(sess: ImeSession, op) -> dict:
+def snapshot(sess: ImeSession, op, *, eat: bool | None = None) -> dict:
     """The reply for the session's state; the caller fills in commit."""
-    return {
+    reply = {
         "direct": sess.direct,
-        "pass_through": sess.direct and op in ("down", "up"),
+        "pass_through": ((sess.direct and op in ("down", "up"))
+                         or (op == "down" and eat is False)),
+        "phase": sess.phase,
         "composition": sess.composition,
         "commit": "",
         "converted": sess.converted,
@@ -105,6 +109,9 @@ def snapshot(sess: ImeSession, op) -> dict:
         "predicting": sess.predicting,
         "pending": False,
     }
+    if op == "down" and eat is not None:
+        reply["eat"] = eat
+    return reply
 
 
 def argument_parser() -> argparse.ArgumentParser:

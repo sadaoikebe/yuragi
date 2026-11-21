@@ -251,19 +251,16 @@ class LearnedContextTest(unittest.TestCase):
 
             # Visit the right clause. The LM's 偉 leads (学 was learned with no left
             # bunsetsu, so it does not override the LM); eight ranked rows follow.
-            session._on_cand_key(0x27)
-            session._on_cand_key(0x27)
+            for vk in (0x27, 0x27):  # Right twice
+                pipe.handle({"op": "down", "vk": vk})
             self.assertEqual(session.candidates, ["偉"] + surfaces[2:9][::-1] + surfaces[:1])
-            session._on_cand_key(0x22)
+            pipe.handle({"op": "down", "vk": 0x22})  # PageDown
             self.assertEqual(session.candidates, surfaces[1:2] + surfaces[9:] + ["学", "い", "イ"])
 
             # Same POS, different text to the left. The old score and review both
             # expire; with no LM vote left, the learned 学 leads.
-            session._on_cand_key(0x25)
-            session._on_cand_key(0x25)
-            session._on_cand_key(ord("2"))
-            session._on_cand_key(0x27)
-            session._on_cand_key(0x27)
+            for vk in (0x25, 0x25, ord("2"), 0x27, 0x27):
+                pipe.handle({"op": "down", "vk": vk})
             self.assertEqual(session.composition, "課、井")
             self.assertEqual(session.candidates, ["学"] + surfaces[:8])
             self.assertEqual(model.candidate_nll.call_count, 1)
@@ -351,10 +348,33 @@ class DeadlineTest(unittest.TestCase):
         self.assertTrue(reply["converted"])
         self.assertTrue(reply["candidates"])
 
-    def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
+    def test_candidate_number_waits_for_conversion(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
         keys = Typist().kana("きしゃ").space()
-        keys.tap(VK_RETURN).kana("かいせい").space()
+        for event in keys.events:
+            reply = pipe.handle(event)
+        self.assertEqual((reply["phase"], reply["pending"]), ("composing", True))
+        digit = pipe.handle({"op": "down", "vk": ord("2"), "t": keys.t + 10})
+        self.assertEqual((digit["eat"], digit["pending"], digit["commit"]), (True, True, ""))
+        worker.complete(pipe.job)
+        selected = pipe.handle(TERMINAL)
+        self.assertEqual((selected["phase"], selected["cand_index"], selected["commit"]),
+                         ("selecting", 1, ""))
+        self.assertEqual(selected["composition"], selected["candidates"][1])
+
+        # Releasing a number used as a command must leave the next stroke
+        # waiting for its own timeout, even if that timeout is already due.
+        next_key = pipe.handle({"op": "down", "vk": ord("K"), "t": keys.t + 20})
+        released = pipe.handle({"op": "up", "vk": ord("2"), "t": next_key["timer"] + 1})
+        self.assertNotIn("eat", released)
+        self.assertEqual((released["composition"], released["timer"]), ("", next_key["timer"]))
+
+    def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        keys = Typist().kana("きしゃ").key("down", VK_SPACE, 150)
+        # Enter arrives before Space resolves, so Enter itself starts the LM job.
+        keys.tap(VK_RETURN, gap=10).key("up", VK_SPACE, 10)
+        keys.kana("かいせい").space()
         keys.tap(0x28).tap(VK_RETURN).kana("う")
         for event in keys.events:
             reply = pipe.handle(event)

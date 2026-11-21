@@ -138,19 +138,12 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual((reply["n_tokens"], reply["segments"], reply["candidates"]), (0, [], []))
         self.assertEqual(k.committed, whole)
 
-    def test_unconverted_input_stays_unconverted(self):
+    def test_ctrl_down_keeps_unconverted_input(self):
         k = self.typed("わたしはがっこう")
+        composition = k.s.composition
         reply = k.ctrl_down()
-        self.assertEqual(reply["commit"], "私は")
-        self.assertFalse(reply["converted"])
-        self.assertEqual(reply["candidates"], [])
-        self.assertEqual(reply["composition"], "学校")
-        self.assertEqual(reply["n_tokens"], 4)
-        # Typing goes on after the rest (decoded again with the committed left).
-        k.s._table["keys"]["に"] = {"plain": "に"}
-        k.s._ingest([Plain("に")])
-        self.assertEqual(k.s.composition, "学校に")
-        self.assertEqual(k.committed, "私は")
+        self.assertEqual((reply["eat"], reply["commit"], reply["phase"]), (True, "", "composing"))
+        self.assertEqual(reply["composition"], composition)
 
     def test_learning_records_a_chosen_word_in_a_partially_committed_clause(self):
         k = self.typed("わたしはがっこうにいく", learning=True)
