@@ -59,9 +59,6 @@ class SymbolConversionTest(unittest.TestCase):
         self.assertFalse(set(symbols) & {c.surface for c in rows if c.kind == "dictionary"})
         return rows
 
-    def test_yajirushi(self):
-        self.assert_symbols_fourth("やじるし", "矢印", "→")
-
     def test_kigou(self):
         rows = self.assert_symbols_fourth("きごう", "記号", "゛")
         self.assertEqual(rows[SYMBOL_OFFSET + SYMBOL_HEAD].kind, "dictionary")

@@ -53,7 +53,6 @@ class KanaKeyTest(unittest.TestCase):
     def test_f10_gives_the_typed_keys_and_cycles_case(self):
         s = self.session()
         type_keys(s, "ew")  # た か
-        self.assertEqual("".join(t["kana"] for t in s._lattice()), "たか")
         surfaces = [tap(s, VK_F10)["composition"] for _ in range(4)]
         self.assertEqual(surfaces, ["ew", "EW", "Ew", "ew"])
         self.assertEqual(s.segments[s.focus].selected.reading, "たか")

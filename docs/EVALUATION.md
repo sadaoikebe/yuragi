@@ -2,7 +2,7 @@
 
 リポジトリ直下で実行する。評価の道具は標準ライブラリだけで動き、学習履歴・個人辞書・LM を使わない
 （LM を使う変換の時間は、下の「LM を使う変換の応答時間」のとおりエンジンで測る）。手書きの補正辞書
-`data/user_lexicon.jsonl` は評価条件に含む（`--no-user-lexicon` で外せる）。
+`data/user_lexicon.jsonl` は重ねる（`--no-user-lexicon` で外せる）。
 
 ```sh
 python3 -m tools.eval.fetch_mozc_dict          # 初回のみ。Mozc OSS 辞書（git には入れない）

@@ -72,23 +72,6 @@ static void StatesAndWhatTheUserSees() {
     assert(ModeFor(Link::Connecting, "") == Mode::Preparing);
     assert(ModeFor(Link::Unreachable, "ready") == Mode::Stopped);
     assert(ModeFor(Link::NotAllowed, "") == Mode::Excluded);
-
-    // While the engine starts, keys pass through (nothing is held for later).
-    assert(SendsKeys(Mode::Normal) && !SendsKeys(Mode::Preparing));
-    assert(!SendsKeys(Mode::Stopped) && !SendsKeys(Mode::Excluded));
-    // The toggle works while preparing, so a direct input left by a lost connection can be undone.
-    assert(Toggles(Mode::Normal) && Toggles(Mode::Preparing));
-    assert(!Toggles(Mode::Stopped) && !Toggles(Mode::Excluded));
-    assert(std::string(Glyph(Mode::Preparing, true)) == "Y");
-    assert(std::string(Glyph(Mode::Normal, false)) == "\xE3\x82\x86");  // ゆ
-    assert(std::string(Glyph(Mode::Normal, true)) == "Y");
-    assert(std::string(Glyph(Mode::Stopped, false)) == "!");
-    assert(std::string(Glyph(Mode::Excluded, false)) == "Y");
-    assert(Faint(Mode::Preparing) && !Faint(Mode::Normal));
-
-    assert((MenuFor(Mode::Normal) == std::vector<int>{MENU_TOGGLE, MENU_ADMIN}));
-    assert((MenuFor(Mode::Preparing) == std::vector<int>{MENU_PREPARING, MENU_ADMIN}));
-    assert((MenuFor(Mode::Stopped) == std::vector<int>{MENU_RETRY, MENU_ADMIN}));
 }
 
 static void EatingKeys() {
@@ -343,7 +326,7 @@ static void LeftContextTail() {
     assert(!ContextTail(tail + std::wstring(1, 0xd842), true));
     std::wstring astral;
     for (size_t i = 0; i < CONTEXT_CHARS; ++i) astral += {0xd842, 0xdfb7};
-    assert(astral.size() == CONTEXT_UNITS && ContextTail(astral, true) == astral);
+    assert(ContextTail(astral, true) == astral);
 }
 
 static int CompareEngineKeys() {

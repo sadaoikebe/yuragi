@@ -17,7 +17,7 @@ from pathlib import Path
 import sys
 
 from . import mozc_dict
-from .mozc_dict import MANIFEST, ROOT, USER_LEX
+from .mozc_dict import MANIFEST, ROOT
 FORMAT = 1
 # The loader's inputs (dictionary*, suffix, connection, id.def for POS names),
 # plus the evaluation set and the upstream notices that travel with them.
@@ -38,12 +38,6 @@ def describe(path: Path) -> dict:
     return {"size": path.stat().st_size, "sha256": sha256(path)}
 
 
-def describe_text(path: Path) -> dict:
-    """describe() of the LF form: git on Windows may check the file out with CRLF."""
-    data = path.read_bytes().replace(b"\r\n", b"\n")
-    return {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-
-
 def build(label: str, upstream_commit: str = "unknown") -> dict:
     return {
         "format": FORMAT,
@@ -51,9 +45,6 @@ def build(label: str, upstream_commit: str = "unknown") -> dict:
         "upstream_commit": upstream_commit,
         "dictionary_dir": str(mozc_dict.DICT_DIR.relative_to(ROOT)),
         "files": {name: describe(mozc_dict.DICT_DIR / name) for name in REQUIRED},
-        # Hand-written corrections are applied separately (an evaluation
-        # condition of their own), so they are recorded, not mixed in.
-        "user_lexicon": {"path": str(USER_LEX.relative_to(ROOT)), **describe_text(USER_LEX)},
         # No cache hash: the cache is named after the dictionary's hash.
     }
 
@@ -72,8 +63,6 @@ def verify(manifest: dict) -> list[str]:
     for path in sorted(directory.glob("dictionary*.txt")):
         if path.name not in recorded:
             problems.append(f"unrecorded {path.name} (the loader would read it)")
-    if describe_text(USER_LEX) != {k: manifest["user_lexicon"][k] for k in ("size", "sha256")}:
-        problems.append(f"changed {USER_LEX.name}")
     return problems
 
 

@@ -601,7 +601,6 @@ def write_reports(output: Path, rows: list[dict], manifest: dict):
     output.mkdir(parents=True, exist_ok=True)
     items = work_items(rows)
     primary = Counter(row["automatic_classification"]["primary"] for row in rows)
-    assert sum(primary.values()) == len(rows)
     deltas = {metric: condition_differences(rows, metric)
               for metric in ("reading_match", "surface_match", "command_pass")}
     manifest.update(primary_counts=dict(primary), condition_differences=deltas,

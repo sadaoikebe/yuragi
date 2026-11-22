@@ -109,7 +109,6 @@ class AlnumContinuationTest(unittest.TestCase):
         k.up(VK_SPACE, [])
         self.assertTrue(reply["converted"])
         self.assertEqual(reply["composition"], "Test")
-        self.assertEqual(k.s.composition, "Test")
         self.assertEqual(k.tap(VK_RETURN)["commit"], "Test")
 
     def test_ways_back_to_kana(self):

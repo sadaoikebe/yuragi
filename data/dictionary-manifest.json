@@ -68,10 +68,5 @@
       "size": 1516,
       "sha256": "a05a67759c983e5e53d7634f2f5ed71531233e51b2cea0f8c404dfed3323c129"
     }
-  },
-  "user_lexicon": {
-    "path": "data/user_lexicon.jsonl",
-    "size": 5092,
-    "sha256": "7667a79fa9c653a2a5f4dbbe11dd0adc5679b9452ce88f3ec8de070207e209f4"
   }
 }

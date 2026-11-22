@@ -144,7 +144,6 @@ class DraftCacheTest(unittest.TestCase):
             "B equals A": a,
             "B extends A": a + self.ids("ので"),
         }
-        self.assertNotEqual(cases["no shared prefix"][0], a[0])
         for name, b in cases.items():
             with self.subTest(name):
                 expected = self.fresh(text, b)

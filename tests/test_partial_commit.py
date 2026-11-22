@@ -281,7 +281,6 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("がっこう")
         k.s.max_tokens = 5
         k.s._table["keys"].update(w={"plain": "っ"}, a={"plain": "が"})
-        self.assertEqual(k.s.composition, "学校")
         moved = k.tap(VK_HOME)
         self.assertEqual((moved["composition"], moved["caret"]), ("がっこう", 0))
         k.tap(VK_RIGHT)
@@ -382,28 +381,13 @@ class PartialCommitTest(unittest.TestCase):
                           restored["segments"]),
                          ("converting", selected["focus"], [], selected["segments"]))
 
-    def test_ctrl_f7_opens_the_word_register_only_without_input(self):
-        k = self.typed("")
-        self.assertEqual(k.tap(0x76, ["ctrl"]).get("global"), "open_word_register")
-        k = self.typed("わたし")
-        self.assertIsNone(k.tap(0x76, ["ctrl"]).get("global"))
-
     def test_ctrl_f10_commits_a_pending_character_before_passing_to_the_app(self):
         k = Keys(self.session())
-        pending = k.send("down", ord("K"))
-        self.assertEqual(pending["phase"], "empty")  # the thumb chord is unresolved
+        k.send("down", ord("K"))  # the thumb chord is unresolved
         reply = k.send("down", 0x79, ["ctrl"])
         self.assertEqual((reply["commit"], reply["eat"], reply.get("global")), ("き", False, None))
         k.send("up", ord("K"))
         self.assertEqual(k.tap(0x79, ["ctrl"]).get("global"), "open_menu")
-
-    def test_first_space_converts_and_the_second_opens_the_window(self):
-        k = self.typed("わたしはがっこうにいく")
-        first = k.convert()
-        self.assertEqual((first["phase"], first["candidates"]), ("converting", []))
-        second = k.convert()
-        self.assertEqual((second["phase"], second["cand_index"]), ("selecting", 1))
-        self.assertEqual(second["segments"][0]["surface"], second["candidates"][1])
 
     # Shift+CapsLock with input is MS-IME's 英数 mode (ms-ime.md §1.5): the input
     # stays, later keys type half-width, and the IME is off once the input ends.

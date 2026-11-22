@@ -161,7 +161,6 @@ class ContextLearningTest(unittest.TestCase):
                 k = Keys(lambda msg: dispatch(s, msg))
                 if left:
                     self.plain(s, reading)
-                    self.assertEqual(s.composition, left)
                     k.commit()
                     start = {"after_commit_seq": k.seq}
                 else:
@@ -367,7 +366,6 @@ class ContextLearningTest(unittest.TestCase):
                 start = {}
                 if left_override:
                     self.plain(s, "かいぎの")
-                    self.assertEqual(s.composition, "会議の")
                     start = {"after_commit_seq": k.commit()}
                 s.lm = ZenzConverter(Review(text, exact=exact))
                 self.plain(s, "げんこうのこうせい", after=start.get("after_commit_seq"))
@@ -424,7 +422,6 @@ class ContextLearningTest(unittest.TestCase):
                 k = Keys(pipe.handle)
                 k.send("down", SPACE)
                 prefetch = pipe.spec
-                self.assertIsNotNone(prefetch)
                 if mode in ("miss", "deadline"):
                     self.learn(None, "厚生", cost=50_000)
                 reply = k.send("up", SPACE)

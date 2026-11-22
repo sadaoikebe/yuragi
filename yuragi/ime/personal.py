@@ -1,8 +1,6 @@
 """The user's own word list, separate from data/user_lexicon.jsonl.
 
-data/user_lexicon.jsonl is part of the evaluation condition (the hand-written
-corrections the Mozc scores are measured with), so personal words must
-not go there. They live in their own JSONL file, are overlaid on the shared
+Personal words live in their own JSONL file, are overlaid on the shared
 lexicon only by the running IME (never by the evaluation loaders), and take
 effect without a restart: every conversion checks the file's signature.
 
