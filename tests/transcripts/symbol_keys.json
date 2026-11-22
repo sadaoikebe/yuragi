@@ -23,10 +23,10 @@
     {"event": {"op": "up", "t": 1010, "vk": 49, "mods": ["shift"]}},
     {"event": {"op": "down", "t": 1110, "vk": 32}, "note": "変換: かなの文節から"},
     {"event": {"op": "up", "t": 1140, "vk": 32}},
-    {"event": {"op": "down", "t": 1240, "vk": 37}, "note": "← で 「 へ。候補に半角と近い記号"},
+    {"event": {"op": "down", "t": 1240, "vk": 37}, "note": "← で 「 の文節へ"},
     {"event": {"op": "up", "t": 1270, "vk": 37}},
-    {"event": {"op": "down", "t": 1370, "vk": 40}, "note": "↓ で半角の ["},
-    {"event": {"op": "up", "t": 1400, "vk": 40}},
+    {"event": {"op": "down", "t": 1370, "vk": 32}, "note": "Space で候補を開いて半角の ["},
+    {"event": {"op": "up", "t": 1400, "vk": 32}},
     {"event": {"op": "down", "t": 1500, "vk": 13}},
     {"event": {"op": "up", "t": 1530, "vk": 13}}
   ],

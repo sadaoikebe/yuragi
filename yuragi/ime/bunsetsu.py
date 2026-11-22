@@ -109,6 +109,7 @@ class Segment:
     # The dictionary/LM base and what was displayed after learning respectively.
     source: Candidate | None = None
     shown: Candidate | None = None  # None for explicitly resized intervals
+    raw: bool = False  # a resized interval still showing its reading
 
     def chosen(self) -> bool:
         """The user's own choice: a resized interval or a changed selection."""

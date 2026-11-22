@@ -88,7 +88,7 @@
 
 - 表を引くときは、今の局面に無ければ親をたどり、最後に `global` を見る。子の局面には、親と違う行だけを書けばよい。
 - `converting` と `selecting` の違いは、候補窓が開いているかだけ。MS-IME は 1 回目の変換では候補窓を出さず（`converting`）、2 回目で出す。
-  ゆらぎは、1 回目の変換で候補窓を出すのをまだ変えていない。それを変えるまでは、変換すると `selecting` になり、`converting` になるのは文節長変更を終えたときだけ。
+  ゆらぎは、1 回目の変換で `selecting` になる。文節長変更を終えたときや、候補窓を閉じる操作をしたときに `converting` になる。
 - **候補窓を開くのは、候補を選ぶ操作だけ**（`next_candidate`・`prev_candidate`。それと、今の 1 回目の変換）。注目文節や文節の境界を変える操作
   （文節の移動、伸縮、先頭の文節の確定、字種の変換）は、候補窓を閉じる。
 - `resizing` には、文節の境界が実際に動いたときに入る。端で動かなければ、文節は変えずに候補窓だけを閉じる（`selecting` は `converting` になり、ほかの局面はそのまま）。
@@ -145,11 +145,11 @@
 | `next_candidate` / `prev_candidate` | converting 以降 | ○ | 次／前の候補。`converting` では候補窓を開く |
 | `next_page` / `prev_page` | selecting 以降 | ○ | 次／前の 9 件 |
 | `select_candidate_1` … `select_candidate_9` | selecting 以降 | ○ | 番号の候補を選ぶ |
-| `candidate_first` / `candidate_last` | selecting 以降 | × | 先頭／最後の候補を選ぶ |
+| `candidate_first` / `candidate_last` | selecting 以降 | ○ | 先頭／最後の候補を選ぶ |
 | `segment_left` / `segment_right` | converting 以降 | ○ | 前／次の文節へ |
-| `segment_first` / `segment_last` | converting 以降 | × | 先頭／末尾の文節へ |
+| `segment_first` / `segment_last` | converting 以降 | ○ | 先頭／末尾の文節へ |
 | `segment_shrink` / `segment_expand` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動くと `resizing` になる（§4.1） |
-| `convert_segment` | resizing | × | 伸縮で読みにした文節を変換し、`converting` に戻る（MS-IME の「文節変換」。候補窓は開かない） |
+| `convert_segment` | resizing | ○ | 伸縮で読みにした文節を変換し、`converting` に戻る（MS-IME の「文節変換」。候補窓は開かない） |
 | `forget_candidate` | selecting 以降 | ○ | 今の候補の学習を忘れる |
 | `noop` | global 以外の全部 | — | 食べて何もしない。MS-IME が食べて何もしないキー、ゆらぎに作らない機能のキー、親の局面の割り当てを止める行に書く |
 | `pass_through` | global 以外の全部 | — | 何もせずアプリに通す |

@@ -16,17 +16,20 @@ from yuragi.lattice.table import load_table
 def key_cases():
     lex = MozcLex({}, set(), [0] * 4, 2)
     table = load_table()
-    for phase in ("direct", "empty", "composing", "converting", "selecting", "predicting"):
+    for phase in ("direct", "empty", "composing", "converting", "selecting", "resizing", "predicting"):
         for flags in range(16):
             mods = [m for i, m in enumerate(("shift", "ctrl", "alt", "win")) if flags & (1 << i)]
             for vk in range(1, 0x100):
                 session = ImeSession(_table=table, _lex=lex, direct=phase == "direct")
                 if phase not in ("empty", "direct"):
-                    session._ingest([Plain("k")])
-                if phase in ("converting", "selecting"):
+                    count = 2 if phase in ("converting", "resizing") else 1
+                    session._ingest([Plain("k")] * count)
+                if phase in ("converting", "selecting", "resizing"):
                     dispatch(session, {"op": "down", "vk": 0x20, "mods": ["shift"]})
+                    if phase in ("converting", "resizing"):
+                        dispatch(session, {"op": "down", "vk": 0x25, "mods": ["shift"]})
                     if phase == "converting":
-                        session._clear_cands()
+                        dispatch(session, {"op": "down", "vk": 0x20, "mods": ["shift"]})
                 if phase == "predicting":
                     with patch("yuragi.ime.session.predict", return_value=[
                             Candidate("キーワード", "きーわーど", 0, 1, 1, "predict")]):

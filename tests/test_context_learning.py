@@ -86,6 +86,8 @@ class ContextLearningTest(unittest.TestCase):
 
     @staticmethod
     def pick(keys, reply, surface):
+        if reply["phase"] == "converting":
+            reply = keys.tap(SPACE)
         while surface not in reply["candidates"] and reply["has_next_page"]:
             reply = keys.tap(NEXT)
         return keys.tap(ord("1") + reply["candidates"].index(surface))
@@ -96,12 +98,19 @@ class ContextLearningTest(unittest.TestCase):
         reply = keys.tap(SPACE)
         while reply["segments"][reply["focus"]]["reading"] != reading:
             reply = keys.tap(RIGHT)
+        if reply["phase"] == "converting":
+            keys.tap(SPACE)
         reply = keys.tap("2")
         return reply["segments"][reply["focus"]]["surface"]
 
     def assert_head(self, reply, surface):
         self.assertEqual(reply["segments"][reply["focus"]]["surface"], surface)
         self.assertEqual(reply["candidates"][0], surface)
+
+    def assert_hidden_head(self, keys, reply, surface):
+        self.assertEqual(reply["segments"][reply["focus"]]["surface"], surface)
+        self.assertEqual(keys.tap(SPACE)["candidates"][0], surface)
+        keys.tap("1")  # restore the shown selection after opening the list
 
     def test_same_session_standalone_real_keys_and_lm_vote_for_older_choice(self):
         for model in (None, Review("厚生")):
@@ -182,7 +191,7 @@ class ContextLearningTest(unittest.TestCase):
         self.plain(s, "げんこうのこうせい")
         first = k.tap(SPACE)
         self.assertEqual(first["segments"][0]["surface"], "原稿の")
-        self.assert_head(k.tap(RIGHT), "校正")
+        self.assert_hidden_head(k, k.tap(RIGHT), "校正")
         right = s.segments[1]
         old_stream = right.choices
         left_rid = s.segments[0].selected.rid
@@ -190,6 +199,7 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual(s.segments[0].selected.rid, left_rid)
         revisited = k.tap(RIGHT)
         self.assertEqual(revisited["segments"][1]["surface"], "校正")
+        revisited = k.tap(SPACE)
         self.assertEqual(revisited["candidates"][0], "構成")
         self.assertIsNot(right.choices, old_stream)
         self.assertIsNone(right.zenz)
@@ -197,7 +207,7 @@ class ContextLearningTest(unittest.TestCase):
         partial = k.tap(DOWN, mods=["ctrl"])
         self.assertEqual(partial["commit"], "現行の")
         self.assertEqual(partial["segments"][0]["start"], 0)
-        self.assert_head(partial, "構成")
+        self.assert_hidden_head(k, partial, "構成")
 
     def test_word_choice_inside_compound_replays_with_another_particle(self):
         def convert(reading, draft):
@@ -229,7 +239,7 @@ class ContextLearningTest(unittest.TestCase):
         k.tap(SPACE)
         partial = k.tap(DOWN, mods=["ctrl"])
         self.assertEqual(partial["commit"], "公正")
-        self.assert_head(partial, "厚生")
+        self.assert_hidden_head(k, partial, "厚生")
         chosen = k.tap("2")["segments"][0]["surface"]
         k.commit()
         self.assertEqual((self.rows()[-1]["surface"], self.rows()[-1]["prev"]), (chosen, "公正"))
@@ -279,8 +289,9 @@ class ContextLearningTest(unittest.TestCase):
         self.plain(s, "げんこうの")
         k.tap(SPACE)
         resized = k.tap(LEFT, mods=["shift"])
-        self.assertEqual([seg["reading"] for seg in resized["segments"]], ["げんこう", "の"])
-        self.assert_head(k.tap(RIGHT), "ノ")
+        self.assertEqual([seg["surface"] for seg in resized["segments"]], ["げんこう", "の"])
+        self.assertEqual(k.tap(SPACE)["composition"], "原稿ノ")
+        self.assert_hidden_head(k, k.tap(RIGHT), "ノ")
         k.commit()
         self.assertEqual(self.rows()[-1]["prev"], "原稿")
 
@@ -294,7 +305,7 @@ class ContextLearningTest(unittest.TestCase):
         self.plain(s, "げんこうのこうせい")
         self.pick(k, k.tap(SPACE), "原稿の")
         left = s.segments[0]
-        self.assert_head(k.tap(RIGHT), "構成")
+        self.assert_hidden_head(k, k.tap(RIGHT), "構成")
         self.assert_head(k.tap(DELETE, mods=["ctrl"]), "校正")
         self.assertIs(s.segments[0], left)
         self.assertTrue(left.fixed)
@@ -323,13 +334,13 @@ class ContextLearningTest(unittest.TestCase):
         k = Keys(lambda msg: dispatch(s, msg))
         self.plain(s, "げんこうのこうせい")
         k.tap(SPACE)
-        self.assert_head(k.tap(RIGHT), "私製校正")
+        self.assert_hidden_head(k, k.tap(RIGHT), "私製校正")
         self.learn("原稿の", "厚生")
         k.tap(LEFT)
-        self.assert_head(k.tap(RIGHT), "私製校正")
+        self.assert_hidden_head(k, k.tap(RIGHT), "私製校正")
         k.tap(ESC)
         k.tap(SPACE)
-        self.assert_head(k.tap(RIGHT), "厚生")
+        self.assert_hidden_head(k, k.tap(RIGHT), "厚生")
 
     def test_prefix_review_does_not_vote_for_uncovered_or_changed_segments(self):
         self.learn(None, "校正")
@@ -359,7 +370,7 @@ class ContextLearningTest(unittest.TestCase):
                 first = k.tap(SPACE)
                 if left_override:
                     self.assertEqual(first["segments"][0]["surface"], "現行の")
-                self.assert_head(k.tap(RIGHT), expected)
+                self.assert_hidden_head(k, k.tap(RIGHT), expected)
 
     def test_lm_failure_uses_the_same_snapshot_without_a_vote(self):
         self.learn(None, "校正")
@@ -391,7 +402,7 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual(next(c for c in model.calls if c[1] == "こうせい")[0], "現行の、")
         k.tap(DOWN, mods=["ctrl"])
         partial = k.tap(DOWN, mods=["ctrl"])
-        self.assert_head(partial, "校正")
+        self.assert_hidden_head(k, partial, "校正")
 
     def test_worker_prefetch_snapshot_and_deadline(self):
         for mode in ("hit", "miss", "deadline"):

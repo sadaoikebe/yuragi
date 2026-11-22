@@ -253,15 +253,23 @@ class LearnedContextTest(unittest.TestCase):
             # bunsetsu, so it does not override the LM); eight ranked rows follow.
             for vk in (0x27, 0x27):  # Right twice
                 pipe.handle({"op": "down", "vk": vk})
+            for event in Typist().space().events:
+                pipe.handle(event)
             self.assertEqual(session.candidates, ["偉"] + surfaces[2:9][::-1] + surfaces[:1])
             pipe.handle({"op": "down", "vk": 0x22})  # PageDown
             self.assertEqual(session.candidates, surfaces[1:2] + surfaces[9:] + ["学", "い", "イ"])
 
             # Same POS, different text to the left. The old score and review both
             # expire; with no LM vote left, the learned 学 leads.
-            for vk in (0x25, 0x25, ord("2"), 0x27, 0x27):
+            for vk in (0x25, 0x25):
+                pipe.handle({"op": "down", "vk": vk})
+            for event in Typist().space().events:
+                pipe.handle(event)
+            for vk in (ord("2"), 0x27, 0x27):
                 pipe.handle({"op": "down", "vk": vk})
             self.assertEqual(session.composition, "課、井")
+            for event in Typist().space().events:
+                pipe.handle(event)
             self.assertEqual(session.candidates, ["学"] + surfaces[:8])
             self.assertEqual(model.candidate_nll.call_count, 1)
 

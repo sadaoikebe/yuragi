@@ -1,4 +1,4 @@
-"""部分確定: Ctrl+↓ commits the first clause and keeps the rest."""
+"""Bunsetsu boundaries, candidate navigation and partial commits."""
 from __future__ import annotations
 
 import json
@@ -17,6 +17,7 @@ from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 
 VK_SPACE, VK_RETURN, VK_LEFT, VK_DOWN = 0x20, 0x0D, 0x25, 0x28
+VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
 
 
 class Keys:
@@ -107,7 +108,104 @@ class PartialCommitTest(unittest.TestCase):
         k.convert()
         k.tap(VK_LEFT, ["shift"])
         k.tap(VK_LEFT, ["shift"])
+        k.convert()
         self.assertEqual(k.ctrl_down()["commit"], "連絡")
+
+    def test_shrink_then_expand_reconverts_before_opening_candidates(self):
+        k = self.typed("わたしはがっこうにいく")
+        original = k.convert()
+        shrunk = k.tap(VK_LEFT, ["shift"])
+        self.assertEqual((shrunk["phase"], shrunk["candidates"]), ("resizing", []))
+        self.assertEqual(self.surfaces(shrunk), ["わたし", "は", "学校に", "行く"])
+        expanded = k.tap(VK_DOWN)
+        self.assertEqual(expanded["phase"], "resizing")
+        self.assertEqual(self.surfaces(expanded), ["わたしは", "学校に", "行く"])
+
+        converted = k.convert()
+        self.assertEqual((converted["phase"], converted["candidates"]), ("converting", []))
+        self.assertEqual(self.surfaces(converted), ["私は", "学校に", "行く"])
+        self.assertEqual([(g["start"], g["end"]) for g in converted["segments"]],
+                         [(0, 4), (4, 9), (9, 11)])
+        for reply, index in ((k.convert(), 1), (k.tap(VK_DOWN), 2)):
+            self.assertEqual((reply["phase"], reply["cand_index"]), ("selecting", index))
+            self.assertEqual(reply["segments"][0]["surface"], original["candidates"][index])
+
+    def test_expand_displays_both_changed_readings_and_preserves_new_boundaries(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        expanded = k.tap(VK_RIGHT, ["shift"])
+        self.assertEqual(self.surfaces(expanded), ["わたしはが", "っこうに", "行く"])
+        converted = k.tap(VK_SPACE, ["shift"])
+        self.assertEqual((converted["phase"], converted["candidates"]), ("converting", []))
+        self.assertEqual([(g["start"], g["end"]) for g in converted["segments"]],
+                         [(0, 5), (5, 9), (9, 11)])
+        self.assertTrue(all(g["surface"] != g["reading"] for g in converted["segments"][:2]))
+
+    def test_commit_of_raw_segments_keeps_the_reading_out_of_learning(self):
+        for partial in (False, True):
+            with self.subTest(partial=partial):
+                k = self.typed("わたしはがっこうにいく", learning=True)
+                k.convert()
+                k.tap(VK_LEFT, ["shift"])
+                if partial:
+                    reply = k.ctrl_down()
+                    self.assertEqual((reply["phase"], reply["commit"], reply["composition"]),
+                                     ("converting", "わたし", "は学校に行く"))
+                else:
+                    moved = k.tap(VK_RIGHT)
+                    self.assertEqual((moved["phase"], moved["focus"]), ("converting", 1))
+                self.assertEqual(k.tap(VK_RETURN)["phase"], "empty")
+                self.assertEqual(k.committed, "わたしは学校に行く")
+                self.assertEqual(self.rows(), [])
+
+    def test_resize_exits_on_script_conversion_cancel_or_new_input(self):
+        for key, phase, text, commit in (
+                (VK_F7, "converting", "ワタシは学校に行く", ""),
+                (VK_ESC, "composing", "私は学校に行く", ""),
+                (ord("W"), "composing", "か", "わたしは学校に行く")):
+            with self.subTest(key=key):
+                k = self.typed("わたしはがっこうにいく")
+                k.convert()
+                k.tap(VK_LEFT, ["shift"])
+                if key == ord("W"):
+                    k.s._table["keys"]["w"] = {"plain": "か"}
+                    reply = k.plain("w")
+                else:
+                    reply = k.tap(key)
+                self.assertEqual((reply["phase"], reply["composition"], k.committed,
+                                  reply["candidates"]), (phase, text, commit, []))
+
+    def test_candidate_and_segment_edges_depend_on_the_phase(self):
+        k = self.typed("わたしはがっこうにいく")
+        original = k.convert()
+        last = k.tap(VK_END)
+        self.assertEqual((last["phase"], last["focus"], last["has_next_page"]),
+                         ("selecting", 0, False))
+        self.assertEqual(last["cand_index"], len(last["candidates"]) - 1)
+        self.assertEqual(k.tap(VK_HOME)["composition"], original["composition"])
+
+        moved = k.tap(VK_RIGHT)
+        self.assertEqual((moved["phase"], moved["focus"], moved["candidates"]), ("converting", 1, []))
+        self.assertEqual(k.tap(VK_END)["focus"], 2)
+        k.convert()
+        blocked = k.tap(VK_RIGHT, ["shift"])
+        self.assertEqual((blocked["phase"], blocked["candidates"]), ("converting", []))
+        k.tap(VK_LEFT, ["shift"])
+        resized = k.tap(VK_DOWN)
+        for key, mods in ((VK_RIGHT, ["shift"]), (VK_HOME, []), (VK_END, []),
+                          (0x08, []), (ord("H"), ["ctrl"])):
+            unchanged = k.tap(key, mods)
+            self.assertEqual((unchanged["phase"], unchanged["focus"], unchanged["segments"]),
+                             ("resizing", 2, resized["segments"]))
+        k.convert()
+        self.assertEqual(k.tap(VK_HOME)["focus"], 0)
+
+        k.tap(VK_LEFT, ["shift"])
+        k.tap(VK_RIGHT)
+        k.tap(VK_LEFT)
+        selected = k.convert()
+        self.assertEqual((selected["phase"], selected["cand_index"], selected["candidates"][0]),
+                         ("selecting", 1, "私"))
 
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
         k = self.typed("わたしはがっこうにいく")
@@ -122,7 +220,7 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(reply["composition"], "学校に行く")
         self.assertTrue(reply["converted"])
         self.assertEqual(reply["focus"], 0)
-        self.assertEqual(reply["candidates"][0], "学校に")
+        self.assertEqual(reply["candidates"], [])
         self.assertEqual([(g["start"], g["end"]) for g in reply["segments"]], [(0, 5), (5, 7)])
         self.assertEqual(reply["n_tokens"], 7)
 
@@ -149,6 +247,7 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく", learning=True)
         k.convert()
         k.ctrl_down()  # 私は, as shown: not learned, but the next clause's left
+        k.convert()
         reply = k.tap(ord("2"))
         chosen = reply["segments"][reply["focus"]]["surface"]
         k.ctrl_down()

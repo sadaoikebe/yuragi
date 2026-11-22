@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 GLOBAL = frozenset({"global"})
 EMPTY = frozenset({"empty"})
 COMPOSING = frozenset({"composing"})
-CONVERTED = frozenset({"converting", "selecting", "resizing"})
+RESIZING = frozenset({"resizing"})
+CONVERTED = frozenset({"converting", "selecting"}) | RESIZING
 SELECTING = frozenset({"selecting", "predicting"})
 INPUT = COMPOSING | CONVERTED | SELECTING
 KANA = EMPTY | INPUT
@@ -28,6 +29,7 @@ class Command:
     key: str = "eat"
     where: str = "engine"
     run: Callable[[ImeSession], str | None] | None = None
+    keeps_resizing: bool = False
     until: str | None = None
 
 
@@ -46,6 +48,7 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("undo_commit", "確定取り消し", EMPTY),
     Command("reconvert", "再変換", EMPTY | {"direct"}),
     Command("convert", "変換", COMPOSING, run=lambda s: s._convert()),
+    Command("convert_segment", "文節を変換", RESIZING, run=lambda s: s._end_resize()),
     Command("predict", "予測候補", COMPOSING, run=lambda s: s._predict_key()),
     Command("commit", "全確定", INPUT, run=lambda s: s._commit()),
     Command("commit_first_segment", "先頭の文節を確定", INPUT, run=lambda s: s._commit_prefix()),
@@ -69,20 +72,27 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("to_half_alnum", "半角英数に変換", INPUT, run=lambda s: s._to_script("half_alnum")),
     Command("next_candidate", "次の候補", CONVERTED | SELECTING, run=lambda s: s._cycle(1)),
     Command("prev_candidate", "前の候補", CONVERTED | SELECTING, run=lambda s: s._cycle(-1)),
+    Command("candidate_first", "先頭の候補", SELECTING, run=lambda s: s._select(0)),
+    Command("candidate_last", "最後の候補", SELECTING, run=lambda s: s._select_last()),
     Command("next_page", "次の候補ページ", SELECTING, run=lambda s: s._page(1)),
     Command("prev_page", "前の候補ページ", SELECTING, run=lambda s: s._page(-1)),
     *(Command(f"select_candidate_{n}", f"候補 {n} を選ぶ", SELECTING,
               run=lambda s, row=n - 1: s._select_row(row)) for n in range(1, 10)),
     Command("segment_left", "前の文節へ", CONVERTED, run=lambda s: s._move_segment(-1)),
     Command("segment_right", "次の文節へ", CONVERTED, run=lambda s: s._move_segment(1)),
-    Command("segment_first", "先頭の文節へ", CONVERTED),
-    Command("segment_last", "末尾の文節へ", CONVERTED),
-    Command("segment_shrink", "文節を縮める", CONVERTED, run=lambda s: s._resize(-1)),
-    Command("segment_expand", "文節を伸ばす", CONVERTED, run=lambda s: s._resize(1)),
+    Command("segment_first", "先頭の文節へ", CONVERTED,
+            run=lambda s: s._move_segment(-len(s.segments))),
+    Command("segment_last", "末尾の文節へ", CONVERTED,
+            run=lambda s: s._move_segment(len(s.segments))),
+    Command("segment_shrink", "文節を縮める", CONVERTED, run=lambda s: s._resize(-1),
+            keeps_resizing=True),
+    Command("segment_expand", "文節を伸ばす", CONVERTED, run=lambda s: s._resize(1),
+            keeps_resizing=True),
     Command("forget_candidate", "候補の学習を忘れる", SELECTING,
             run=lambda s: s.forget_candidate()),
-    Command("noop", "何もしない", LOCAL, run=lambda s: None),
-    Command("pass_through", "そのまま通す", LOCAL, key="pass", run=lambda s: None),
+    Command("noop", "何もしない", LOCAL, run=lambda s: None, keeps_resizing=True),
+    Command("pass_through", "そのまま通す", LOCAL, key="pass", run=lambda s: None,
+            keeps_resizing=True),
     Command("commit_and_pass", "確定して通す", INPUT, key="commit_pass", run=lambda s: s._commit()),
 )})
 

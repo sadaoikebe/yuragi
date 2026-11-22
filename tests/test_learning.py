@@ -94,6 +94,8 @@ class LearningTest(unittest.TestCase):
         self.convert(s, "きょうは")
         dispatch(s, {"op": "down", "vk": VK_LEFT, "mods": ["shift"]})
         self.assertEqual([g.selected.reading for g in s.segments], ["きょう", "は"])
+        for op in ("down", "up"):
+            dispatch(s, {"op": op, "vk": VK_SPACE})
         self.assertEqual(s.composition, "今日は")
 
     def test_penalized_numeral_can_be_chosen_and_learned(self):

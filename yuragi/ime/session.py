@@ -303,6 +303,7 @@ class ImeSession:
     tokens: list[Token | Literal] = field(default_factory=list)
     composition: str = ""
     converted: bool = False
+    resizing: bool = False
     candidates: list[str] = field(default_factory=list)
     cand_index: int = 0
     segments: list[Segment] = field(default_factory=list)
@@ -360,6 +361,8 @@ class ImeSession:
             return "predicting"
         if not self.converted:
             return "composing"
+        if self.resizing:
+            return "resizing"
         return "selecting" if self.candidates else "converting"
 
     def load(self) -> None:
@@ -553,6 +556,8 @@ class ImeSession:
 
     def _run_command(self, command: Command | None) -> str | None:
         if command is not None and command.run is not None:
+            if not command.keeps_resizing:
+                self.resizing = False
             return command.run(self)
         return None
 
@@ -719,14 +724,19 @@ class ImeSession:
             return
         if self.predicting:
             self._cancel_conversion()  # the kana spelling of what was typed
-        if not self.converted:
+        show = not self.converted
+        if show:
             self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
+        else:
+            self._clear_cands()
         if self.focus < 0:
             return
         segment = self.segments[self.focus]
-        if segment.literal or segment.choices is None:
+        if segment.literal:
             return
+        self._prepare_cands(self.focus)
         stream = segment.choices
+        assert stream is not None
         rows: list[int] = []
         i = 0
         while len(rows) < 2 and stream.ensure(i):
@@ -738,7 +748,8 @@ class ImeSession:
         if script in ("hiragana", "katakana"):
             hiragana = script == "hiragana"
             default = rows[0] if hiragana or len(rows) == 1 else rows[1]
-            self._select(self._next_kana_row(segment, hiragana=hiragana, default=default))
+            self._select(self._next_kana_row(segment, hiragana=hiragana, default=default),
+                         show=show)
             return
         hira = (segment.selected if segment.selected.kind == "kana"
                 else stream.cache[rows[0]])
@@ -753,8 +764,10 @@ class ImeSession:
         chosen = Candidate(surface, hira.reading, hira.score, hira.lid, hira.rid, kind)
         self._set_selection(self.focus, chosen)
         segment.fixed = True
+        segment.raw = False
         segment.index = stream.find(chosen)  # -1: shown with no highlighted row
-        self._show_page()
+        if show:
+            self._show_page()
 
     @staticmethod
     def _is_hiragana_row(c: Candidate) -> bool:
@@ -828,7 +841,7 @@ class ImeSession:
         # Every segment is a stop: a symbol or a run of digits has its own rows.
         if self.focus >= 0:
             self.focus = max(0, min(self.focus + delta, len(self.segments) - 1))
-            self._open_cands()
+            self._clear_cands()
 
     def _select_row(self, row: int) -> None:
         if self.focus >= 0 and row < len(self.candidates):
@@ -911,53 +924,68 @@ class ImeSession:
         segment = self.segments[self.focus]
         if segment.literal or self.predicting:
             return  # a digit run keeps its interval; predictions span the input
+        self._clear_cands()
         following = self.focus + 1
+        reading = segment.selected.reading
         if delta > 0:
             if following == len(self.segments) or self.segments[following].literal:
                 return
             neighbor = self.segments[following]
+            neighbor_reading = neighbor.selected.reading
             segment.end += 1
             neighbor.start += 1
+            reading += neighbor_reading[0]
             if neighbor.start == neighbor.end:
                 del self.segments[following]
-                changed = [self.focus]
             else:
-                changed = [self.focus, following]
+                self._make_raw(following, neighbor_reading[1:])
         else:
             if segment.end - segment.start == 1:
                 return
             segment.end -= 1
-            if following == len(self.segments) or self.segments[following].literal:
-                self.segments.insert(following, Segment(
-                    segment.end, segment.end + 1, segment.selected))
-            else:
-                self.segments[following].start -= 1
-            changed = [self.focus, following]
-        # Determine the new readings with the right interval's POS available
-        # to the left. Apply learning only after both readings are known.
-        lattice = self._lattice()
-        for index in reversed(changed):
-            resized = self.segments[index]
-            resized.choices = None
-            resized.fixed = False
-            resized.zenz = None
-            resized.order = None
-            resized.shown = None
-            pins, left, right = candidate_inputs(
-                lattice, self.segments, index, self._left_id, self._lex)
-            resized.selected = next(candidates(
-                restrict(lattice, resized.start, resized.end, pins), self._lex, left, right,
-                learning=self._learning_view))
-            resized.source = resized.selected
-        repeat = self._repeat and not self._partial and len(self.segments) == 1
-        for index in changed:
-            resized = self.segments[index]
-            prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
-            learned, _ = candidate_heads(resized, self._lex, self._learning_view, prev, repeat)
-            if learned is not None:
-                resized.selected = learned
+            self.segments.insert(following, Segment(segment.end, segment.end + 1, segment.selected))
+            self._make_raw(following, reading[-1])
+            reading = reading[:-1]
+        self._make_raw(self.focus, reading)
         self._update_composition()
-        self._open_cands()
+        self.resizing = True
+
+    def _make_raw(self, index: int, reading: str) -> None:
+        segment = self.segments[index]
+        segment.selected = Candidate(reading, reading, 0, BOS_ID, BOS_ID, "raw")
+        segment.raw = True
+        segment.fixed = False
+        segment.choices = segment.context = None
+        segment.index = 0
+        segment.zenz = segment.order = segment.source = segment.shown = None
+
+    def _convert_raw(self, index: int, lattice: list[dict]) -> None:
+        segment = self.segments[index]
+        pins, left, right = candidate_inputs(lattice, self.segments, index, self._left_id, self._lex)
+        segment.selected = next(candidates(
+            restrict(lattice, segment.start, segment.end, pins), self._lex, left, right,
+            learning=self._learning_view))
+        segment.source = segment.selected
+        segment.raw = False
+
+    def _apply_resize_learning(self, index: int) -> None:
+        segment = self.segments[index]
+        repeat = self._repeat and not self._partial and len(self.segments) == 1
+        prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
+        learned, _ = candidate_heads(segment, self._lex, self._learning_view, prev, repeat)
+        if learned is not None:
+            segment.selected = learned
+
+    def _end_resize(self) -> None:
+        # The base conversion uses the right POS. Learning uses the left
+        # selection, which can itself be a learned spelling.
+        raw = [i for i, segment in enumerate(self.segments) if segment.raw]
+        lattice = self._lattice()
+        for i in reversed(raw):
+            self._convert_raw(i, lattice)
+        for i in raw:
+            self._apply_resize_learning(i)
+        self._update_composition()
 
     def _clear_cands(self) -> None:
         self.candidates = []
@@ -978,19 +1006,34 @@ class ImeSession:
         self.candidate_kinds = [c.kind for c in page]
         self.cand_index = segment.index - start
 
-    def _select(self, index: int) -> None:
+    def _select(self, index: int, *, show: bool = True) -> None:
+        if self.focus < 0:
+            return
         segment = self.segments[self.focus]
         stream = segment.choices
         if stream is not None and stream.ensure(index):
             segment.index = index
             self._set_selection(self.focus, stream.cache[index])
             segment.fixed = True
-            self._show_page()
+            segment.raw = False
+            if show:
+                self._show_page()
+
+    def _select_last(self) -> None:
+        if self.focus >= 0:
+            stream = self.segments[self.focus].choices
+            if stream is not None:
+                self._select(stream.last())
 
     def _cycle(self, delta: int) -> None:
         if self.focus < 0:
             return
         segment = self.segments[self.focus]
+        if segment.raw:
+            self._convert_raw(self.focus, self._lattice())
+            self._apply_resize_learning(self.focus)
+        if not self.candidates or segment.choices is None:
+            self._prepare_cands(self.focus)
         stream = segment.choices
         if stream is None:
             return
@@ -1126,14 +1169,16 @@ class ImeSession:
             self._learning.confirm(
                 [s.selected for s in segments], self._lex,
                 prev=self._left_bunsetsu, repeat=self._repeat and standalone,
-                chosen=[s.chosen() for s in segments], shown=[s.shown for s in segments])
+                chosen=[not s.raw and s.chosen() for s in segments],
+                shown=[s.shown for s in segments])
 
     def _commit(self, *, reset_input: bool = True) -> str:
         text = self.composition
         if text:
             standalone = len(self.segments) == 1 and not self._partial
             self._confirm(self.segments, standalone=standalone)
-            self._note_commit(text, self.segments[-1], standalone=standalone)
+            last = self.segments[-1]
+            self._note_commit(text, None if last.raw else last, standalone=standalone)
         if reset_input:
             self._reset_input()
         else:
@@ -1150,6 +1195,7 @@ class ImeSession:
         self.focus = -1
         self.composition = ""
         self.converted = False
+        self.resizing = False
         self.predicting = False
         self._clear_cands()
 
@@ -1157,8 +1203,7 @@ class ImeSession:
         """部分確定 (Ctrl+↓): commit the first interval only.
 
         The first clause, or the first literal (a run of digits or of 英数の続き
-        is one). The rest keeps its intervals, selections and fixed state; when
-        converted, its candidates reopen.
+        is one). The rest keeps its intervals, selections and fixed state.
         """
         if not self.segments:
             return ""
@@ -1167,8 +1212,9 @@ class ImeSession:
         head = self.segments[0]
         end = head.end
         text = head.selected.surface
-        self._confirm([head], standalone=False)
-        self._note_commit(text, head)
+        if not head.raw:
+            self._confirm([head], standalone=False)
+        self._note_commit(text, None if head.raw else head)
         self._partial = True
         self._display_key = None
         # The directions the committed reading gives each press (the thumbs
@@ -1193,8 +1239,7 @@ class ImeSession:
         self._word_starts = {b - end for b in self._word_starts if b >= end}
         self.composition = "".join(s.selected.surface for s in self.segments)
         self.focus = _first_stop(self.segments)
-        if self.converted:
-            self._open_cands()
+        self._clear_cands()
         return text
 
     def _note_commit(self, text: str, last: Segment | None = None, *,
