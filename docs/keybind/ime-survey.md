@@ -120,11 +120,11 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 
 ---
 
-## 3. プリセットを作るときの資料
+## 3. プリセットの元になる資料
 
-| プリセット | 元にするもの | 出典の状況 |
+| プリセット | 使える資料 | 出典の状況 |
 |---|---|---|
-| MS-IME | 旧 MS-IME の表（[ms-ime.md](ms-ime.md) §2）と Mozc の `ms-ime.tsv`・`chromeos.tsv`（[mozc.md](mozc.md)） | 2 つの出典で照合できる。違う所は §2 の「（Mozc: …）」。旧 IME の表はキー設定の画面と同じで、「–」は割り当てなし（ms-ime.md §2） |
+| MS-IME | 新 MS-IME の実機の動き（[ms-ime.md](ms-ime.md) §1.5）、旧 MS-IME の表（ms-ime.md §2）、Mozc の `ms-ime.tsv`・`chromeos.tsv`（[mozc.md](mozc.md)） | 実機の動きは TSF のアプリで採った。旧 IME の表と Mozc は照合でき、違う所は §2 の「（Mozc: …）」。旧 IME の表はキー設定の画面と同じで、「–」は割り当てなし |
 | ATOK | ATOK Windows の公式マニュアル（[atok.md](atok.md)）と Mozc の `atok.tsv` | 公式マニュアルの表は状態別ではない。状態別の表は利用者が改変したエクスポート [GIST34]。出典で食い違う所がある（Ctrl+F8、入力中の Shift+Enter など。atok.md §1.1・§1.3） |
 | macOS（ことえり） | Apple の資料（[macos.md](macos.md)）と Mozc の `kotoeri.tsv` | Apple の資料は状態別の表を持たない。文節の移動のキーと Ctrl+B/F の向きは出典で食い違う（macos.md §2） |
 | Japanist | 資料に無い | 状態 × キーの全体表は資料に無い（others.md §1.4） |

@@ -2,7 +2,7 @@
 
 キーバインドの設計（[../KEYBIND.md](../KEYBIND.md)）が前提にする、Windows のキー入力の動き。既存の IME がこれをどう扱っているかは [ime-impl.md](ime-impl.md)。
 
-- 対象は Windows 10/11、日本語の入力言語に US キーボードの配列ドライバ（`kbd101.dll`、「日本語キーボード（101/102 キー）」）。
+- 対象は Windows 10/11、日本語の入力言語に US キーボードの配列ドライバ（`kbd101.dll`。設定の「言語のオプション」→ キーボードでは「英語キーボード（101/102 キー）」、英語の表示では English Keyboard (101/102 key)）。
 - 「実測」は Windows 11（10.0.26300）での測定。§7 のとおり、`SendInput` で送ったキーと本物のキーボードの両方で測り、特に断らなければ同じ結果。
 - 修飾キーと、修飾するキーを押す・離す順序を、次の記号で書く。
 
@@ -118,7 +118,7 @@ TIP が自分のスレッドに `SetWindowsHookEx(WH_KEYBOARD, …, nullptr, Get
 - 表は**キーの出来事（down と up）ごとに、その瞬間の修飾で**引かれる。
 - 組み合わせごとに「離したときも、押したときの表を使う」印（`NLSFEProcSwitch`）を付けられる。印があると、押したあとの最初の up だけ別の表（`NLSFEProcAlt`）を使い、
   そのあと元に戻る（[KBDEDIT]。実測と一致）。
-- 印が無いと、押す順序によっては、押したときの仮想キーコードが押されたままになる。きれいに押して離すまで、OS はそのキーを押されたままとみなす（[KBDEDIT]）。
+- 印が無いと、押す・離す順序によっては（§3.3 の順 B・C）、押したときの仮想キーコードが押されたままになる。きれいに押して離すまで、OS はそのキーを押されたままとみなす（[KBDEDIT]）。
 
 `kbd101` で NLS のキーは `` ` ``（スキャンコード 0x29）と CapsLock（0x3A）の 2 つ。印があるのは CapsLock の Shift+Ctrl だけ。
 
@@ -154,13 +154,16 @@ TIP が自分のスレッドに `SetWindowsHookEx(WH_KEYBOARD, …, nullptr, Get
 
 ### 3.3 押されたままに見えるキー
 
-down に対応する up が届かない、または別の仮想キーコードで届くと、OS はその down の仮想キーコードを押されたままとみなす。
+読み替えで、down と同じ仮想キーコードの up が OS に来ないと、OS はその down の仮想キーコードを押されたままとみなす。
+キーの down と up のあいだで修飾の有無が変わる順（B・C）で起きる。B は修飾ありの down（`VK_KANJI` などに読み替え）に修飾なしの up、
+C は修飾なしの down に修飾ありの up（読み替えられる）が来る。A と D は down と up が同じ修飾なので、押されたままにはならない
+（`` ` `` → Alt の順 D は、up が窓のメニューに入って TIP には届かないが、`GetKeyState` は離れている）。
 
 | 起きる順序 | 押されたままに見えるもの |
 |---|---|
 | Alt+`` ` `` の順 B | `VK_KANJI`。`GetKeyState(VK_KANJI)` が押されたままで、システム全体の `GetAsyncKeyState` でも押されたままになることがある。`GetKeyState(VK_OEM_3)` は押されていない |
 | `` ` `` → Alt・Ctrl の順 C | `VK_OEM_3`。次に `` ` `` を押すと bit 30 が 1 で届く |
-| CapsLock → Shift・Ctrl の順 C | `VK_CAPITAL` |
+| CapsLock → Shift・Ctrl・Alt の順 C | `VK_CAPITAL` |
 
 - 別の仮想キーコードで届く up（Alt+`` ` `` の順 B の `VK_OEM_3` の up）は、bit 30 が 0 のことがある。
 - 同じキーを、読み替えの起きない順序できれいに押して離すと戻る（[KBDEDIT]）。
@@ -239,7 +242,7 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 | Alt+`` ` `` を `{VK_OEM_3, ALT}` や `{VK_KANJI, ALT}` で PreservedKey に登録する | 届かない（§3.6） |
 | PreservedKey が呼ばれるたびに切り替えなどを実行する | 押し続けると、繰り返しのたびに実行される（§1.4） |
 | 食べた down と up を仮想キーコードで対応させる | 順 B の up（`VK_OEM_3`）を取りこぼし、アプリに down の無い up が届く（§3.2） |
-| 食べた down の up が必ず来ると考える | 順 C の Ctrl+`` ` ``・Shift+CapsLock や、Alt でメニューに入ったあとの up は来ない（§3.2） |
+| 食べた down の up が必ず来ると考える | `` ` `` → Ctrl・CapsLock → Shift・CapsLock → Ctrl の順 C と、Alt でメニューに入ったあと（`` ` `` → Alt の順 D、CapsLock → Alt の順 C・D など）の up は来ない（§3.2） |
 | 同じキーの down が up 無しで続いたら、必ず繰り返しとみなす | up が失われたあとの押し直しを、繰り返しと取り違える（§3.3）。繰り返しの途中に別のキーの down は挟まらない（§2） |
 | down を食べたあと、修飾が変わった down をふつうのキーとして扱う | 順 B で押し続けると、`` ` `` が打たれたり大文字のロックが切り替わったりする（§3.4） |
 | 押されているかを `GetKeyState(VK_KANJI)`・`GetKeyState(VK_OEM_3)` で判定する | 押されたままに見える（§3.3） |

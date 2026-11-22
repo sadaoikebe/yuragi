@@ -71,7 +71,8 @@ def run(name, seq, setup):
         lib.release_mods()
         try:
             lib.guard()
-            lib.send(lib.VK_KANJI, True)  # a stuck VK_KANJI from order B/D (windows.md §3.3)
+            lib.send(lib.VK_KANJI, True)  # a stuck VK_KANJI from order B (windows.md §3.3)
+            lib.send(lib.VK_OEM_3, True)  # a stuck VK_OEM_3 from order C
             for _ in range(3):
                 lib.chord(lib.VK_ESCAPE, settle=0.05)
             if status(t).get("caps"):
