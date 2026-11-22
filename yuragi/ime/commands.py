@@ -42,6 +42,7 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("mode_katakana", "カタカナ入力", GLOBAL, where="tip"),
     Command("open_settings", "設定を開く", GLOBAL, where="tip"),
     Command("open_word_register", "単語登録を開く", GLOBAL | EMPTY, where="tip"),
+    Command("open_menu", "IME メニューを開く", EMPTY, where="tip"),
     Command("insert_space", "空白", EMPTY | COMPOSING, run=lambda s: s._insert_space("　")),
     Command("insert_alt_space", "別幅空白", EMPTY, run=lambda s: s._insert_space(" ")),
     Command("insert_full_space", "全角空白", KANA, run=lambda s: s._add_space("　")),

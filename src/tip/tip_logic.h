@@ -62,7 +62,7 @@ inline constexpr std::array<const char*, 8> kPhaseNames = {
     "empty", "composing", "converting", "selecting", "resizing", "predicting", "editing", "direct"
 };
 
-enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, Settings, Words };
+enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, Settings, Words, Menu };
 inline GlobalCommand ParseGlobal(const std::string& id) {
     if (id == "ime_toggle") return GlobalCommand::Toggle;
     if (id == "ime_on") return GlobalCommand::On;
@@ -71,6 +71,7 @@ inline GlobalCommand ParseGlobal(const std::string& id) {
     if (id == "mode_katakana") return GlobalCommand::Katakana;
     if (id == "open_settings") return GlobalCommand::Settings;
     if (id == "open_word_register") return GlobalCommand::Words;
+    if (id == "open_menu") return GlobalCommand::Menu;
     return GlobalCommand::None;
 }
 
@@ -308,7 +309,7 @@ inline const char* Glyph(Mode mode, bool direct) {
 }
 inline bool Faint(Mode mode) { return mode == Mode::Preparing; }
 
-// The right-click menu (DESIGN「メニュー」).
+// The IME menu (DESIGN「メニュー」).
 enum MenuItem { MENU_TOGGLE = 1, MENU_ADMIN = 2, MENU_RETRY = 3, MENU_PREPARING = 5 };
 inline std::vector<int> MenuFor(Mode mode) {
     switch (mode) {

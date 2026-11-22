@@ -321,6 +321,15 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたし")
         self.assertIsNone(k.tap(0x76, ["ctrl"]).get("global"))
 
+    def test_ctrl_f10_commits_a_pending_character_before_passing_to_the_app(self):
+        k = Keys(self.session())
+        pending = k.send("down", ord("K"))
+        self.assertEqual(pending["phase"], "empty")  # the thumb chord is unresolved
+        reply = k.send("down", 0x79, ["ctrl"])
+        self.assertEqual((reply["commit"], reply["eat"], reply.get("global")), ("き", False, None))
+        k.send("up", ord("K"))
+        self.assertEqual(k.tap(0x79, ["ctrl"]).get("global"), "open_menu")
+
     def test_first_space_converts_and_the_second_opens_the_window(self):
         k = self.typed("わたしはがっこうにいく")
         first = k.convert()

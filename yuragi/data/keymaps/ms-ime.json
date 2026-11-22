@@ -11,6 +11,7 @@
     ["empty", "Shift+Space", "insert_alt_space"],
     ["empty", "Ctrl+Shift+Space", "insert_full_space"],
     ["empty", "Ctrl+F7", "open_word_register"],
+    ["empty", "Ctrl+F10", "open_menu"],
     ["composing", "F1", "pass_through"],
     ["composing", "F3", "pass_through"],
     ["composing", "F4", "pass_through"],

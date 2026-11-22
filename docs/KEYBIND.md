@@ -117,6 +117,7 @@
 | `ime_toggle` / `ime_on` / `ime_off` | global（`ime_toggle` は predicting にも割り当て可） | ○ / ○ / ○ | 直接入力とかな入力の切り替え。入力があれば確定してから切り替える。TIP が実行 |
 | `mode_hiragana` / `mode_katakana` | global | ○ / ○ | ひらがな／カタカナの入力モードにする（直接入力ならオンにする）。TIP が実行 |
 | `open_settings` / `open_word_register` | global（`open_word_register` は empty にも割り当て可） | ○ / ○ | 設定ウィンドウを開く（後者は単語登録のタブ）。TIP が実行 |
+| `open_menu` | empty | ○ | タスクバーの右クリックと同じ IME メニューを開く。TIP が実行 |
 | `insert_space` | empty, composing | ○ | 空白を入れる（幅は入力モードに従う。ひらがなでは全角） |
 | `insert_alt_space` | empty | ○ | `insert_space` と別の幅の空白 |
 | `insert_full_space` / `insert_half_space` | empty 以降 | ○ | 幅を決めた空白。入力なしでは文書に入れ、入力中では入力中の文字に足す。変換中より先では、確定してから空白で次の入力を始める |
@@ -538,6 +539,7 @@ MS-IME と同じく、届いた出来事を 1 つずつ、届いた時点の形�
 
 - 実行できるコマンドは `where: tip` のものだけ: `ime_toggle`・`ime_on`・`ime_off`・`mode_hiragana`・`mode_katakana`（手元の入力モードを変え、`set_direct`・`set_mode` を送る。
   入力があれば、先にエンジンに確定を頼む）、`open_settings`・`open_word_register`（ブローカーに `open_admin` を送る）。
+- `open_menu` は `empty` の行からエンジンが返す。MS-IME プリセットでは Ctrl+F10。TIP は入力欄のスレッドで、キーのコールバックを抜けてからメニューを開く。
 - **Alt 付き（Ctrl なし）の行だけを TSF の PreservedKey に登録する。** Alt 付きの和音は PreservedKey にしか届かない（[windows.md](keybind/windows.md) §1.3）。
   ほかの行は `OnKeyDown` で照合する（局面の表に同じ和音があれば、そちらが先。§7.1）。
 - **局面が決まっていない間は、局面で意味が変わる和音を TIP が自分で決めない。** 返事を待つ要求があるか、判定のタイマーが掛かっている間（§7.2 の `unsettled`）、

@@ -1210,6 +1210,7 @@ public:
     HRESULT STDMETHODCALLTYPE Deactivate() override {
         DropHeld(L"deactivate");
         tested_.reset();
+        menu_generation_.reset();
         FinishLocal();
         link_.Stop();
         UnadviseLayout();
@@ -1481,20 +1482,7 @@ public:
         if (click == TF_LBI_CLK_LEFT && tip_logic::Toggles(CurrentMode()) && Eligible()) Toggle();
         // The taskbar input indicator hands a right click over as OnClick and never
         // calls InitMenu, so the menu is shown here (owned by this thread's focus window).
-        if (click == TF_LBI_CLK_RIGHT) {
-            HMENU popup = CreatePopupMenu();
-            for (int item : tip_logic::MenuFor(CurrentMode())) {
-                bool grayed;
-                const wchar_t* text = MenuText(item, &grayed);
-                AppendMenuW(popup, MF_STRING | (grayed ? MF_GRAYED : 0), item, text);
-            }
-            UINT align = GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
-            UINT id = (UINT)TrackPopupMenuEx(popup, align | TPM_BOTTOMALIGN | TPM_RETURNCMD |
-                                                 TPM_NONOTIFY | TPM_RIGHTBUTTON,
-                                             pt.x, pt.y, GetFocus(), nullptr);
-            DestroyMenu(popup);
-            if (id) OnMenuSelect(id);
-        }
+        if (click == TF_LBI_CLK_RIGHT) ShowMenu(GetFocus(), pt, TPM_BOTTOMALIGN);
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE InitMenu(ITfMenu* menu) override {
@@ -1569,6 +1557,7 @@ private:
     friend class ReadSession;
     using Scope = tip_logic::Scope;
     static const UINT kLinkMessage = WM_APP + 1;
+    static const UINT kMenuMessage = WM_APP + 3;
     static const UINT_PTR kTimerNotice = 3, kTimerReplay = 4, kTimerCarry = 5;
     static const DWORD kLangBarCookie = 0x6f79;
 
@@ -1581,6 +1570,12 @@ private:
         }
         if (self && m == kKeysMessage) {
             self->PumpKeys();
+            return 0;
+        }
+        if (self && m == kMenuMessage) {
+            self->AddRef();
+            self->ShowKeyboardMenu();
+            self->Release();
             return 0;
         }
         if (self && m == WM_TIMER) {
@@ -2050,7 +2045,8 @@ private:
                key.message_time == event->message_time;
     }
     bool KeysWaiting() const {
-        return !sent_keys_.empty() || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_;
+        return !sent_keys_.empty() || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_ ||
+               menu_generation_;
     }
     tip_logic::GlobalCommand GlobalFor(unsigned code) const {
         using tip_logic::GlobalCommand;
@@ -2122,7 +2118,7 @@ private:
         }
     }
     void PumpKeys() {
-        if (!tm_) return;
+        if (!tm_ || menu_generation_) return;
         if (FocusChanged() || (carry_.Active() && !carry_.SameRoot(RootOwner()))) {
             FocusMoved();
             return;
@@ -2140,7 +2136,7 @@ private:
             if (!after || !state_ || state_->applied_seq < after) return;
             sent_keys_.erase(sent);
             if ((!global || !RunGlobal(*global)) && !ReplayHeld(key)) return;
-            if (replay_ || retry_replay_ || pending_mode_seq_) return;
+            if (replay_ || retry_replay_ || pending_mode_seq_ || menu_generation_) return;
         }
         if (state_ && !state_->pending.empty()) return;
         while (!buffered_.empty() && !KeysWaiting()) {
@@ -2298,6 +2294,12 @@ private:
 
     bool RunGlobal(tip_logic::GlobalCommand command) {
         using tip_logic::GlobalCommand;
+        if (command == GlobalCommand::Menu) {
+            if (!PostMessageW(hwnd_, kMenuMessage, 0, 0))
+                return false;
+            menu_generation_ = focus_generation_;
+            return true;
+        }
         if (command == GlobalCommand::Settings || command == GlobalCommand::Words) {
             if (!link_.Connected()) TryConnect(true);
             if (command == GlobalCommand::Settings) SendOp("open_admin");
@@ -2477,6 +2479,38 @@ private:
         if (lb_sink_) lb_sink_->OnUpdate(TF_LBI_ICON | TF_LBI_TEXT | TF_LBI_TOOLTIP);
     }
 
+    void ShowMenu(HWND owner, POINT pt, UINT vertical_align) {
+        if (!owner || GetWindowThreadProcessId(owner, nullptr) != GetCurrentThreadId()) return;
+        HMENU popup = CreatePopupMenu();
+        if (!popup) return;
+        for (int item : tip_logic::MenuFor(CurrentMode())) {
+            bool grayed;
+            const wchar_t* text = MenuText(item, &grayed);
+            AppendMenuW(popup, MF_STRING | (grayed ? MF_GRAYED : 0), item, text);
+        }
+        UINT align = GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
+        UINT id = (UINT)TrackPopupMenuEx(popup, align | vertical_align | TPM_RETURNCMD |
+                                         TPM_NONOTIFY | TPM_RIGHTBUTTON, pt.x, pt.y, owner, nullptr);
+        DestroyMenu(popup);
+        if (id && tm_) OnMenuSelect(id);
+    }
+    void ShowKeyboardMenu() {
+        if (!menu_generation_) return;
+        // TrackPopupMenuEx runs a nested message loop. Start it outside the TSF
+        // key callback, and wait until it closes before handling buffered keys.
+        if (*menu_generation_ == focus_generation_ && RootOwner() && !FocusChanged() &&
+            Eligible() && ScopeAllowsInput()) {
+            HWND owner = GetFocus();
+            POINT pt{};
+            GUITHREADINFO gui{sizeof(gui)};
+            if (GetGUIThreadInfo(GetCurrentThreadId(), &gui) && gui.hwndCaret == owner)
+                pt = {gui.rcCaret.left, gui.rcCaret.bottom};
+            if (owner && ClientToScreen(owner, &pt)) ShowMenu(owner, pt, TPM_TOPALIGN);
+        }
+        menu_generation_.reset();
+        if (hwnd_) PostMessageW(hwnd_, kKeysMessage, 0, 0);
+    }
+
     LONG refs_ = 1;
     ITfThreadMgr* tm_ = nullptr;
     TfClientId client_ = TF_CLIENTID_NULL;
@@ -2516,6 +2550,7 @@ private:
     tip_logic::Carry carry_;
     std::vector<Registration> preserved_;
     long long pending_mode_seq_ = 0, mode_edit_seq_ = 0;
+    std::optional<uint64_t> menu_generation_;
     bool langbar_ = false;
     ITfLangBarItemSink* lb_sink_ = nullptr;
 };
