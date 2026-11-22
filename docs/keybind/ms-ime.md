@@ -101,7 +101,7 @@ S1 の「English keyboard (101/102 key)」タブの表。S2 ではこのタブ�
 
 資料に無い既定キーを、新 MS-IME（Windows 11 10.0.26300、キーの割り当ては既定、US 配列 `kbd101`）で確かめた。
 
-- **見方:** ブランチ `keyprobe` の `tools/keyprobe/msime_tsf_table.py`。TSF の RichEdit（`SES_USECTF`）の窓に `SendInput` でキーを送り、
+- **見方:** `tools/keyprobe/msime_tsf_table.py`。TSF の RichEdit（`SES_USECTF`）の窓に `SendInput` でキーを送り、
   アプリに届いた down（＝ IME が食べなかったキー）、キーの直後の文字、Esc を 3 回押したあとに残る文字（＝確定した文字）を記録する。
   9 つの状態 × 107 キー。状態の作り方は「kanji」を打つ（②）、Space を 1 回（③）、2 回（④）、「watashihanamaedesu」を変換して Shift+← （⑤）など。
 - **IMM のアプリでは動きが違う。** 同じ表を IMM の窓（`target_imm.py`）でも採ると、963 件のうち 177 件で、食べるか通すかが違った
