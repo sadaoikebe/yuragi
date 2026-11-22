@@ -2,7 +2,7 @@
 
 Mac の日本語入力に慣れた人が Windows でゆらぎを使うときに、何がどれだけ違うかの整理。
 Mac 側は実機の動き（[macos.md](macos.md)、全表は [macos-table.md](macos-table.md)）、
-MS-IME 側は実機の表（[ms-ime.md](ms-ime.md) §1.5）、ゆらぎ側は今の既定のキー割り当て（`yuragi/data/keymaps/ms-ime.json`、局面とコマンドは [KEYBIND.md](../KEYBIND.md) §3）。
+MS-IME 側は実機の表（[ms-ime.md](ms-ime.md) §1.5）、ゆらぎ側は既定のキー割り当て（`yuragi/data/keymaps/ms-ime.json`、局面とコマンドは [KEYBIND.md](../KEYBIND.md) §3）。同梱の「macOS」プリセットの動きは §7。
 
 - Mac は「日本語 - ローマ字入力」で、ライブ変換オフ（macOS の初期値はオン）、Windows風オフ、US 配列。ライブ変換は §6。
 - キーの名前は Windows に合わせる（Mac の Delete は Backspace、fn＋Delete は Delete、Return は Enter、Option は Alt）。Mac の Command のショートカットは、Windows では Ctrl のショートカットに当たる（§5）。
@@ -182,7 +182,7 @@ Mac 風と MS-IME 風を 1 つのプリセットで両立できないキー。Ma
 - Mac の Command のショートカットは、IME を通らずアプリに届く（[macos.md](macos.md) §1）。入力中の文字は、カーソルを動かす・文字を入れる操作（Command＋A・V・←）で確定し、保存（Command＋S）では確定されずに残る。
   Windows ではこれが Ctrl のショートカットになるが、MS-IME とゆらぎは入力中・変換中に Ctrl＋A（先頭へ・先頭の文節へ）、Ctrl＋S（左へ・前の文節へ）、Ctrl＋Z（何もしない・文節戻し）、Ctrl＋X（予測候補・次の候補）を IME の操作に使う。
   Mac の人が「すべてを選択」「保存」「取り消す」のつもりで押すと、入力中は IME に取られる。Ctrl＋C・Ctrl＋V は確定してアプリに通すので、Mac の Command＋V と同じ結果になる。
-- ゆらぎで Mac 風にするなら、プリセットごとに「割り当ての無いキーの既定」を `commit_and_pass` か `noop` かで選べるようにする（今は `commit_and_pass` に決めてある）。
+- 「macOS」プリセットは、Windows から届いた割り当ての無い機能キーを `noop` で受けて、入力を残す。
 
 ---
 
@@ -199,27 +199,16 @@ Mac には、打つそばから変換して見せるライブ変換がある（�
 
 ---
 
-## 7. ゆらぎで Mac 風のプリセットを作るときに要るもの
+## 7. ゆらぎの macOS プリセット
 
-| 要るもの | 中身 | 区分 |
-|---|---|---|
-| キーの行 | §3 の「キー」の行（Ctrl+J/K/L/;、Alt+Z/X/C/A/S、Ctrl+N/P、Ctrl+B/F、Ctrl+I/O/W/Q の伸縮、Ctrl+R/V のページ、Alt+Space など） | 利用者のキー設定（段 3。作ってある）で今でも書ける。プリセットにするのは段 4 |
-| Esc で全部の文節を読みに戻す | 今の `cancel_conversion`（変換をやめて入力中に戻る）で足りる | プリセットだけ |
-| 変換中の Backspace で末尾を消して確定 | `delete_last_and_commit`（新しいコマンド） | 粒度 |
-| 候補ウインドウの Enter で選ぶだけ | `accept_candidate`（窓を閉じ、次の文節へ。最後の文節ならそのまま） | 粒度 |
-| 伸縮してすぐ変換 | `segment_shrink`／`segment_expand` の、読みにせず変換し直す変種（`resizing` に入らない） | 粒度 |
-| 予測の Backspace・Space | Mac の動きに合わせたコマンド（末尾を消して確定、予測をやめて変換）。数字で選ばない | 粒度 |
-| 窓を開くだけ（↑ / ↓） | `open_candidates`（選んでいた候補で窓を開く。作ってある。KEYBIND §3.2） | プリセットだけ |
-| 割り当ての無いキーの既定 | プリセットごとに `noop` を選べるようにする（§5） | 概念 |
-| アプリのショートカットを IME で取らない | 入力中・変換中の Ctrl＋A・S・Z・X を `commit_and_pass`（確定して通す）にする。Mac の Command のショートカットに当たる（§5）。保存のように確定しない動きは、Windows の IME からは作れない | プリセットだけ |
-| 入力中の後ろの字を消さない | Delete を `noop` にするだけ | プリセットだけ |
-| 確定の取り消し（Ctrl+Delete） | `undo_commit` を作る。TSF で直前の確定範囲を読みに戻す | 機能 |
-| 再変換（Ctrl+Shift+R） | `reconvert` を作る（選んだ文字、選んでいなければカーソルの前の語を変換し直す） | 機能 |
-| 候補ウインドウのタブ（読み・部首など） | ゆらぎの辞書の作りに依る | 機能 |
-| ライブ変換 | §6 | 機能 |
-| 日本語 ↔ 英字の切り替え | Ctrl+Space を `ime_toggle` に割り当てる案。ただし Windows では Ctrl+Space をアプリや中国語 IME が使うことがある | 概念 |
+設定ウィンドウの「キー」タブから「macOS」を選んで保存する。割り当ては [macos.json](../../yuragi/data/keymaps/macos.json)。ライブ変換と「Windows風のキー操作」をオフにした Mac の実機を基準にした。
 
-Mac の動きのうち、Ctrl+Q・Home（予測）・End（予測）で入力を捨てて制御文字を確定する動きは、日本語入力プログラムの不具合に見える。F8 の半角英字は、F10 と同じ働きになる。
+- 変換の候補窓では Enter で候補を選んで次の文節へ移る。数字の 1〜9 は候補を選んで窓を閉じる。確定は窓を閉じた状態の Enter。Esc は入力全体を読みに戻す。
+- 文節の伸縮は、その場で境界が変わった文節を変換し直す。ほかの文節の区切り、候補の並び、未変換時の表示、親指シフトの文字配列と数字の幅はゆらぎの規則に従う。
+- Ctrl+Space でゆらぎのかな入力と直接入力を切り替える。Windows 用の Alt+`` ` `` と、JIS のかな・英数キー（`ImeOn` / `ImeOff`）でも切り替えられる。入力ソース自体の切り替えは Windows の Win+Space で行う。
+- IME に届く Ctrl 付きのキーは Mac の Control の割り当てに合わせた。たとえば入力中の Ctrl+A は半角英数への変換、Ctrl+S はカーソルを左へ動かす。Windows アプリの Ctrl ショートカットは入力を終えてから使う。
+- Option 単独の組み合わせは TSF で局面別に割り当てられない（[KEYBIND.md](../KEYBIND.md) §4.2）。Alt を押すとゆらぎの Windows 側の規則で確定する。
+- 確定取り消し、再変換、候補の辞書情報やタブ、macOS のライブ変換は未対応。実機で制御文字を挿入した入力中の Ctrl+Q や予測中の Home / End は何もしない。
 
 ---
 

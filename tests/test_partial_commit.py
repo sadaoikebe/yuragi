@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import ANY, Mock
 
 from yuragi.chord.fsm import Plain
+from yuragi.ime.keymap import load_keymap
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
@@ -99,6 +100,60 @@ class PartialCommitTest(unittest.TestCase):
 
     def surfaces(self, reply):
         return [seg["surface"] for seg in reply["segments"]]
+
+    def macos_keymap(self):
+        directory = self.path.parent
+        settings = load_keymap(directory, list_presets=True)
+        self.assertIn("macos", settings.presets)
+        settings.use = "macos"
+        settings.save(directory)
+        return load_keymap(directory).compile()
+
+    def test_macos_candidate_enter_only_advances_to_the_next_segment(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.s.keymap = self.macos_keymap()
+        converted = k.convert()
+        opened = k.tap(VK_DOWN)
+        self.assertEqual((opened["phase"], opened["composition"]),
+                         ("selecting", converted["composition"]))
+        first = k.tap(ord("2"))
+        self.assertEqual((first["phase"], first["commit"], first["segments"][0]["surface"]),
+                         ("converting", "", opened["candidates"][1]))
+        opened = k.tap(VK_DOWN)
+        accepted = k.tap(VK_RETURN)
+        self.assertEqual((accepted["phase"], accepted["commit"], accepted["focus"]),
+                         ("converting", "", 1))
+        self.assertEqual(k.tap(VK_RETURN)["commit"], opened["composition"])
+
+    def test_macos_shrink_reconverts_and_escape_restores_all_readings(self):
+        reading = "わたしはがっこうにいく"
+        k = self.typed(reading)
+        k.s.keymap = self.macos_keymap()
+        k.convert()
+        shrunk = k.tap(ord("I"), ["ctrl"])
+        self.assertEqual((shrunk["phase"], self.surfaces(shrunk)),
+                         ("converting", ["私", "は", "学校に", "行く"]))
+        ignored = k.tap(ord("C"), ["ctrl"])
+        self.assertEqual((ignored["eat"], ignored["commit"], ignored["composition"]),
+                         (True, "", shrunk["composition"]))
+        reverted = k.tap(VK_ESC)
+        self.assertEqual((reverted["phase"], reverted["composition"]), ("composing", reading))
+
+    def test_macos_prediction_space_converts_but_a_number_starts_new_input(self):
+        k = Keys(self.session())
+        k.s.keymap = self.macos_keymap()
+        for key in "JAK":  # とうき
+            k.plain(key)
+        prediction = k.tap(ord("N"), ["ctrl"])
+        self.assertEqual(prediction["phase"], "predicting")
+        converted = k.convert()
+        self.assertEqual((converted["phase"], converted["commit"]), ("converting", ""))
+        k.tap(VK_ESC)
+        prediction = k.tap(ord("N"), ["ctrl"])
+        self.assertEqual(prediction["phase"], "predicting")
+        typed = k.plain("2")
+        self.assertEqual((k.committed, typed["phase"], typed["composition"]),
+                         (prediction["composition"], "composing", "２"))
 
     def test_compounds_are_one_interval_and_can_still_be_split(self):
         for reading in ("れんらくする", "ごたんとうしゃ", "じゅうまんえん"):

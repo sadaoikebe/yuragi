@@ -2,7 +2,6 @@
 
 どんなキーの割り当てを設定されても、その割り当てで操作できるようにするための、ゆらぎ側の仕組みの設計。
 各プリセットの中身（どのキーに何を割り当てるか）は扱わない。
-段 1〜3（§10）は作ってある。段 4 のほかのプリセットと残りのコマンドは今後の作業。
 
 | 資料 | 中身 |
 |---|---|
@@ -25,7 +24,7 @@
 | 5 | 設定ファイル | `~/.yuragi-ime/keymap.json`。旧 MS-IME と同じく、プリセットか「ユーザー定義」を選ぶ。ユーザー定義は**プリセット＋差分**で持つ（§5） |
 | 6 | Space（親指キー） | 表の `Space` は「Space の単独打鍵」。修飾付きの Space は親指キーにしない（§4） |
 | 7 | 文字キー | 入力なし・入力中では常に文字。変換中より先の局面でだけ割り当てられる（§4） |
-| 8 | 割り当てのないキー | 入力がある間は、確定してアプリに通す。Alt を押したときも確定する（MS-IME と同じ。§4.3） |
+| 8 | 割り当てのないキー | 入力がある間、「MS-IME」では確定してアプリに通し、「macOS」では入力を残す。Alt の押下では確定する（§4.3） |
 | 9 | オン/オフ・モードのキー | TIP が自分で実行する「常時」の割り当て。Alt 付きのものは TSF の PreservedKey に登録する（§7.5） |
 | 10 | キーの出来事の扱い | `OnTestKeyDown` と `OnKeyDown` は同じ答えを返す。MS-IME と同じく、繰り返しも 1 打ずつ実行し、up は食べない（§7.3、§7.4） |
 | 11 | 反映 | 設定ウィンドウで保存 → エンジンが読み直す（再起動しない）→ 全アプリの TIP に配る（§8.3） |
@@ -98,7 +97,6 @@
   ←・→ で文節の端を越えると、隣の文節へ移って `converting` に戻る。入力全体の端を越えると確定してキーを通す。
   Shift+←・Shift+→ と Ctrl+S/D/K/L は入力全体の端で止まる。
   Backspace・Ctrl+H は入力全体の先頭で、Delete・Ctrl+G は末尾で、確定してキーを通す。
-  F2・再変換からの入り方は今後の作業。
 - 「英数の続き」は局面にしない。文字キーの打たれ方が変わるだけで、使えるコマンドは `composing` と同じ。
   Shift+CapsLock（`alnum_mode`）で入ったときは、変換中でも局面を変えない（CONVERSION「英数の続き」）。
 - 準備中・停止・対象外では、`global` の中の TIP が実行するコマンドだけが効く（§7.5）。
@@ -132,15 +130,17 @@
 | `insert_alt_space` | empty | ○ | `insert_space` と別の幅の空白 |
 | `insert_full_space` / `insert_half_space` | empty 以降 | ○ | 幅を決めた空白。入力なしでは文書に入れ、入力中では入力中の文字に足す。変換中より先では、確定してから空白で次の入力を始める |
 | `undo_commit` | empty | × | 直前の確定を取り消す |
-| `reconvert` | empty, direct | × | 選んだ文字を変換し直す |
-| `convert` | composing | ○ | 変換する |
+| `reconvert` | empty, direct | × | 確定済みの文字を変換し直す。[ゆらぎでの実装案](keybind/reconversion.md#5-ゆらぎでの実装案)を参照 |
+| `convert` | composing、predicting | ○ | 読みを変換する。予測選択中は予測候補を閉じてから変換する |
 | `predict` | composing | ○ | 予測候補に入る |
 | `commit` | composing 以降 | ○ | 全部確定する |
+| `commit_with_half_space` | predicting | ○ | 選んだ予測候補を確定し、半角空白を入れる |
 | `commit_at_cursor_and_pass` / `commit_inside_and_pass` | composing | ○ | カーソルを保ったまま確定してキーを通す。後者は末尾なら確定せず通す |
 | `commit_first_segment` | composing 以降 | ○ | 先頭の文節だけ確定する |
 | `commit_one_char` | composing | ○ | 先頭の 1 打を、かなのまま確定する（CONVERSION「部分確定」） |
 | `commit_to_focus` | converting 以降 | × | 注目文節までを確定する |
 | `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力はカーソルの前の 1 打、変換済みは表示の末尾の 1 字を消す |
+| `delete_last_and_commit` | converting 以降、predicting | ○ | 表示の末尾の 1 字を消して残りを確定する |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
 | `cycle_kana_mode` / `toggle_alnum_width` | empty | ○ | 未確定文字が無いときに、かなの字種または英数の幅の入力モードを変える |
 | `cycle_kana_script` / `cycle_alnum_width` | composing 以降 | ○ | 無変換・Shift+無変換。未変換の入力の字種、または変換中の注目文節の字種を変える |
@@ -149,18 +149,25 @@
 | `cursor_left_or_pass` / `cursor_right_or_pass` / `delete_before_or_pass` | editing | ○ | 左右へ移動、または前字を削除する。入力全体の端でこれ以上動けなければ確定して通す |
 | `cancel` | composing | ○ | 入力を全部消す |
 | `cancel_conversion` | converting 以降、predicting | ○ | 変換をやめて、入力中に戻る |
+| `restore_reading` | converting 以降、predicting | ○ | 変換をやめて、入力全体を読みで表示する |
 | `segment_revert` | converting、selecting | ○ | 注目文節を読みに戻す |
 | `cancel_resize` | resizing | ○ | 文節長変更前の境界と表記を戻す |
 | `to_hiragana` / `to_katakana` / `to_half_katakana` / `to_full_alnum` / `to_half_alnum` | composing 以降 | ○ | 字種を変える（MS-IME の F6–F10） |
+| `input_to_hiragana` / `input_to_katakana` / `input_to_full_alnum` / `input_to_half_alnum` | composing | ○ | 入力全体の字種を変え、入力中のままカーソルを末尾へ移す |
 | `close_candidates` | selecting | ○ | 候補窓を閉じて `converting` に戻る。変換はそのまま |
+| `accept_candidate` | selecting | ○ | 現在の候補を選んで窓を閉じ、次の文節があればそこへ移る |
 | `open_candidates` | converting | ○ | 選んでいた候補で候補窓を開く |
 | `next_candidate` / `prev_candidate` | converting 以降、predicting | ○ | 次／前の候補。`converting` では候補窓を開く |
+| `prev_prediction` | predicting | ○ | 予測候補を一つ戻る。先頭に達したら止まる |
 | `next_page` / `prev_page` | selecting 以降 | ○ | 次／前の 9 件 |
+| `prev_page_wrap` | selecting | ○ | 前の 9 件へ。先頭ページからは最後のページへ |
 | `select_candidate_1` … `select_candidate_9` | selecting 以降 | ○ | 番号の候補を選ぶ |
+| `pick_candidate_1` … `pick_candidate_9` | selecting | ○ | 番号の候補を選んで窓を閉じる |
 | `candidate_first` / `candidate_last` | selecting 以降 | ○ | 先頭／最後の候補を選ぶ |
 | `segment_left` / `segment_right` | converting 以降 | ○ | 前／次の文節へ |
 | `segment_first` / `segment_last` | converting 以降 | ○ | 先頭／末尾の文節へ |
 | `segment_shrink` / `segment_expand` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動くと `resizing` になる（§3.1） |
+| `segment_shrink_and_convert` / `segment_expand_and_convert` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動いた文節をその場で変換する |
 | `convert_segment` | resizing | ○ | 伸縮で読みにした文節を変換し、`converting` に戻る（MS-IME の「文節変換」。候補窓は開かない） |
 | `convert_edited_segment` | editing | ○ | 注目文節の入力を変換し、候補窓を閉じた変換中に戻る |
 | `forget_candidate` | selecting 以降 | ○ | 今の候補の学習を忘れる |
@@ -231,12 +238,12 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
 
 ### 4.3 割り当てのないキー
 
-表を親までたどっても行が無いときの扱い。これも固定の規則にする。MS-IME の動き（[ms-ime.md](keybind/ms-ime.md) §1.5）に合わせる。
+表を親までたどっても行が無い機能キーへの応答は、入力があればプリセットの `unbound_input` で決まる。
 
 | 局面 | 修飾なし・Shift・Ctrl 付き | Alt 付き（Ctrl なし）・Win 付き |
 |---|---|---|
 | direct、empty | アプリに通す | アプリに通す |
-| composing 以降 | **確定してアプリに通す**（`commit_and_pass`） | アプリに通す（Alt を押したときに確定している） |
+| composing 以降 | 「MS-IME」は **確定してアプリに通す**（`commit_and_pass`）。「macOS」は **食べて入力を残す**（`noop`） | アプリに通す（Alt を押したときに確定している） |
 
 - MS-IME は、入力がある間、働きの無いキーの多くを確定してからアプリに通す（Insert、PageUp、Ctrl+C、Ctrl+V、Ctrl+Shift+矢印など）。
   食べて何もしないキー（Shift+Enter など）と、確定せずに通すキー（F1、Ctrl+Tab、Ctrl+Home など）もある。これらは MS-IME のプリセットに `noop`・`pass_through` の行として書く。
@@ -264,7 +271,7 @@ MS-IME のプリセットは、新 MS-IME を実機で見た動き（[keybind/ms
 `VK_IME_ON` が届いたらひらがなに、`VK_IME_OFF` が届いたら半角英数に切り替える。
 変換・無変換は `Convert`／`NonConvert` の仮想キーコードが届いたときに使える。
 `kbd101` が INT4 を 0xFF、INT5 を `VK_OEM_PA1` として届けたときは、未確定文字を保ってそのままアプリに通す。
-変換キーによる再変換と、他の JIS 専用キーの割り当ては別途扱う。実機での違いは [keybind/ms-ime.md](keybind/ms-ime.md) に記す。
+JIS 専用キーの実機での動きは [keybind/ms-ime.md](keybind/ms-ime.md) を参照。
 TIP はどちらのファイルも読まない（§8）。
 
 ### 5.2 プリセットの形式
@@ -288,7 +295,9 @@ TIP はどちらのファイルも読まない（§8）。
 - 1 行が `[局面, 和音, コマンド]`。1 行に 1 つなので、差分が読みやすい。
 - 同じコマンドに複数のキーを割り当てるときは、行を複数書く。
 - 同じ（局面, 和音）の有効な行が 2 つあったら、後の行を使う。`keymap.json` の読み込みでは記録に残す。編集画面では 1 つの欄にまとめる。
+- `unbound_input` は `commit_and_pass`（省略時）か `noop`。ユーザー定義にも土台のプリセットから引き継ぐ。
 - プリセットは全部の行を書く（他のプリセットを土台にしない）。プリセット同士が独立なので、1 つを直しても他に響かない。
+- `macos.json` はライブ変換と「Windows風のキー操作」をオフにした Mac の実機のキー操作に基づく。Windows 向けの扱いは [macos-vs-windows.md](keybind/macos-vs-windows.md) §7。
 
 ### 5.3 利用者の設定の形式（ユーザー定義）
 
@@ -376,7 +385,7 @@ class Command:
     keeps_resizing: bool = False  # 実行しても文節長変更を終えない（§6.3）
 
 COMMANDS = {c.id: c for c in (
-    Command("convert", "変換", COMPOSING, run=lambda s: s._convert()),
+    Command("convert", "変換", COMPOSING | PREDICTING, run=lambda s: s._convert()),
     Command("commit", "全確定", INPUT, run=lambda s: s._commit()),
     Command("segment_shrink", "文節を縮める", CONVERTED, run=lambda s: s._resize(-1), keeps_resizing=True),
     Command("select_candidate_3", "候補 3 を選ぶ", SELECTING, run=lambda s: s._select_row(2)),
@@ -732,8 +741,8 @@ TIP: rev が違えば表を入れ替え、常時のキーを登録し直す
 | 入力全体の試験（`tests/transcripts/`、`test_partial_commit` など）は、MS-IME のプリセットで動かす。期待値は MS-IME の動き | プリセットの行の誤りによる、意図しない挙動の変化 |
 | **TIP とエンジンの突き合わせ**: 局面 × 和音の全部の組について、エンジンに実際にキーを送ったときの `eat` と、C++ の `WantKey()` が食べる表から出す答えが同じ。`tests/keymap_cases.py` が組の全部をエンジンに送って期待値を作り、`tip_logic_test --key-cases` の標準入力に渡す。C++ は DLL に埋め込む表で `WantKey()` を引いて比べる（CTest の `tip_keymap_roundtrip`） | TIP とエンジンの食い違い（キーがアプリに抜ける、食べたまま何も起きない） |
 | DLL に埋め込む表は、ビルドのたびにプリセットから作る（CMake）。上の突き合わせがその表で比べる | 埋め込みの作り忘れ |
-| （段 3）悪い行の混ざった `keymap.json` で、良い行は効き、悪い行だけが落ちる | 1 行の誤りで設定の全部が消えること |
-| （段 3）自作の `keymap.json` や選んだ別のプリセットが読めないとき（§5.4）、同梱の `ms-ime.json` で動き、注意 `keymap` が出る | 設定の破損でエンジンが起動しなくなること |
+| 悪い行の混ざった `keymap.json` で、良い行は効き、悪い行だけが落ちる | 1 行の誤りで設定の全部が消えること |
+| 自作の `keymap.json` や選んだ別のプリセットが読めないとき（§5.4）、同梱の `ms-ime.json` で動き、注意 `keymap` が出る | 設定の破損でエンジンが起動しなくなること |
 | 同梱の `ms-ime.json` が無い、読めない、形式が不正、または悪い行があるとき、`ready` を返す前に `fatal program-files-unreadable` を出して終了する | 配布物の破損が診断されずにエンジンが終了すること、壊れた割り当てで起動すること |
 | `tip.json` の切り替えキーがプリセットの局面の行と重なる（Ctrl+Space）とき、入力のある局面でも切り替えのコマンドが引ける | 切り替えキーが入力中に食べられて効かないこと |
 | 文節長変更（§3.1）: 多文節を変換して、縮める → 伸ばす → Space → Space。返事の `phase`、候補、文節の境界、見せる文字（読みか変換か）を追う。`resizing` からの文節の移動、先頭の文節の確定、字種の変換、取消、確定、文字キーのあとの局面と文字。端で動かない伸縮。`selecting` での文節の移動 | 候補窓が開いたままになること、`resizing` が残ること、読みにした文節が黙って変換されること、候補窓を閉じた変換中で操作が黙って効かないこと |
@@ -745,16 +754,3 @@ TIP: rev が違えば表を入れ替え、常時のキーを登録し直す
 | 実機: 2 欄以上のフォームで、エンジンの返事を遅らせて上と同じ列を打つ（Win32 のダイアログ、Word、Chromium、WPF か WinUI）。フォーカスの通知・種類の照会・キーの到着の順序を記録する | TSF の呼び出しの順序についての前提の崩れ（§7.7 の「持ち越す移動」の見分け方は、アプリの作りに依る） |
 | 実機: `tools/keyprobe/msime_tsf_table.py` と同じ表を、ゆらぎで採り、MS-IME の表と比べる（食べるか、確定して通すか、そのまま通すか） | プリセットと MS-IME の食い違い |
 | 実機: [keybind/windows.md](keybind/windows.md) §1・§3 の表の項目を、確認用の TIP と `checks.py`（`tools/keyprobe/README.md`）で、TIP のキーの扱いを変えるときと Windows の大きな更新のあとに確かめる | TSF・配列ドライバの前提の崩れ（自動の試験では見つからない） |
-
----
-
-## 10. 作る順序
-
-各段は、それだけで出荷できる（前の段までで挙動が閉じている）。段 1〜3 は作ってある。
-
-| 段 | 中身 | 利用者に見える変化 |
-|---|---|---|
-| 1 | エンジン: 和音、局面、コマンド表、キー表（MS-IME のプリセット）、表引きの `on_key()`。返事の `phase`・`eat` | エンジンに届くキーが、MS-IME の割り当てで動く |
-| 2 | TIP: 食べる表、`OnTestKeyDown` と `OnKeyDown` の同じ答え、キーの出来事の扱い（§7.4）、常時のキー、送り直しと持ち越し。ブローカーが表を配る | Ctrl 付きのキー、入力中の機能キー、Alt での確定が MS-IME と同じになる |
-| 3 | `keymap.json`（ユーザー定義）、読み直し、設定ウィンドウの「キー」タブ | キーを変えられる |
-| 4 | ほかのプリセットを足す（ATOK など。[keybind/ime-survey.md](keybind/ime-survey.md) §3）。足りないコマンドを作る（§3.2 の × の行） | プリセットを選べる。MS-IME の表のうち、まだ効かなかった行が効く |

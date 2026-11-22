@@ -745,11 +745,11 @@ class ImeSession:
         self.fsm.reset()
         return insert
 
-    def _cancel_conversion(self) -> None:
+    def _cancel_conversion(self, *, show_reading: bool = False) -> None:
         self.converted = False
         self.editing = False
         self._cursor = None
-        self._reading_edit = False
+        self._reading_edit = show_reading
         self._clear_cands()
         self._refresh()
         self._clear_suggestion()
@@ -906,13 +906,11 @@ class ImeSession:
         if not self.converted:
             current = self._input_script or self.input_mode
             if alnum:
-                self._input_script = "half_alnum" if current == "full_alnum" else "full_alnum"
+                script = "half_alnum" if current == "full_alnum" else "full_alnum"
             else:
                 index = KANA_SCRIPTS.index(current) if current in KANA_SCRIPTS else -1
-                self._input_script = KANA_SCRIPTS[(index + 1) % len(KANA_SCRIPTS)]
-            self._clear_cands()
-            self._show_input_reading()
-            self._update_composition()
+                script = KANA_SCRIPTS[(index + 1) % len(KANA_SCRIPTS)]
+            self._set_input_script(script, move_to_end=False)
             return
 
         if self.focus < 0:
@@ -937,6 +935,15 @@ class ImeSession:
         selected = segment.selected
         self._set_selection(self.focus, Candidate(surface, selected.reading, selected.score,
                                                   selected.lid, selected.rid, "alnum" if alnum else "kana"))
+
+    def _set_input_script(self, script: str, *, move_to_end: bool = True) -> None:
+        self._input_script = script
+        if move_to_end:
+            self._cursor = None
+        self._clear_cands()
+        self._clear_suggestion()
+        self._show_input_reading()
+        self._update_composition()
 
     def _freeze_input_script(self) -> None:
         """Keep the spelling of the last input run when another run starts."""
@@ -1273,9 +1280,15 @@ class ImeSession:
                 self.focus = focus
             self._clear_cands()
 
-    def _select_row(self, row: int) -> None:
+    def _accept_candidate(self) -> None:
+        self.segments[self.focus].fixed = True
+        self._move_segment(1)
+
+    def _select_row(self, row: int, *, close: bool = False) -> None:
         if self.focus >= 0 and row < len(self.candidates):
-            self._select(self.candidate_page * PAGE_SIZE + row)
+            self._select(self.candidate_page * PAGE_SIZE + row, show=not close)
+            if close:
+                self._clear_cands()
 
     def _open_cands(self) -> None:
         self._clear_cands()
@@ -1347,7 +1360,7 @@ class ImeSession:
             text += segment.selected.surface
         self.composition = text
 
-    def _resize(self, delta: int) -> None:
+    def _resize(self, delta: int, *, convert: bool = False) -> None:
         """Override one automatic boundary, keeping all other intervals intact."""
         if self.focus < 0:
             return
@@ -1361,7 +1374,7 @@ class ImeSession:
             return
         if delta < 0 and segment.end - segment.start == 1:
             return
-        if not self.resizing:
+        if not self.resizing and not convert:
             self._resize_origin = ([replace(s) for s in self.segments], self.editing)
         self.editing = False
         reading = segment.selected.reading
@@ -1381,8 +1394,11 @@ class ImeSession:
             self._make_raw(following, reading[-1])
             reading = reading[:-1]
         self._make_raw(self.focus, reading)
-        self._update_composition()
-        self.resizing = True
+        if convert:
+            self._end_resize()
+        else:
+            self._update_composition()
+            self.resizing = True
 
     def _cancel_resize(self) -> None:
         if self._resize_origin is not None:
@@ -1466,7 +1482,7 @@ class ImeSession:
             if stream is not None:
                 self._select(stream.last())
 
-    def _cycle(self, delta: int) -> None:
+    def _cycle(self, delta: int, *, wrap_start: bool = True) -> None:
         if self.focus < 0:
             return
         if self.segments[self.focus].raw:
@@ -1479,20 +1495,26 @@ class ImeSession:
             return
         index = segment.index + delta
         if index < 0:
+            if not wrap_start:
+                return
             index = stream.last()
         elif not stream.ensure(index):
             index = 0
         self._select(index)
 
-    def _page(self, delta: int) -> None:
+    def _page(self, delta: int, *, wrap_start: bool = False) -> None:
         if self.focus < 0:
             return
-        segment = self.segments[self.focus]
+        stream = self.segments[self.focus].choices
+        if stream is None:
+            return
         page = self.candidate_page + delta
         if page < 0:
-            return
+            if not wrap_start:
+                return
+            page = stream.last() // PAGE_SIZE
         start = page * PAGE_SIZE
-        if segment.choices is not None and segment.choices.ensure(start):
+        if stream.ensure(start):
             self._select(start)
 
     def segment_snapshot(self) -> list[dict]:
@@ -1680,17 +1702,25 @@ class ImeSession:
                 chosen=[not s.raw and s.chosen() for s in segments],
                 shown=[s.shown for s in segments])
 
-    def _commit(self, *, reset_input: bool = True) -> str:
+    def _commit(self, *, reset_input: bool = True, suffix: str = "") -> str:
         text = self.composition
         if text:
             standalone = len(self.segments) == 1 and not self._partial
             self._confirm(self.segments, standalone=standalone)
             last = self.segments[-1]
-            self._note_commit(text, None if last.raw else last, standalone=standalone)
+            self._note_commit(text + suffix, None if suffix or last.raw else last,
+                              standalone=standalone and not suffix)
         if reset_input:
             self._reset_input()
         else:
             self._clear_input()
+        return text + suffix
+
+    def _delete_last_and_commit(self) -> str:
+        text = self.composition[:-1]
+        if text:
+            self._note_commit(text)
+        self._reset_input()
         return text
 
     def _clear_input(self) -> None:

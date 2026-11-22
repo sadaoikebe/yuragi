@@ -77,7 +77,8 @@ def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
 
 
 class Keymap:
-    def __init__(self, bindings: Bindings):
+    def __init__(self, bindings: Bindings, unbound_input: str = "commit_and_pass"):
+        self._unbound_input = COMMANDS[unbound_input]
         rows: dict[str, dict[int, Command]] = {phase: {} for phase in (*PARENT, "global")}
         for (phase, chord), command_id in bindings.items():
             command = COMMANDS[command_id]
@@ -104,7 +105,7 @@ class Keymap:
         if command is not None:
             return command
         if phase in INPUT and not chord.alt_only and not chord.mods & WIN:
-            return COMMANDS["commit_and_pass"]
+            return self._unbound_input
         return COMMANDS["pass_through"]
 
     def eat_table(self) -> dict:
@@ -170,6 +171,7 @@ def _read_binding(row, *, allow_remove: bool) -> tuple[BindingKey, str | None]:
 class Preset:
     label: str
     bindings: Bindings
+    unbound_input: str
 
 
 def _read_preset(name: str) -> Preset:
@@ -183,7 +185,11 @@ def _read_preset(name: str) -> Preset:
     label, bindings = raw.get("label"), raw.get("bindings")
     if raw.get("name") != name or not isinstance(label, str) or not isinstance(bindings, list):
         raise ValueError(f"プリセット {name} の形式が不正です")
-    return Preset(label, dict(_read_binding(row, allow_remove=False) for row in bindings))
+    unbound_input = raw.get("unbound_input", "commit_and_pass")
+    if unbound_input not in ("commit_and_pass", "noop"):
+        raise ValueError(f"割り当ての無いキーの機能が不正です: {unbound_input!r}")
+    return Preset(label, dict(_read_binding(row, allow_remove=False) for row in bindings),
+                  unbound_input)
 
 
 @cache
@@ -193,7 +199,8 @@ def _default_preset() -> Preset:
 
 @cache
 def default_keymap() -> Keymap:
-    return Keymap(_default_preset().bindings)
+    preset = _default_preset()
+    return Keymap(preset.bindings, preset.unbound_input)
 
 
 def _legacy_overrides(data_dir: Path) -> Bindings:
@@ -236,7 +243,8 @@ class KeymapSettings:
     def compile(self) -> Keymap:
         if self.use == DEFAULT_PRESET and not self.legacy:
             return default_keymap()
-        return Keymap(self.bindings())
+        preset = self.presets[self.base if self.use == CUSTOM else self.use]
+        return Keymap(self.bindings(), preset.unbound_input)
 
     def begin_custom(self) -> None:
         if self.use != CUSTOM:
