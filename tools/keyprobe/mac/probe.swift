@@ -11,7 +11,7 @@
 //          hid  CGEvent.post to the system; needs Accessibility, sent only while frontmost (untested)
 // keys     "kyouhaamedesu {Space} {Shift+Left}": {Name} / {Ctrl+Shift+Name} is one chord, other words
 //          are typed letter by letter, {Wait} presses nothing. Modifiers: Shift Ctrl Opt Cmd. Names: KEY.
-// shot-dir when given, each candidate window is captured to <shot-dir>/win-<key index>.png
+// shot-dir when given, every other visible window (candidate window, input source indicator) is captured to <shot-dir>/win-<key index>.png
 //          (screencapture; needs the Screen Recording permission)
 import Carbon
 import Cocoa
@@ -414,7 +414,7 @@ func runTable(_ path: String) {
 // ---- guide mode: a person presses the keys ------------------------------------------------
 // steps.json: [{"id": ..., "source": ..., "prep": "<keys>", "say": "<what to press>"}, ...]
 // Per step: set the state up (synthetic keys), show `say` in the window, and record everything
-// until 0.3 s after the key is released (1 s after the last real key event otherwise) (10 s with none). If the first step gets no real key, stop. Real events come from a local event
+// until 0.3 s after the key is released (1 s after the last real key event otherwise) (8 s for the first step and 4 s afterwards with none). If the first step gets no real key, stop. Real events come from a local event
 // monitor; it also sees the synthetic events given to NSApp.sendEvent, so those are skipped (injecting).
 
 

@@ -96,7 +96,7 @@ Apple のガイドは「入力中/変換中/候補表示中」といった状態
 | カタカナへ | Shift | 「Shiftキーの動作」が「カタカナを入力」のとき | [SW] |
 | 半角カタカナへ | Control＋Shift＋; | 入力モードで半角カタカナを有効にしている場合 | [SW] |
 
-- 出典で食い違う: [CH] は「JIS キーボードがない場合、ひらがな入力モードは Control＋Shift＋J、ローマ字入力モードは Control＋Shift＋;」と書く。[SW] は英字を Ctrl+Shift+'、Ctrl+Shift+; を半角カタカナとする。
+- 出典で食い違う: [CH] は「JIS キーボードがない場合、ひらがな入力モードは Control＋Shift＋J、ローマ字入力モードは Control＋Shift＋;」と書く。[SW] は英字を Ctrl+Shift+'（JIS キーボードでは Ctrl+Shift+; か英数キー）とし、半角カタカナにも Ctrl+Shift+; を挙げる。
 - 「英数」「かな」キーを 1 回押すと英字/ひらがなへ切り替わる [SW][PCW2]。2 回押すと、直前に入力した文字の変換になる（§2）。
 
 ## 4. その他の操作
@@ -222,6 +222,9 @@ Windows（MS-IME・ゆらぎ）との違いの整理は [macos-vs-windows.md](ma
 | 英数 2 回、かな 2 回 | §10.6 | §2 |
 | Mozc にある Option＋A / C / S / X / Z | **ある**（既定）。A・S は半角英字、C は全角英字、X はカタカナ、Z はひらがな。Option＋J / L はカーソル左 / 予測候補に入る | §4 |
 | Control＋1、Control＋2 | 試験アプリでは何も起きなかった（確定直後・選択なし） | §4 |
+| 候補ウインドウの 1 ページの件数 | **9 件**（[SC] の「8 行ずつ」とは違う） | §2 |
+| カーソルを上 / 下（↑・Control＋E / ↓・Control＋X） | 入力中の ↑ は何もせず、Control＋E は食べて何もしない。↓・Control＋X は予測候補に入る。変換中はどれも候補ウインドウを開く | §2 |
+| Control＋:（ローマ字に変換） | 合成した Control＋Shift＋;（US 配列の Control＋:）は、入力中も変換中も何も変えなかった | §1 |
 
 ### 10.2 入力中（未変換）
 
@@ -327,7 +330,7 @@ Windows（MS-IME・ゆらぎ）との違いの整理は [macos-vs-windows.md](ma
 | Space | 文節を選ぶ状態に入り、候補ウインドウを開く |
 | ←、Control＋B / S | 文節を選ぶ状態に入り、**最後の文節**に注目して候補ウインドウを開く（カーソルは動かない） |
 | →、↑、↓、Control＋N / P / E / F / D / X | 文節を選ぶ状態に入り、先頭の文節に注目して候補ウインドウを開く |
-| Return | 確定する |
+| Return | 確定する（候補ウインドウが開いていないとき。開いていれば窓を閉じる） |
 | Esc | **1 回目は最後の文節を読みに戻す**（「今日は雨です」→「今日は／あめです」）。文節選択の状態からは全部を読みに戻す |
 | Delete | 読みの末尾 1 字を消す（確定しない。ライブ変換でないときと違う） |
 | F6〜F10、Control＋J / K / L / ; | 入力全体の字種を変える。文節選択中は注目文節だけ |
@@ -336,7 +339,7 @@ Windows（MS-IME・ゆらぎ）との違いの整理は [macos-vs-windows.md](ma
 
 ### 10.8 人の手で確かめたこと・確かめていないこと
 
-本物のキーボードで押したもの（`tools/keyprobe/mac/guide.py`）。
+本物のキーボードで押したもの（手順は `tools/keyprobe/mac/guide.py` など）。
 
 | キー | 結果 |
 |---|---|
@@ -370,14 +373,14 @@ JIS キーボードの英数・かなキーを本物で押したとき、かな�
 
 ### 10.10 「Windows風のキー操作」の実機
 
-Mac から Windows に移る人が使う設定ではないが、Apple が「Windows 風」として何を MS-IME 風にしたかの記録として残す。全部は [macos-table.md](macos-table.md) の最後。
+Apple が「Windows 風」として何を MS-IME 風にしたかの記録。全部は [macos-table.md](macos-table.md) の最後。
 
 - F8 が半角カタカナ。Control＋U / I / O / P / T が F6〜F10（MS-IME と同じ）。Control＋J / K / L / ; の文字種変換は無くなる。
 - Control＋K / L が文節の縮め / 伸ばし。Control＋Z と変換中の Delete・Control＋H が「読みに戻す」（確定しない）。
 - 候補ウインドウの Return は 1 回で確定する。
 - ↑ / ↓ は前 / 次の候補を選んで窓を開く（既定は窓を開くだけ）。PageUp/Down は変換中は何もしない。
-- Option＋英字は Option の文字（∆ ¬ など）になる（Option＋A など Mozc 風の割り当ては無くなる）。
-- Control＋C は確定する。Control＋N は変換中と予測候補の選択中に、入力を捨てて制御文字 `\x0e` を確定する（Control＋Q と同じ癖）。入力中は何もしない。
+- Option＋J / L と Option＋Shift＋Z / X / R は Option の文字（∆ ¬ など）になる。Option＋A / C / S / X / Z の字種変換は既定と同じに残る。
+- Control＋C は確定する。Control＋N は変換中と予測候補の選択中に、入力を捨てて制御文字 `\x0e` を確定する（Control＋Q と同じ癖）。入力中は何もしない（カーソルが途中にあるときは末尾へ動かす）。
 
 ---
 

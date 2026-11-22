@@ -1179,7 +1179,7 @@ public:
             lbm->Release();
         }
         link_.Start(hwnd_, kLinkMessage);
-        TryConnect();  // DESIGN「接続」: one of the three moments a connection is tried
+        TryConnect();  // DESIGN「接続」: one of the four moments a connection is tried
         CheckScope();
         Log(L"ActivateEx client=%u", (unsigned)tid);
         return S_OK;

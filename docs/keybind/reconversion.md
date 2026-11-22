@@ -77,14 +77,14 @@
 
 ## 3. MS-IME の動き
 
-- キー（資料）: テンプレート「Microsoft IME」では変換キーと Ctrl+ImeOn、「ATOK」では Shift+変換が再変換（[ms-ime.md](ms-ime.md) §1.1）。
+- キー（資料）: テンプレート「Microsoft IME」では変換キー、「ATOK」では Shift+変換、どちらでも Ctrl+ImeOn が再変換（[ms-ime.md](ms-ime.md) §1.1）。
   設定アプリでは、再変換の働きを「直前に確定した文字を再変換します」と書く [HP]。
 - 読みをどこから得ているかは、資料に無い。貼り付けた文字の読みを再変換で調べる使い方が紹介されている（旧 IME）[ATKANA]。
 - 選択が空でカーソルが文字の中: カーソルの位置の文節が再変換の状態になる。確定すると、その文節が置き換わる（報告）[FOREST][OOO]。
 - 選択が空でカーソルが確定した文字の直後: 再変換の候補が出る。MS-IME は、編集セッションの中で対象の範囲を選択範囲にしてから入力中の文字を始める（報告、TSF を記録した結果）[VSC324435]。
 - 選択があるとき: 選んだ範囲を再変換して置き換える（報告）[FOREST][VSC324435]。
 - 確定直後の Ctrl+Backspace（旧 IME、報告）: 1 番目の候補を選んだ変換中に戻る。変換キーで候補を順に選べ、続けて Backspace でかなに戻る [AT0702]。
-  新 MS-IME では、① の Ctrl+Backspace はアプリに通り、確定は取り消されない（[ms-ime.md](ms-ime.md) §1.5）。確定の直後は確かめていない。
+  新 MS-IME では、① と確定の直後の Ctrl+Backspace はアプリに通り、確定は取り消されない（[ms-ime.md](ms-ime.md) §1.5）。
 - Win+/（報告）: どの IME でも再変換できる。MS-IME はカーソルの位置の文節を再変換する。Google 日本語入力は、選んでいないと何も起こらない [FOREST]。
 
 ---
@@ -124,7 +124,6 @@
 | RCS | Microsoft Learn「RECONVERTSTRING」 | https://learn.microsoft.com/en-us/windows/win32/api/imm/ns-imm-reconvertstring |
 | URI | Microsoft Learn「Using Reconversion with an IME」 | https://learn.microsoft.com/en-us/windows/win32/intl/using-reconversion-with-an-ime |
 | WINKEY | Microsoft サポート「Windows のキーボード ショートカット」 | https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec |
-| S2 | Microsoft サポート「Microsoft 日本語 IME」（ja-jp） | https://support.microsoft.com/ja-jp/windows/microsoft-日本語-ime-da40471d-6b91-4042-ae8b-713a96476916 |
 | HP | HP FAQ 93 | https://jp.ext.hp.com/v-ivr/common/os-howto/faq/93/ |
 | ATKANA | @IT Windows TIPS（IME 2003 のころ） | https://atmarkit.itmedia.co.jp/fwin2k/win2ktips/861kanacon/kanacon.html |
 | AT0702 | @IT（2007-02） | https://atmarkit.itmedia.co.jp/ait/articles/0702/03/news016.html |

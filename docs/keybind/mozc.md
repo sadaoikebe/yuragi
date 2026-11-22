@@ -62,7 +62,7 @@ Google 日本語入力とそのオープンソース版 Mozc の、キー設定�
 
 | コマンド名 | 和名（GUI） | 使える状態 | 説明 |
 |---|---|---|---|
-| `IMEOn` | IME を有効化 | D P C V | IME をオンにする。macOS では、エディタで非表示（Mac では IME のオン/オフをキーで変えられないため） |
+| `IMEOn` | IME を有効化 | D P C V | IME をオンにする。macOS では、エディタで非表示（ソースのコメントは「Mac では IME オン/オフのキー割り当てを変えられない」） |
 | `IMEOff` | IME を無効化 | P C V | IME をオフにする。入力中の文字を確定するか消すかは資料に無い。macOS ではエディタで非表示 |
 | `CancelAndIMEOff` | キャンセル後 IME を無効化 | P C V | 入力中の文字を捨ててから IME をオフにする（ATOK 風） |
 | `CompositionModeHiragana` | ひらがなに入力切替 | D P C V | 入力モードをひらがなにする（D から使ったときに IME もオンになるかは資料に無い）。**Apple 系では何もしない（NONE）** |

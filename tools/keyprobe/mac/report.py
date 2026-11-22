@@ -115,7 +115,7 @@ def main():
           "キーは試験アプリの中で合成した（システムが先に取るキーは届かない。Control＋Space など）。")
     print("- 設定: ライブ変換オフ、推測候補表示オン、タイプミス修正オン、学習なし（プライベートモード）。")
     print("- **制御文字の確定**（`確定「\\x01」` など）は合成したキーでの結果。Home・End・Control＋Q などで入力を捨てて制御文字を確定した。"
-          "本物のキーで同じになるかは確かめていない（[macos.md](macos.md) §10.8）。\n")
+          "本物のキーで確かめたのは、予測候補を選んでいるときの Home と入力中の Control＋Q で、同じだった（[macos.md](macos.md) §10.8）。\n")
     print("**状態の作り方**\n")
     print("| 状態 | 作り方 |\n|---|---|")
     for s, p in PREP.items():
@@ -134,13 +134,13 @@ def main():
     if len(sys.argv) > 3:
         live = load(sys.argv[3])
         print("## ライブ変換をオンにしたとき\n")
-        print("ライブ変換の文字列には注目文節の太い下線が無いので、`*` は付かない。\n")
+        print("ライブ変換で入力しただけの文字列には注目文節の太い下線が無いので、`*` は付かない（文節を選ぶ状態に入ると付く）。\n")
         table(live, [s for s in GROUPS[2][1] if any((s, k) in live for k in keys)], keys)
         print()
     if len(sys.argv) > 2:
         win = load(sys.argv[2])
         print("## 「Windows風のキー操作」をオンにしたとき（既定と違うところだけ）\n")
-        print("Mac から Windows に移る人が使う設定ではない。Apple が「Windows 風」として、どのキーを MS-IME 風に置き換えたかの記録として残す。"
+        print("Apple が「Windows 風」として、どのキーを MS-IME 風に置き換えたかの記録。"
               "空欄は既定と同じ。\n")
         for title, states in GROUPS:
             states = [s for s in states if any((s, k) in win for k in keys)]

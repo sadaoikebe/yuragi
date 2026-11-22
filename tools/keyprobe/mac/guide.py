@@ -3,7 +3,7 @@
     python3 guide.py <tag> [step-id ...]
 
 The probe window sets each state up by itself, beeps and shows what to press (in red). Press it, then
-wait: the step ends 0.3 s after the key is released (4 s if nothing arrives; the run stops if the first step gets no key). Appends to out/guide-<tag>.jsonl.
+wait: the step ends 0.3 s after the key is released (8 s for the first step and 4 s afterwards if nothing arrives; the run stops if the first step gets no key). Appends to out/guide-<tag>.jsonl.
 `real` in each record is the key events the app saw from the keyboard (down / up / flags, repeat).
 """
 import json

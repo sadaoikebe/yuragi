@@ -39,7 +39,7 @@ out/probe app $J "kyouhaamedesu {Space} {Space} {Shift+Left} {Esc} {Esc}" out/sh
 - **キーの書き方:** 空白で区切る。`{Name}`・`{Ctrl+Shift+Name}` が和音 1 つ、ほかの語は 1 字ずつ打つ（ローマ字）。`{Wait}` は何も押さずに記録だけする。
   `{Sel:n}` は確定済みの文字の末尾 n 字を選ぶ（再変換の確認用）。`ShiftKey`・`CtrlKey`・`OptKey`・`CmdKey`・`Fn` は修飾キーだけを押して離す。
   修飾は `Shift`・`Ctrl`・`Opt`・`Cmd`。名前は `probe.swift` の `KEY`（`Space`、`Left`、`Eisu`、`Kana`、`F1`〜`F12` など）。
-- **画像のフォルダ:** 付けると、候補ウインドウが開いているキーごとに `win-<キーの番号>.png` を撮る。初回は「画面収録」の許可を求められる。付けなければ許可は何も要らない。
+- **画像のフォルダ:** 付けると、試験の窓のほかに窓（候補ウインドウ、入力ソースの表示など）が出ているキーごとに、その窓を `win-<キーの番号>.png` に撮る。窓が 2 つ以上あると、後の窓の画像で上書きされる。初回は「画面収録」の許可を求められる。付けなければ許可は何も要らない。
 - **表示の読み方:** `summary.py` の頭のコメント。`|` が文節の区切り、`*` が注目文節。
 - 実行中はキーボードとマウスに触らない。窓は、キーの列が終わると閉じる。
 - 結果は `out/`（git に入れない）。
@@ -51,12 +51,13 @@ out/probe app $J "kyouhaamedesu {Space} {Space} {Shift+Left} {Esc} {Esc}" out/sh
 | キーの列の最後は `{Esc}` で片付け、`{Return}` で確定しない | 日本語入力プログラムは確定した変換を学習する。試作中に「辮かん」を 1 回確定しただけで、「へんかん」の第 1 候補が変わった |
 | 終わったあとの入力ソースは、最後に押したキーしだい | 始める前の入力ソースに戻す処理は入っていない |
 | `2>/dev/null` を付ける | 標準エラーに `error messaging the mach port for IMKCFRunLoopWakeUpReliable` が出る（記録には影響しなかった） |
-| 許可のダイアログなど、ほかの窓が前に出たら、その回の記録は捨てる | その間のキーは試験の窓に届かず、変換中の文字列が変わらなくなる。`press` の行の `front`（試験アプリが前面か）で見分けられるかは確かめていない |
+| 許可のダイアログなど、ほかの窓が前に出たら、その回の記録は捨てる | その間のキーは試験の窓に届かず、変換中の文字列が変わらなくなる。`table.py` は前後の `front`（試験アプリが前面か）で見分け、`--redo` で採り直す |
 
 ## 表を採る・設定を切り替える
 
 ```sh
-python3 table.py default                      # 既定の設定。11 状態 × 147 キーで 95 分ほど
+python3 table.py default empty composing comp_cursor pred_focus converted cand multi multi_second resized after_commit abc
+                                              # 既定の設定。11 状態 × 147 キーで 95 分ほど（状態を省くと、ライブ変換の 4 状態も採る）
 python3 table.py default --redo               # 前面でなかった件を採り直す
 python3 report.py out/table-default.jsonl out/table-windows.jsonl out/table-live.jsonl > ../../../docs/keybind/macos-table.md
 ```
