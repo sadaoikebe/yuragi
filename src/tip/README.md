@@ -21,6 +21,7 @@
 ```
 
 `document_context` を `false` にすると、文書の左文脈の読み取り、確定位置の監視、打鍵への文脈情報の付加を停止する。
-`log` を有効にすると、本文を含めずに文書取得とキー処理の経過時間を `%TEMP%\yuragi_tip.log` に記録する。
+`log` を有効にすると、本文を含めずに文書取得とキー処理の経過時間を `%TEMP%\yuragi_tip.log`（UTF-8）に記録する。
+`log_text` も有効にすると、返事ごとに入力中の文字と確定した文字も書く（`reply text seq=… comp=… commit=…`）。打った文字がファイルに残るので、調べるときだけ使う。
 
 ビルドと試験は [DEVELOPMENT.md](../../docs/DEVELOPMENT.md)。

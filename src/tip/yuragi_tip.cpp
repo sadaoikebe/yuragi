@@ -84,9 +84,14 @@ static void Log(const wchar_t* fmt, ...) {
     wchar_t buf[1024];
     va_list ap;
     va_start(ap, fmt);
-    vswprintf_s(buf, fmt, ap);
+    _vsnwprintf_s(buf, _TRUNCATE, fmt, ap);  // vswprintf_s ends the host application on overflow
     va_end(ap);
-    fwprintf(f, L"%s\n", buf);
+    char line[sizeof(buf) / sizeof(buf[0]) * 3 + 1];  // UTF-8, one line per call
+    int n = WideCharToMultiByte(CP_UTF8, 0, buf, -1, line, (int)sizeof(line) - 1, nullptr, nullptr);
+    if (n > 0) {
+        line[n - 1] = '\n';
+        fwrite(line, 1, (size_t)n, f);
+    }
     fclose(f);
 }
 
@@ -1719,6 +1724,9 @@ private:
         }
         Log(L"reply client=%p seq=%lld t=%llu pending=%d",
             static_cast<void*>(this), m.seq, NowMs(), m.pending);
+        if (settings_.log_text)  // the typed text only on request (tip.json "log_text")
+            Log(L"reply text seq=%lld comp=%ls commit=%ls", m.seq,
+                Utf8ToWide(m.composition).c_str(), Utf8ToWide(m.commit).c_str());
         if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.global, m.seq);
         for (const auto& [seq, eat, global] : m.resolved_keys) KeyResult(seq, eat, global, m.seq);
         if (pending_mode_seq_ && m.seq >= pending_mode_seq_ && !m.pending) {

@@ -486,7 +486,8 @@ Tag が無ければ「インストールされていません」と表示して�
 - `src\tip\dev-build.ps1`: TIP（64・32 ビット）とブローカーを Release でビルドして試験し、`dist\yuragi_tip.dll`・
   `dist\yuragi_tip32.dll` と `dist\yuragi-broker.exe` を作る（管理者権限・登録なし）。リリースのワークフローもこれを使う（CI は cmake を直接呼ぶ）。
 - `src\tip\dev-register.ps1 [-Python <python.exe>]`: タグ `dev` として登録する（UAC 1 回）。
-  `HKCU\…\Tag = dev`、`versions\dev\engine.json` はリポジトリを指し、エンジンは指定の Python で動く。
+  `HKCU\…\Tag = dev`、`versions\dev\engine.json` はリポジトリを指す。エンジンは `-Python` の Python で動く（torch と transformers が要る）。
+  `-Python` を省くと、入っている製品版の `engine.json` から同梱の Python と LM のモデルを借りる（辞書とキャッシュはリポジトリの既定）。
   開発登録は `--require-lm` を付けて起動する。設定が `lm_rescore: false` でも zenz を暖機し、成功してから
   `ready` を返す。モデルの読み込みや暖機に失敗すると `fatal lm-unavailable` で終了する。
   DLL とブローカーは `dist\` から読み込む（開発機に限り `Program Files` 配置を省く）。DLL は

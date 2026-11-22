@@ -3,7 +3,10 @@
 #   powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1 [-Python <python.exe>]
 #
 # - HKCU の Tag を dev にし、%LOCALAPPDATA%\yuragi-ime\versions\dev\engine.json を
-#   このリポジトリに向ける (python -m yuragi.engine --require-lm)。
+#   このリポジトリに向ける (yuragi.engine --require-lm)。
+# - -Python を渡すと、その Python で python -m yuragi.engine を動かす (torch と transformers が要る)。
+#   渡さなければ、入っている製品版の engine.json から同梱の Python と LM のモデルを借りる
+#   (辞書とキャッシュはリポジトリの既定)。--require-lm なので、LM を読めない Python では起動しない。
 # - DLL とブローカーは dist\ から読み込む (開発機に限り Program Files に置かない)。
 #   DLL は dist\yuragi_tip-a.dll / -b.dll / ... のうち、登録中でなく使用中でもないものに
 #   コピーして登録するので、古い DLL を読み込んだアプリを閉じなくても更新できる。
@@ -16,7 +19,8 @@ $Clsid = '{A7C4E201-0B3A-4F11-9E61-0C1A0B7E0A01}'
 $Layout = "0x0411:$Clsid{A7C4E202-0B3A-4F11-9E61-0C1A0B7E0A01}"
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
-function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo) {
+# $Product (製品版の engine.json) を渡すと、その Python と LM のモデルで、リポジトリのソースを動かす。
+function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo, $Product = $null) {
     $engine = [ordered]@{
         format = 1
         python = $Python
@@ -25,10 +29,45 @@ function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo) {
         args = @('-m', 'yuragi.engine', '--require-lm')
         admin_args = @('-m', 'yuragi.ime.admin_ui')
     }
+    if ($Product) {
+        # 同梱の Python は埋め込み版で、-m では作業フォルダを探さない。製品版と同じ -c の前置きで読む。
+        $given = @($Product.args)
+        if ($given.Count -lt 3 -or $given[0] -ne '-c' -or $given[2] -ne 'yuragi.engine') {
+            throw '製品版の engine.json の形が想定と違います。-Python で Python を渡してください。'
+        }
+        $lm = @()
+        for ($i = 3; $i -lt $given.Count - 1; $i++) {
+            if ($given[$i] -in @('--lm-model', '--lm-cpu-model')) { $lm += @($given[$i], $given[$i + 1]) }
+        }
+        $engine.python = $Product.python
+        $engine.pythonw = $Product.pythonw
+        $engine.args = @($given[0], $given[1], 'yuragi.engine', '--require-lm') + $lm
+        $engine.admin_args = @($given[0], $given[1], 'yuragi.ime.admin_ui')
+    }
     [IO.File]::WriteAllText($Path, ($engine | ConvertTo-Json -Depth 3), [Text.UTF8Encoding]::new($false))
 }
 
-if (-not $Python) { $Python = (Get-Command python -ErrorAction Stop).Source }
+# 入っている製品版の engine.json (今のタグ。dev なら、いちばん新しい版)。
+function Find-ProductEngine {
+    $versions = Join-Path $env:LOCALAPPDATA 'yuragi-ime\versions'
+    $tag = (Get-ItemProperty -LiteralPath 'HKCU:\Software\yuragi-ime' -ErrorAction SilentlyContinue).Tag
+    $paths = @()
+    if ($tag -and $tag -ne 'dev') { $paths += Join-Path $versions "$tag\engine.json" }
+    $paths += @(Get-ChildItem -LiteralPath $versions -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'dev' } | Sort-Object LastWriteTime -Descending |
+        ForEach-Object { Join-Path $_.FullName 'engine.json' })
+    foreach ($p in $paths) {
+        if (Test-Path -LiteralPath $p) { return (Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json) }
+    }
+    return $null
+}
+
+$product = $null
+if (-not $Python) {
+    $product = Find-ProductEngine
+    if (-not $product) { throw '製品版が入っていません。torch と transformers の入った Python を -Python で渡してください。' }
+    $Python = $product.python
+}
 if (-not (Test-Path -LiteralPath $Python)) { throw "Python が見つかりません: $Python" }
 foreach ($f in @('yuragi_tip.dll', 'yuragi-broker.exe')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Dist $f))) { throw "$f がありません。先に dev-build.ps1 を実行してください。" }
@@ -79,7 +118,7 @@ New-Item -Force 'HKCU:\Software\yuragi-ime' | Out-Null
 Set-ItemProperty -LiteralPath 'HKCU:\Software\yuragi-ime' -Name 'Tag' -Value 'dev'
 $version = Join-Path $env:LOCALAPPDATA 'yuragi-ime\versions\dev'
 New-Item -ItemType Directory -Force $version | Out-Null
-Write-DevEngineConfig (Join-Path $version 'engine.json') $Python $Repo
+Write-DevEngineConfig (Join-Path $version 'engine.json') $Python $Repo $product
 Add-Type -Namespace YuragiDev -Name Input -MemberDefinition @'
 [DllImport("input.dll", CharSet = CharSet.Unicode)]
 public static extern bool InstallLayoutOrTip(string profile, uint flags);
