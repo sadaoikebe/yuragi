@@ -1,4 +1,4 @@
-"""The management window: word registration, learning, settings, status.
+"""The management window: word registration, learning, settings, keys, status.
 
   python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE] [--dict-dir DIR]
 
@@ -28,7 +28,8 @@ import os
 from pathlib import Path
 import sys
 
-from . import broker_client, config, learning_admin, personal
+from . import broker_client, config, keymap, learning_admin, personal
+from .keymap_ui import KeyTab
 from .learning import LearningStore
 
 POS_NAMES = list(personal.POS_IDS)
@@ -71,6 +72,7 @@ LEARNING_STATES = {"on": "学習中", "off": "使わない設定"}
 ENGINE_STATES = {"ready": "動作中", "starting": "起動中", "down": "停止中"}
 WARNINGS = {
     "lm": "言語モデルを使えません（辞書だけで変換しています）",
+    "keymap": "キー設定を読み込めませんでした（「キー」タブを確認してください）",
 }
 STOP_REASONS = {
     "exited": "変換エンジンが繰り返し止まった（理由は記録のフォルダの engine.log）",
@@ -219,6 +221,24 @@ class AdminModel:
             return Outcome(True, f"「{label}」は既定値のままです")
         return Outcome(True, f"「{label}」を既定値に戻しました。{RESTART_NOTE}")
 
+    def key_settings(self) -> keymap.KeymapSettings:
+        return keymap.load_keymap(self.runtime_dir, list_presets=True)
+
+    def save_keys(self, settings: keymap.KeymapSettings) -> Outcome:
+        try:
+            settings.save(self.runtime_dir)
+        except (OSError, ValueError) as exc:
+            return Outcome(False, f"キー設定を保存できませんでした（{exc}）")
+        reply = broker_client.reload_keymap() or {}
+        result = reply.get("keymap_reload")
+        if result == "applied":
+            return Outcome(True, "キー設定を保存して反映しました")
+        if result == "failed":
+            return Outcome(False, f"保存しましたが、反映できませんでした（{reply.get('reason', '理由不明')}）")
+        if result == "deferred":
+            return Outcome(True, "キー設定を保存しました。エンジンの次の起動時に反映します")
+        return Outcome(True, "キー設定を保存しました。すぐに効かない場合は、エンジンを起動し直してください")
+
     # -- status ----------------------------------------------------------------
 
     def status_rows(self) -> list[tuple[str, str]]:
@@ -325,7 +345,8 @@ class AdminWindow:
         self.message_label = ttk.Label(root, textvariable=self.message, anchor="w")
         self.message_label.pack(fill="x", padx=self.px(8), pady=(0, self.px(6)))
         for title, build in (("単語登録", self._words_tab), ("学習", self._learning_tab),
-                             ("設定", self._settings_tab), ("状態", self._status_tab)):
+                             ("設定", self._settings_tab), ("キー", self._keys_tab),
+                             ("状態", self._status_tab)):
             frame = ttk.Frame(notebook, padding=self.px(6))
             build(frame)
             notebook.add(frame, text=title)
@@ -362,17 +383,23 @@ class AdminWindow:
             tcl.call("ttk::combobox::Unpost", str(box))
 
     # helpers
-    def _table(self, parent, columns, widths):
+    def _table(self, parent, columns, widths, *, horizontal=False):
         ttk = self.ttk
         frame = ttk.Frame(parent)
         tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse")
         for col, width in zip(columns, widths):
             tree.heading(col, text=col)
-            tree.column(col, width=self.px(width), stretch=col == columns[-1])
+            tree.column(col, width=self.px(width), stretch=not horizontal and col == columns[-1])
         bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=bar.set)
-        tree.pack(side="left", fill="both", expand=True)
-        bar.pack(side="right", fill="y")
+        tree.grid(row=0, column=0, sticky="nsew")
+        bar.grid(row=0, column=1, sticky="ns")
+        if horizontal:
+            scroll = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+            tree.configure(xscrollcommand=scroll.set)
+            scroll.grid(row=1, column=0, sticky="ew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
         frame.pack(fill="both", expand=True)
         return tree
 
@@ -519,6 +546,9 @@ class AdminWindow:
                    ).pack(side="right", padx=self.px(6))
         self.status_tree = self._table(frame, ("項目", "内容"), (240, 560))
 
+    def _keys_tab(self, frame):
+        self.keys_frame, self.keys_tab = frame, KeyTab(self, frame)
+
     def refresh(self):
         m = self.model
         self._fill(self.words_tree, [(w.reading, w.surface, w.pos, w.cost) for w in m.words()])
@@ -529,6 +559,8 @@ class AdminWindow:
         self._setting_rows = {str(i): r for i, r in enumerate(rows)}
         if self.notebook.select() == str(self.status_frame):
             self._refresh_status()
+        elif self.notebook.select() == str(self.keys_frame):
+            self.keys_tab.open()
 
     def _refresh_status(self):
         # Hashes the dictionary files and asks the broker: only when looked at.

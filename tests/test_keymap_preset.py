@@ -23,6 +23,7 @@ raise SystemExit(main(["--data-dir", str(directory)]))
 class BundledPresetTest(unittest.TestCase):
     def test_invalid_distribution_reports_fatal_before_ready(self):
         deep = sys.getrecursionlimit() + 100
+        header = b'{"name":"ms-ime","label":"MS-IME","bindings":'
         cases = {
             "missing": None,
             "invalid UTF-8": b'\xff',
@@ -30,11 +31,11 @@ class BundledPresetTest(unittest.TestCase):
             "non-JSON number": b'{"version":NaN,"bindings":[]}',
             "deep nesting": b'[' * deep + b'0' + b']' * deep,
             "missing bindings": b'{}',
-            "malformed row": b'{"bindings":[["composing",13,"commit"]]}',
-            "unknown command": b'{"bindings":[["composing","Enter","unknown"]]}',
-            "bad chord": b'{"bindings":[["composing","NoSuchKey","commit"]]}',
-            "forbidden assignment": b'{"bindings":[["composing","Enter","commit"],'
-                                    b'["composing","A","commit"]]}',
+            "malformed row": header + b'[["composing",13,"commit"]]}',
+            "unknown command": header + b'[["composing","Enter","unknown"]]}',
+            "bad chord": header + b'[["composing","NoSuchKey","commit"]]}',
+            "forbidden assignment": header + b'[["composing","Enter","commit"],'
+                                             b'["composing","A","commit"]]}',
         }
         with tempfile.TemporaryDirectory() as directory:
             preset = Path(directory) / "ms-ime.json"

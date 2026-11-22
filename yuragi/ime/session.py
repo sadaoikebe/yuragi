@@ -582,12 +582,13 @@ class ImeSession:
             return self._then(self._finish_pending(), self._commit)
         alnum = self._alnum_continues()
         if self.input_mode == "full_alnum" and not self._alnum_held and chord == SPACE:
-            return self._then(self._finish_pending(), lambda: self._ingest([Literal("　")]))
+            return self._then(self._finish_pending(), lambda: self._space_in_alnum(Literal("　")))
         if alnum and chord == SPACE:
             pending = self._finish_pending()
             self._forget_fsm_down(chord.vk)
-            tap = [Literal(" ", alnum=True)] if self._alnum_held else [ThumbTap()]
-            return self._then(pending, lambda: self._ingest(tap))
+            if self._alnum_held:
+                return self._then(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
+            return self._then(pending, lambda: self._ingest([ThumbTap()]))
         literal = literal_character(chord.vk, bool(chord.mods & SHIFT))
         if self.input_mode == "full_alnum" and not self._alnum_held and kind == "M":
             literal = to_full_width(alnum_character(chord.vk, bool(chord.mods & SHIFT)))
@@ -606,6 +607,12 @@ class ImeSession:
             insert = self._commit(reset_input=False)
         self._fsm_down.add(chord.vk)
         return insert + (self._ingest(self.fsm.on_down(kind, key, now_ms)) or "") or None
+
+    def _space_in_alnum(self, literal: Literal) -> str | None:
+        command = self.keymap.lookup(self.phase, SPACE)
+        if command == default_keymap().lookup(self.phase, SPACE):
+            return self._ingest([literal])
+        return self._run_command(command)
 
     def _forget_fsm_down(self, vk: int) -> None:
         if vk in self._fsm_down:

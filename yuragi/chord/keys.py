@@ -115,6 +115,7 @@ _NAMES = {
     0x6E: "NumpadDecimal", 0x6F: "NumpadDivide",
 }
 _VKS = {name.lower(): vk for vk, name in _NAMES.items()}
+KEY_NAMES = tuple(_NAMES.values())
 
 
 @dataclass(frozen=True, slots=True)

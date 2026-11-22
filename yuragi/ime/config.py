@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 DEFAULT_RUNTIME_DIR = Path.home() / ".yuragi-ime"  # the user's data: config.json, logs, ...
 CONFIG_NAME = "config.json"
@@ -54,13 +55,21 @@ def load(path: Path) -> dict:
         return dict(DEFAULTS)
 
 
-def _write(path: Path, raw: dict) -> None:
+def write_json(path: Path, raw: dict) -> None:
     """Replace the file atomically."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                         prefix=path.name + ".", suffix=".tmp", delete=False) as f:
+            tmp = Path(f.name)
+            json.dump(raw, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 def set_setting(path: Path, key: str, value) -> None:
@@ -70,7 +79,7 @@ def set_setting(path: Path, key: str, value) -> None:
         raise ValueError(f"{key} is one of {list(SETTINGS[key])}, not {value!r}")
     raw = stored(path)
     raw[key] = value
-    _write(path, raw)
+    write_json(path, raw)
 
 
 def unset_setting(path: Path, key: str) -> bool:
@@ -79,5 +88,5 @@ def unset_setting(path: Path, key: str) -> bool:
     if key not in raw:
         return False
     del raw[key]
-    _write(path, raw)
+    write_json(path, raw)
     return True

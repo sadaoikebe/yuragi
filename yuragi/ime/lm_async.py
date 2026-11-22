@@ -24,6 +24,7 @@ import threading
 import time
 
 from .server import apply_op, set_reply_commit, snapshot, suggestion_reply
+from .keymap import Keymap
 from .session import ConversionRequest, ImeSession
 from .zenz import KanaRun
 
@@ -272,8 +273,9 @@ class ConnectionPipeline:
         self.prefetch = prefetch
         self.prefetch_delay_ms = prefetch_delay_ms
         self.clock = clock
-        self.queue: deque[dict] = deque()
+        self.queue: deque[tuple[dict, Keymap]] = deque()
         self.deferred_down: dict | None = None
+        self.await_keymap: Keymap | None = None
         self.last_t = 0
         self.job: Job | None = None  # the awaited conversion's job
         self.spec: Job | None = None  # the last prefetch
@@ -288,11 +290,23 @@ class ConnectionPipeline:
         if op == "reset" or (op == "set_direct" and msg["direct"] != self.sess.direct
                              and msg.get("commit") is not True):
             self._abandon()
+        keymap = self.sess.keymap
+        # Keep the rules at acceptance while the LM delays execution.
+        queued = (msg, keymap)
         if (self.sess._await is not None and op == "timeout"
-                and self.queue and self.queue[-1].get("op") == "timeout"):
-            self.queue[-1] = msg  # consecutive timeouts: the last one is equivalent
+                and self.queue and self.queue[-1][0].get("op") == "timeout"
+                and self.queue[-1][1] is keymap):
+            self.queue[-1] = queued  # consecutive timeouts with the same rules
         else:
-            self.queue.append(msg)
+            self.queue.append(queued)
+        try:
+            return self._drain(msg)
+        finally:
+            self.sess.keymap = keymap
+
+    def _drain(self, msg: dict) -> dict:
+        current_keymap = self.sess.keymap
+        op = msg.get("op")
         commit, grace = "", False
         eat = key_global = None
         resolved_keys = []
@@ -319,21 +333,26 @@ class ConnectionPipeline:
                 grace = False
                 if outcome is PENDING:
                     break
+                assert self.await_keymap is not None
+                self.sess.keymap = self.await_keymap
                 commit += self.sess.finish_conversion(outcome)
                 if self.deferred_down is not None:
                     m, self.deferred_down = self.deferred_down, None
                     key_result(m)
                 self.job = None
+                self.await_keymap = None
                 continue
             if not self.queue:
                 break
-            m = self.queue.popleft()
+            m, self.sess.keymap = self.queue.popleft()
             self.sess.lm_deferred = self.worker.available()
             commit += apply_op(self.sess, m)
             key_result(m)
             if self.sess._await is not None:
+                self.await_keymap = self.sess.keymap
                 self._submit_convert()
                 grace = True
+        self.sess.keymap = current_keymap
         self._prefetch()
         deferred = op == "down" and eat is None
         if deferred:
@@ -360,6 +379,7 @@ class ConnectionPipeline:
         self.worker.cancel_owner(self)
         self.queue.clear()
         self.deferred_down = None
+        self.await_keymap = None
         self.sess._await = None
         self.sess._continuation = None
         self.job = self.spec = None

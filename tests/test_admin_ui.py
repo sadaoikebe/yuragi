@@ -10,6 +10,7 @@ from unittest import mock
 
 from yuragi.ime import admin_ui, broker_client
 from yuragi.ime.admin_ui import SETTINGS, AdminModel
+from yuragi.chord.keys import Chord
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import read_words
@@ -53,6 +54,20 @@ class SettingsTest(Base):
         self.assertTrue(self.model.set_setting("lm_rescore", "使わない").ok)
         self.assertEqual(json.loads(self.config.read_text(encoding="utf-8")),
                          {"lm_rescore": False})
+
+    def test_first_key_edit_preserves_the_legacy_toggle_after_save(self):
+        (self.dir / "tip.json").write_text('{"toggle_vk":32,"toggle_mods":["ctrl"]}', encoding="utf-8")
+        draft = self.model.key_settings()
+        draft.begin_custom()
+        draft.overrides["composing", Chord.parse("Enter")] = "cancel"
+        with mock.patch.object(broker_client, "reload_keymap",
+                               return_value={"keymap_reload": "applied"}):
+            self.assertTrue(self.model.save_keys(draft).ok)
+        (self.dir / "tip.json").unlink()
+        table = self.model.key_settings().compile()
+        self.assertEqual(table.lookup("composing", Chord.parse("Ctrl+Space")).id, "ime_toggle")
+        self.assertIsNone(table.lookup("empty", Chord.parse("Alt+`")))
+        self.assertEqual(table.lookup("composing", Chord.parse("Enter")).id, "cancel")
 
 class FakeVar:
     def __init__(self, value=""):

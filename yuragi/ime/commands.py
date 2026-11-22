@@ -32,6 +32,7 @@ class Command:
     run: Callable[[ImeSession], str | None] | None = None
     keeps_resizing: bool = False
     until: str | None = None
+    passes_at_edge: bool = False
 
 
 COMMANDS = MappingProxyType({c.id: c for c in (
@@ -65,7 +66,7 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("commit_to_focus", "注目文節まで確定", CONVERTED),
     Command("delete_before", "前字削除", COMPOSING | CONVERTED, run=lambda s: s._delete_before()),
     Command("delete_before_or_pass", "前字削除（文全体の先頭で確定して通す）", EDITING,
-            run=lambda s: s._delete_at_cursor(before=True, pass_at_edge=True)),
+            run=lambda s: s._delete_at_cursor(before=True, pass_at_edge=True), passes_at_edge=True),
     Command("alnum_mode", "英数の続き", INPUT, run=lambda s: s._hold_alnum(), keeps_resizing=True),
     Command("cycle_kana_mode", "かな入力の字種を切り替え", EMPTY,
             run=lambda s: s._cycle_kana_mode()),
@@ -76,13 +77,13 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("cycle_alnum_width", "英数の幅を切り替え", INPUT,
             run=lambda s: s._cycle_jis_script(alnum=True)),
     Command("delete_after", "後字削除", COMPOSING | EDITING,
-            run=lambda s: s._delete_at_cursor(before=False, pass_at_edge=True)),
+            run=lambda s: s._delete_at_cursor(before=False, pass_at_edge=True), passes_at_edge=True),
     Command("cursor_left", "カーソルを左へ", COMPOSING | EDITING, run=lambda s: s._move_cursor(-1)),
     Command("cursor_right", "カーソルを右へ", COMPOSING | EDITING, run=lambda s: s._move_cursor(1)),
     Command("cursor_left_or_pass", "カーソルを左へ（文全体の先頭で確定して通す）", EDITING,
-            run=lambda s: s._move_cursor(-1, pass_at_edge=True)),
+            run=lambda s: s._move_cursor(-1, pass_at_edge=True), passes_at_edge=True),
     Command("cursor_right_or_pass", "カーソルを右へ（文全体の末尾で確定して通す）", EDITING,
-            run=lambda s: s._move_cursor(1, pass_at_edge=True)),
+            run=lambda s: s._move_cursor(1, pass_at_edge=True), passes_at_edge=True),
     Command("cursor_home", "カーソルを先頭へ", COMPOSING | EDITING, run=lambda s: s._cursor_edge(end=False)),
     Command("cursor_end", "カーソルを末尾へ", COMPOSING | EDITING, run=lambda s: s._cursor_edge(end=True)),
     Command("cancel", "全消去", COMPOSING, run=lambda s: s._cancel()),

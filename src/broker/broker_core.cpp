@@ -150,6 +150,11 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     }
     if (op == "set_direct") Flag(msg, "direct", client.direct);
     if (state_ != EngineState::Ready) {
+        if (op == "reload_keymap") {
+            platform_.WriteClient(id, "{\"seq\":" + std::to_string(seq) +
+                                      ",\"keymap_reload\":\"deferred\"}");
+            return;
+        }
         // DESIGN「使えない間の打鍵」: nothing is held; the TIP lets keys through until the engine is ready.
         platform_.WriteClient(id, client.passes ? SeqState(seq, ClientState())
                                                 : SeqPass(seq, client.direct));
@@ -181,7 +186,11 @@ void Broker::OnEngineLine(const std::string& line) {
         return;
     }
     if (msg.Get("event").text == "warning") {
-        Warn(msg.Get("warning").text);
+        const std::string& code = msg.Get("warning").text;
+        bool active = true;
+        Flag(msg, "active", active);
+        if (active) Warn(code);
+        else warnings_.erase(std::remove(warnings_.begin(), warnings_.end(), code), warnings_.end());
         return;
     }
     if (msg.Get("event").text == "keymap") {

@@ -115,6 +115,13 @@ class Channel:
         log(f"warning {code}")
         self.send({"event": "warning", "warning": code})
 
+    def clear_warning(self, code: str) -> None:
+        with self._lock:
+            if code not in self._warnings:
+                return
+            self._warnings.remove(code)
+        self.send({"event": "warning", "warning": code, "active": False})
+
     def ready(self, keymap: dict | None = None) -> None:
         with self._lock:
             self._ready = True
@@ -188,6 +195,7 @@ class Connection:
 class Engine:
     def __init__(self, channel: Channel, args: argparse.Namespace):
         self.channel = channel
+        self.data_dir = getattr(args, "data_dir", DEFAULT_DATA_DIR)
         self.keymap = None
         self.connections: dict[object, Connection] = {}
         self.loaded = None
@@ -208,9 +216,9 @@ class Engine:
                 mozc_dict.CACHE = args.cache_dir / mozc_dict.CACHE.name
             # Imported after the directories are set: some modules read them at import.
             from yuragi.ime import config, server
-            from yuragi.ime.keymap import startup_keymap
+            from yuragi.ime.keymap import load_keymap
             import yuragi.ime.lm_async  # noqa: F401  (its worker starts after the warm-up)
-            self.keymap = startup_keymap(args.data_dir)
+            self.keymap = self.read_keymap(load_keymap(self.data_dir))
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
             fatal("program-files-unreadable")
@@ -311,10 +319,12 @@ class Engine:
 
         Then the LM worker starts and converts the same input before it is used."""
         from yuragi.ime import server
+        from yuragi.ime.keymap import default_keymap
         from yuragi.ime.lm_async import LmWorker
         from yuragi.ime.server import process_request
         start = time.perf_counter()
         sess = self.new_session()
+        sess.keymap = default_keymap()  # the scripted conversion always uses Space
         t = 0
         for vk in WARM_KEYS:
             process_request(sess, {"op": "down", "vk": vk, "t": t})
@@ -355,6 +365,27 @@ class Engine:
         return ConnectionPipeline(sess, self.worker, grace_ms=grace,
                                   deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
                                   prefetch_delay_ms=s.lm_prefetch_delay_ms, timing=s.lm_timing)
+
+    def read_keymap(self, settings):
+        for note in settings.notes:
+            log(f"keymap: {note}")
+        if settings.error:
+            log(f"keymap: {settings.error}")
+            self.channel.warning("keymap")
+        return settings.compile()
+
+    def reload_keymap(self) -> dict:
+        from yuragi.ime.keymap import load_keymap
+        settings = load_keymap(self.data_dir)
+        keymap = self.read_keymap(settings)
+        if settings.error:
+            return {"keymap_reload": "failed", "reason": settings.error}
+        self.keymap = keymap
+        for connection in self.connections.values():
+            connection.sess.keymap = keymap
+        self.channel.send({"event": "keymap", "keymap": keymap.eat_table()})
+        self.channel.clear_warning("keymap")
+        return {"keymap_reload": "applied"}
 
     # -- serving -----------------------------------------------------------------
     def serve(self, stream) -> None:
@@ -428,7 +459,14 @@ class Engine:
         """One request; whatever goes wrong inside stays inside this one (DESIGN「要求 1 件ごとの防壁」)."""
         sid, seq = msg.get("sid"), msg.get("seq")
         connection = self.connections.get(sid)
-        if connection is None:
+        if msg.get("op") == "reload_keymap":
+            try:
+                reply = self.reload_keymap()
+            except (OSError, ValueError) as exc:
+                log(f"keymap: {where(exc)}")
+                self.channel.warning("keymap")
+                reply = {"keymap_reload": "failed", "reason": "キー設定を読み直せませんでした"}
+        elif connection is None:
             log(f"request for a session that is not open (op {msg.get('op')!r})")
             reply = {"error": True}
         else:

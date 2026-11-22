@@ -1,18 +1,23 @@
-"""The bundled keymap, compiled once for lookup by phase and chord."""
+"""Keymap presets and user overrides, compiled for lookup by phase and chord."""
 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass, field
 from functools import cache
 from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
-from typing import Iterable
-
-from yuragi.chord.keys import ALT, MODIFIER_VKS, VK_OEM_3, WIN, Chord, modifier_bits
+from yuragi.chord.keys import ALT, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, modifier_bits
+from . import config
 from .commands import COMMANDS, Command, INPUT
 
 PRESET_PATH = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime.json"
+DEFAULT_PRESET = "ms-ime"
+KEYMAP_NAME = "keymap.json"
+CUSTOM = "custom"
+DEFAULT_TOGGLE = Chord(VK_OEM_3, ALT)
 
 PARENT = {
     "direct": "global",
@@ -25,20 +30,58 @@ PARENT = {
     "editing": "converting",
 }
 
+type BindingKey = tuple[str, Chord]
+type Bindings = dict[BindingKey, str | None]
+
+
+def chord_allowed(phase: str, chord: Chord) -> bool:
+    return not (
+        (chord.alt_only and phase != "global")
+        or (chord.character and phase in ("empty", "composing"))
+        or (chord.typing and phase in ("global", "direct"))
+    )
+
+
+def command_allowed(phase: str, chord: Chord, command: Command) -> bool:
+    if phase not in command.phases:
+        return False
+    # A ThumbTap runs after down. Commands that need to return the original
+    # stroke or ask the TIP to act require a regular key request.
+    effective = COMMANDS[command.until] if command.until else command
+    return chord != SPACE or (
+        effective.where == "engine" and effective.key == "eat"
+        and not (phase == "editing" and effective.passes_at_edge)
+    )
+
+
+def implemented(command: Command) -> bool:
+    return command.run is not None or command.where == "tip"
+
+
+def available(command: Command) -> bool:
+    return implemented(command) or command.until is not None
+
+
+def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
+    global_keys = {chord for (phase, chord), command_id in overrides.items()
+                   if phase == "global" and command_id is not None
+                   and implemented(COMMANDS[command_id])}
+    rows = {key: command for key, command in base.items()
+            if key[0] == "global" or key[1] not in global_keys}
+    for key, command in overrides.items():
+        if command is None:
+            rows.pop(key, None)
+        else:
+            rows[key] = command
+    return rows
+
 
 class Keymap:
-    def __init__(self, bindings: Iterable[tuple[str, str, str]]):
+    def __init__(self, bindings: Bindings):
         rows: dict[str, dict[int, Command]] = {phase: {} for phase in (*PARENT, "global")}
-        for phase, name, command_id in bindings:
-            chord = Chord.parse(name)
-            command = COMMANDS.get(command_id)
-            if command is None:
-                raise ValueError(f"unknown command: {command_id}")
-            if (phase not in command.phases or (chord.alt_only and phase != "global")
-                    or (chord.character and phase in ("global", "direct", "empty", "composing"))
-                    or (chord.typing and phase in ("global", "direct"))):
-                raise ValueError(f"invalid binding: {phase}, {name}, {command_id}")
-            if command.run is None and command.where == "engine":
+        for (phase, chord), command_id in bindings.items():
+            command = COMMANDS[command_id]
+            if not implemented(command):
                 if command.until is None:
                     continue
                 command = COMMANDS[command.until]
@@ -90,57 +133,183 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
 
 
-@cache
-def _default_bindings() -> tuple[tuple[str, str, str], ...]:
-    """Read the bundled preset's rows for compilation by Keymap."""
+def _read_object(path: Path) -> dict:
     try:
-        preset = json.loads(PRESET_PATH.read_text(encoding="utf-8"),
-                            parse_constant=_reject_json_constant)
+        raw = json.loads(path.read_text(encoding="utf-8-sig"), parse_constant=_reject_json_constant)
     except RecursionError as exc:
-        raise ValueError("bundled preset is nested too deeply") from exc
-    if not isinstance(preset, dict) or not isinstance(preset.get("bindings"), list):
-        raise ValueError("expected an object with a bindings array")
-    rows = []
-    for row in preset["bindings"]:
-        if (not isinstance(row, list) or len(row) != 3
-                or not all(isinstance(field, str) for field in row)):
-            raise ValueError("expected a binding with three strings")
-        phase, chord, command = row
-        rows.append((phase, chord, command))
-    return tuple(rows)
+        raise ValueError("JSON の入れ子が深すぎます") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("JSON オブジェクトが必要です")
+    return raw
+
+
+def _read_binding(row, *, allow_remove: bool) -> tuple[BindingKey, str | None]:
+    if (not isinstance(row, list) or len(row) != 3
+            or not isinstance(row[0], str) or not isinstance(row[1], str)
+            or not (isinstance(row[2], str) or (allow_remove and row[2] is None))):
+        raise ValueError("[局面, キー, 機能] の形式ではありません")
+    phase, name, command_id = row
+    if phase not in PARENT and phase != "global":
+        raise ValueError(f"知らない局面: {phase!r}")
+    try:
+        chord = Chord.parse(name)
+    except ValueError as exc:
+        raise ValueError(f"読めないキー: {name!r}") from exc
+    if not chord_allowed(phase, chord):
+        raise ValueError(f"{name} は {phase} に割り当てられません")
+    if command_id is not None:
+        command = COMMANDS.get(command_id)
+        if command is None:
+            raise ValueError(f"知らない機能: {command_id!r}")
+        if not command_allowed(phase, chord, command):
+            raise ValueError(f"{command.label} は {phase} の {name} に割り当てられません")
+    return (phase, chord), command_id
+
+
+@dataclass(frozen=True)
+class Preset:
+    label: str
+    bindings: Bindings
+
+
+def _read_preset(name: str) -> Preset:
+    if name == DEFAULT_PRESET:
+        path = PRESET_PATH
+    elif name != CUSTOM and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
+        path = PRESET_PATH.with_name(name + ".json")
+    else:
+        raise ValueError(f"知らないプリセット: {name!r}")
+    raw = _read_object(path)
+    label, bindings = raw.get("label"), raw.get("bindings")
+    if raw.get("name") != name or not isinstance(label, str) or not isinstance(bindings, list):
+        raise ValueError(f"プリセット {name} の形式が不正です")
+    return Preset(label, dict(_read_binding(row, allow_remove=False) for row in bindings))
+
+
+@cache
+def _default_preset() -> Preset:
+    return _read_preset(DEFAULT_PRESET)
 
 
 @cache
 def default_keymap() -> Keymap:
-    return Keymap(_default_bindings())
+    return Keymap(_default_preset().bindings)
 
 
-def startup_keymap(data_dir: Path) -> Keymap:
+def _legacy_overrides(data_dir: Path) -> Bindings:
     """Carry the previous tip.json toggle through to the negotiated table."""
-    base = default_keymap()
     try:
-        config = json.loads((data_dir / "tip.json").read_text(encoding="utf-8-sig"))
+        tip = _read_object(data_dir / "tip.json")
     except (OSError, ValueError):
-        return base
-    if not isinstance(config, dict):
-        return base
-    vk = config.get("toggle_vk", VK_OEM_3)
-    mods = config.get("toggle_mods", ["alt"])
+        return {}
+    vk = tip.get("toggle_vk", VK_OEM_3)
+    mods = tip.get("toggle_mods", ["alt"])
     if type(vk) is not int or not (0 < vk <= 0xFF) or vk in MODIFIER_VKS:
-        return base
+        return {}
     if not isinstance(mods, list) or any(m not in ("shift", "ctrl", "alt") for m in mods):
-        return base
+        return {}
     chord = Chord(vk, modifier_bits(mods, set()))
-    if chord == Chord(VK_OEM_3, ALT) or chord.typing:
-        return base
+    if chord == DEFAULT_TOGGLE or chord.typing:
+        return {}
     try:
         Chord.parse(str(chord))
     except ValueError:
-        return base
-    rows = (row for row in _default_bindings()
-            if row != ("global", "Alt+`", "ime_toggle")
-            and (row[0] == "global" or Chord.parse(row[1]) != chord))
-    return Keymap((*rows, ("global", str(chord), "ime_toggle")))
+        return {}
+    return {("global", DEFAULT_TOGGLE): None, ("global", chord): "ime_toggle"}
+
+
+@dataclass
+class KeymapSettings:
+    presets: dict[str, Preset]
+    use: str = DEFAULT_PRESET
+    base: str | None = None
+    overrides: Bindings = field(default_factory=dict)
+    legacy: Bindings = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def bindings(self) -> Bindings:
+        if self.use == CUSTOM:
+            return merged_bindings(self.presets[self.base].bindings, self.overrides)
+        return merged_bindings(self.presets[self.use].bindings, self.legacy)
+
+    def compile(self) -> Keymap:
+        if self.use == DEFAULT_PRESET and not self.legacy:
+            return default_keymap()
+        return Keymap(self.bindings())
+
+    def begin_custom(self) -> None:
+        if self.use != CUSTOM:
+            self.base, self.use = self.use, CUSTOM
+            self.overrides = self.legacy.copy()
+            self.legacy.clear()
+
+    def save(self, data_dir: Path) -> None:
+        raw = {"version": 1, "use": self.use}
+        if self.base is not None:
+            raw["custom"] = {"base": self.base, "overrides": [
+                [phase, str(chord), self.overrides[phase, chord]]
+                for phase, chord in sorted(self.overrides, key=lambda key: (key[0], str(key[1])))
+            ]}
+        config.write_json(data_dir / KEYMAP_NAME, raw)
+
+
+def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings:
+    """Use the same parser for the engine and the editor; only the engine applies it to typing."""
+    settings = KeymapSettings({DEFAULT_PRESET: _default_preset()})
+
+    def load_preset(name) -> str:
+        if not isinstance(name, str):
+            raise ValueError("プリセット名がありません")
+        if name not in settings.presets:
+            try:
+                settings.presets[name] = _read_preset(name)
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"プリセット {name!r} を使えません ({exc})") from exc
+        return name
+
+    try:
+        raw = _read_object(data_dir / KEYMAP_NAME)
+    except FileNotFoundError:
+        settings.legacy = _legacy_overrides(data_dir)
+    except (OSError, ValueError) as exc:
+        settings.error = f"{KEYMAP_NAME} を読めません ({exc})"
+    else:
+        try:
+            use = raw.get("use", DEFAULT_PRESET)
+            if use == CUSTOM or "custom" in raw:
+                try:
+                    custom = raw.get("custom")
+                    if not isinstance(custom, dict) or not isinstance(custom.get("overrides"), list):
+                        raise ValueError("ユーザー定義の形式が不正です")
+                    settings.base = load_preset(custom.get("base"))
+                    for index, row in enumerate(custom["overrides"], 1):
+                        try:
+                            key, command = _read_binding(row, allow_remove=True)
+                        except ValueError as exc:
+                            settings.notes.append(f"差分 {index} 行目: {exc}")
+                            continue
+                        if command is not None and not available(COMMANDS[command]):
+                            continue
+                        if key in settings.overrides:
+                            settings.notes.append(f"差分 {index} 行目: 同じ局面とキーの前の行を無視しました")
+                        settings.overrides[key] = command
+                except ValueError as exc:
+                    if use == CUSTOM:
+                        raise
+                    settings.notes.append(str(exc))
+            settings.use = CUSTOM if use == CUSTOM else load_preset(use)
+        except ValueError as exc:
+            settings.error = str(exc)
+
+    if list_presets:
+        for path in sorted(PRESET_PATH.parent.glob("*.json")):
+            if path.stem not in settings.presets:
+                try:
+                    load_preset(path.stem)
+                except ValueError:
+                    continue
+    return settings
 
 
 if __name__ == "__main__":

@@ -1,17 +1,16 @@
-"""The management tools' line to the broker (DESIGN「メニュー」): its state, and "retry".
+"""The management tools' line to the broker for status, restart and keymap reload.
 
 The broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session> (Windows only;
-elsewhere there is no broker). These functions connect,
-say hello as a TIP would, and either read the state or ask for a retry (which
-also restarts a running engine, so that new settings are read). Nothing here
-starts anything.
+elsewhere there is no broker). These functions connect and say hello as a TIP
+would. A retry restarts the engine; a keymap reload keeps its sessions.
+Nothing here starts a broker.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-import threading
+import time
 
 HELLO = {"op": "hello", "proto": 1, "tag": "manage", "bits": 64}
 
@@ -59,29 +58,36 @@ def pipe_address() -> str:
 
 class _Connection:
     def __init__(self, address: str, timeout: float):
+        import _winapi
+        import msvcrt
         self.timeout = timeout
         self.file = open(address, "r+b", buffering=0)  # FileNotFoundError: no broker
+        self.handle = msvcrt.get_osfhandle(self.file.fileno())
+        self.peek = _winapi.PeekNamedPipe
+        self.buffer = b""
 
     def send(self, msg: dict) -> None:
         self.file.write((json.dumps(msg) + "\n").encode("utf-8"))
 
-    def read_line(self) -> dict | None:
-        """One line within the timeout; None when none came."""
-        result: list = []
-
-        def read():
-            buffer = b""
-            while not buffer.endswith(b"\n"):
-                chunk = self.file.read(4096)
+    def read_line(self, seq: int | None = None) -> dict | None:
+        """Read one reply within the timeout, skipping events when waiting for a seq."""
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            if b"\n" in self.buffer:
+                line, self.buffer = self.buffer.split(b"\n", 1)
+                reply = json.loads(line)
+                if isinstance(reply, dict) and (seq is None or reply.get("seq") == seq):
+                    return reply
+                continue
+            available, _ = self.peek(self.handle)
+            if available:
+                chunk = self.file.read(min(4096, available))
                 if not chunk:
-                    return
-                buffer += chunk
-            result.append(json.loads(buffer.split(b"\n", 1)[0]))
-
-        reader = threading.Thread(target=read, daemon=True)
-        reader.start()
-        reader.join(self.timeout)
-        return result[0] if result else None
+                    return None
+                self.buffer += chunk
+            else:
+                time.sleep(0.005)
+        return None
 
     def close(self) -> None:
         self.file.close()
@@ -126,6 +132,22 @@ def retry(address: str | None = None, timeout: float = 1.0) -> bool:
         return True
     except OSError:
         return False
+    finally:
+        connection.close()
+
+
+def reload_keymap(address: str | None = None, timeout: float = 1.0) -> dict | None:
+    connection = _connect(address, timeout)
+    if connection is None:
+        return None
+    try:
+        connection.send(HELLO)
+        if connection.read_line() is None:
+            return None
+        connection.send({"op": "reload_keymap", "seq": 1})
+        return connection.read_line(seq=1)
+    except (OSError, ValueError):
+        return None
     finally:
         connection.close()
 
