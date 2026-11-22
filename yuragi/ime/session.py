@@ -1282,6 +1282,38 @@ class ImeSession:
         self._clear_cands()
         return text
 
+    def _commit_one_char(self) -> str:
+        """Shift+↓ before conversion: commit the first press (one kana or literal).
+
+        MS-IME commits the first unit it typed (one romaji syllable, one
+        letter or digit); a press is that unit here. 英数の続き started by
+        Shift+letter ends; under Shift+CapsLock everything is committed.
+        """
+        if not self.segments:
+            return ""
+        kept = [i for i, t in enumerate(self.tokens)
+                if to_lattice_token(t, self._table) is not None]
+        if self._alnum_held:
+            return self._commit(reset_input=False)
+        head = self.segments[0]
+        text = head.selected.reading[0]  # the typed kana, not the live conversion
+        if not head.literal and self.input_mode == "katakana":
+            text = chr(ord(text) + 0x60) if "ぁ" <= text <= "ゖ" else text
+        self._note_commit(text)
+        if len(kept) == 1:
+            self._clear_input()
+            return text
+        self._partial = True
+        chosen = Plan(self._lattice()).directions(0, 1, head.selected.reading[0])
+        del self.tokens[:kept[1]]
+        remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
+        for press, dirs in chosen.items():
+            if press in remaining and dirs and dirs != SIDES:
+                self._carry[press] = dirs
+        self._end_alnum()
+        self._refresh()
+        return text
+
     def _note_commit(self, text: str, last: Segment | None = None, *,
                      standalone: bool = False) -> None:
         """Advance the current input and remember what this connection committed."""

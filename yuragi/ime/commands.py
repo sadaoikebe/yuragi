@@ -52,7 +52,7 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("predict", "予測候補", COMPOSING, run=lambda s: s._predict_key()),
     Command("commit", "全確定", INPUT, run=lambda s: s._commit()),
     Command("commit_first_segment", "先頭の文節を確定", INPUT, run=lambda s: s._commit_prefix()),
-    Command("commit_one_char", "先頭の一字を確定", COMPOSING, until="noop"),
+    Command("commit_one_char", "先頭の一字を確定", COMPOSING, run=lambda s: s._commit_one_char()),
     Command("commit_to_focus", "注目文節まで確定", CONVERTED),
     Command("delete_before", "前字削除", COMPOSING, run=lambda s: s._delete_before()),
     Command("alnum_mode", "英数の続き", INPUT, run=lambda s: s._hold_alnum(), keeps_resizing=True),

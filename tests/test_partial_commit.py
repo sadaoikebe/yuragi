@@ -309,6 +309,47 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(k.tap(VK_CAPITAL, ["shift"])["phase"], "resizing")
         self.assertEqual(k.convert()["phase"], "converting")
 
+    # Shift+↓ before conversion commits the first press: MS-IME commits the
+    # first unit it typed (ms-ime.md §1.5), shown as kana, not the live conversion.
+    def test_shift_down_commits_the_input_one_press_at_a_time(self):
+        k = Keys(self.session())
+        for letter in "kan":
+            k.plain(letter)
+        replies = [k.tap(VK_DOWN, ["shift"]) for _ in range(3)]
+        self.assertEqual([(r["commit"], r["phase"]) for r in replies],
+                         [("き", "composing"), ("う", "composing"), ("め", "empty")])
+        k.s.input_mode = "katakana"
+        k.plain("k")
+        k.plain("a")
+        self.assertEqual(k.tap(VK_DOWN, ["shift"])["commit"], "キ")
+
+    def test_shift_down_keeps_the_direction_of_the_rest_of_the_press(self):
+        words = {"えでる": [Entry("江出る", "えでる", 1, 1, 0)],
+                 "なる": [Entry("成る", "なる", 1, 1, 0)],
+                 "でる": [Entry("出る", "でる", 1, 1, 3000)]}
+        lex = MozcLex(words, {w[:i] for w in words for i in range(1, len(w) + 1)}, [0] * 4, 2)
+        k = Keys(ImeSession(_lex=lex, _table=load_table()))
+        k.chords("w", "d")  # え・で (left) or が・な (right)
+        k.chords("i")
+        k.idle()
+        reply = k.tap(VK_DOWN, ["shift"])
+        self.assertEqual((reply["commit"], reply["composition"]), ("え", "出る"))
+
+    def test_shift_down_ends_alphanumerics(self):
+        k = Keys(self.session())
+        k.plain("k")
+        k.tap(ord("A"), ["shift"])
+        self.assertEqual(k.tap(VK_DOWN, ["shift"])["commit"], "き")
+        k.plain("k")  # Shift+letter's 英数の続き ended: kana again
+        self.assertEqual(k.s.composition[1:], "き")
+
+        k = Keys(self.session())
+        k.plain("k")
+        k.tap(VK_CAPITAL, ["shift"])
+        k.plain("b")
+        done = k.tap(VK_DOWN, ["shift"])  # under Shift+CapsLock: all of it, then off
+        self.assertEqual((done["commit"], done.get("global")), ("きb", "ime_off"))
+
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
         k = self.typed("わたしはがっこうにいく")
         reply = k.convert()

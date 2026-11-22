@@ -119,7 +119,7 @@
 | `predict` | composing | ○ | 予測候補に入る |
 | `commit` | composing 以降 | ○ | 全部確定する |
 | `commit_first_segment` | composing 以降 | ○ | 先頭の文節だけ確定する |
-| `commit_one_char` | composing | × | 先頭の 1 字を確定する。作るまでは `noop` |
+| `commit_one_char` | composing | ○ | 先頭の 1 打を、かなのまま確定する（CONVERSION「部分確定」） |
 | `commit_to_focus` | converting 以降 | × | 注目文節までを確定する |
 | `delete_before` | composing | ○ | 最後の 1 打を消す |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
