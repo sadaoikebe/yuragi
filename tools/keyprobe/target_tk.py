@@ -1,4 +1,4 @@
-"""Tk window for the key probe (KEYBIND.md §12): records every key event Tk receives.
+"""Tk window for the key probe (tools/keyprobe/README.md): records every key event Tk receives.
 
     python target_tk.py <title> <log path> [--menu]
 

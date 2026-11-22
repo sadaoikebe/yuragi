@@ -208,7 +208,7 @@ def paint(hwnd) -> None:
     text = (
         "ゆらぎ 試験窓  （Notepad 用ではない。TSF TIP は src/tip）\n"
         "Space+文字 = 親指シフト（左右不明）。Space 単独 = 変換。Enter = 確定。Esc = 取消。\n"
-        "Shift+F6 = 注目候補の学習を忘れる。\n"
+        "Ctrl+Delete（候補窓）= 候補の学習を忘れる。\n"
         f"[{status}] tokens={len(session.tokens)} fsm={session.fsm.state}\n\n"
     )
     if not comp:

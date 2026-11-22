@@ -11,7 +11,7 @@ plain conversion of the input (Space already offers that).
 
 What the learning store holds decides how history is used: the latest
 confirmation of each learned (reading, surface) pair, the most recently
-confirmed first. Suppressed pairs (Shift+F6) are already gone from the store,
+confirmed first. Suppressed pairs (forget_candidate) are already gone from the store,
 so they never come back as predictions either.
 
 The typed input is a token sequence, not one string: an ambiguous thumb chord

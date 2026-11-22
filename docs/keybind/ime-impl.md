@@ -59,7 +59,6 @@
 | 略号 | 資料 | URL |
 |---|---|---|
 | MOZC | Mozc `src/win32/tip/`・`src/win32/base/`（commit 1527a4cd）。`tip_text_service.cc`（PreservedKey、`OnPreservedKey`）、`tip_keyevent_handler.cc`、`base/keyevent_handler.cc`（up の規則、VK_KANJI の注記）、`base/keyboard.cc` | https://github.com/google/mozc/tree/1527a4cd1217cec4611cd4bc8d46f8c66ea79e6a/src/win32 |
-| MOZC-IMM | Mozc の IMM32 版（2023 年に削除。commit 08ef9a0c） `src/win32/ime/` | https://github.com/google/mozc/tree/08ef9a0c6267a41e2c8774c960c9b9d4cf3a62dc/src/win32/ime |
 | CORVUS | CorvusSKK `imcrvtip/`（commit a7f1cf08）。`KeyEventSink.cpp`、`ConfigTip.cpp`、`KeyHandler.cpp` | https://github.com/nathancorvussolis/corvusskk/tree/a7f1cf083ba7c9f0866e7dd4decb3e91c8f18794/imcrvtip |
 | TUTCODE | tsf-tutcode `imcrvtip/`（commit df1847ab） | https://github.com/deton/tsf-tutcode/tree/df1847aba25a560a857bf4f69849c1101bd1cc3f/imcrvtip |
 | SAMPLEIME | Microsoft Windows-classic-samples SampleIME（commit 434f6002）。`KeyEventSink.cpp`、`CompositionProcessorEngine.cpp`、`Globals.cpp`、`Define.h` | https://github.com/microsoft/Windows-classic-samples/tree/434f6002bdf9cf9829406c3ff2b33387982d6168/Samples/IME/cpp/SampleIME |

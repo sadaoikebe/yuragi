@@ -1,7 +1,7 @@
 """Local confirmation history (DESIGN「学習履歴のファイル」). Never imported by the evaluation loaders.
 
 The file is a JSONL log of the user's choices and pair suppressions
-(Shift+F6, "forget"), read in order. Only a choice is recorded: a commit of
+(forget_candidate, "forget"), read in order. Only a choice is recorded: a commit of
 what the engine showed adds nothing, so it changes no later conversion. What
 a conversion uses: the changed words, keyed by reading and the left word,
 or the whole interval when word boundaries cannot be aligned. A choice

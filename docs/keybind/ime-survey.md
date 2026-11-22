@@ -34,7 +34,7 @@
 
 ## 2. 機能ごとの既定キーの比較
 
-主要 4 系統とゆらぎの今のキー。各列の出典は次のとおり。
+主要 4 系統の既定キー。各列の出典は次のとおり。
 
 - **MS-IME 列**: 旧 MS-IME の表（[ms-ime.md](ms-ime.md) §2、テンプレート「Microsoft IME」）。丸数字はその表の状態（② 入力のみ、③ 変換済み、④ 候補一覧、⑤ 文節長変更、⑥ 文節内入力）。
   Mozc の ms-ime.tsv（[mozc.md](mozc.md) §4.1）が違うときは「（Mozc: …）」で添える。新 MS-IME の資料（ms-ime.md §1）にあるものは「新 IME:」と書く。
@@ -42,100 +42,85 @@
 - **macOS 列**: Apple の資料（[macos.md](macos.md)）の Mac 既定。Mozc の kotoeri.tsv（mozc.md §4.1）が違うときは「（Mozc: …）」で添える。
 
 Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv、macOS では kotoeri.tsv（mozc.md §1.1）。
-日本語キー（変換・無変換・かな・英数・半角/全角・ひらがな・カタカナ）は US 配列のゆらぎでは使えないので、括弧で示す。
+日本語キー（変換・無変換・かな・英数・半角/全角・ひらがな・カタカナ）は US 配列のキーボードに無いので、括弧で示す。
 
 ### 2.1 IME のオン/オフ・入力モード
 
-| 機能 | ゆらぎ | MS-IME | ATOK | macOS |
-|---|---|---|---|---|
-| オン/オフ切替 | Alt+`（`tip.json` で変更可） | (半角/全角)。新 IME: Alt+`（US 配列）、(変換)/(無変換) は設定で選べる | (半角/全角)（101/104 での代わりは資料に無い） | 切替のキーは資料に無い。入力ソースの切り替えは Ctrl+Space（前）/ Ctrl+Option+Space（次） |
-| オンにする / オフにする（別々） | 無し | ImeOn（ひらがなキー）/ ImeOff（IME オフ）（ms-ime.md §2.2）。新 IME: ImeOn（ひらがな）/ ImeOff（半角英数）（Mozc: オン = (英数)・(ひらがな)・(カタカナ)・F13・ON、オフ = OFF） | (変換) でオンにできる。オフだけのキーは資料に無い（機能「日本語入力OFF」はある） | (かな)（ひらがなへ）/ (英数)（英字へ） |
-| ひらがな・カタカナ・英数の入力モード | 無し（かな入力のみ。英数は Shift+英字の一時入力） | (ひらがな)、(カタカナ)、(英数)（かな英数）、(無変換)（かな切替）、Shift+(無変換)（英数切替）。新 IME の US 配列: Ctrl+CapsLock（ひらがな）、Shift+CapsLock（英数）、Alt+CapsLock（カタカナ。出典で食い違う、詳細は ms-ime.md §1.2） | (無変換)（半角英数の固定入力）、Shift+(無変換)（固定入力英字の順次切替）、Ctrl+(無変換)（固定入力カナの順次切替）、(変換)（漢字／半角モード切替） | Ctrl+Shift+J（ひらがな）/ K（カタカナ）/ L（全角英字）/ '（英字）、Option+Shift+Z/X、Ctrl+Shift+; は出典で食い違う（詳細は macos.md §3） |
-| 一時的な英数入力 | Shift+英字（確定まで続く） | 和英混在入力の設定「Shift キー単独で英数モードに切り替える」。一時的かどうかは資料に無い（Mozc: 設定「シフトキーでの入力切替」、既定は英数字） | Shift+文字キー（英語入力モード）。(Caps Lock英数) で英語入力モードのオン/オフ | Shift（「Shiftキーの動作」が英字モードのとき。Return で元に戻る） |
+| 機能 | MS-IME | ATOK | macOS |
+|---|---|---|---|
+| オン/オフ切替 | (半角/全角)。新 IME: Alt+`（US 配列）、(変換)/(無変換) は設定で選べる | (半角/全角)（101/104 での代わりは資料に無い） | 切替のキーは資料に無い。入力ソースの切り替えは Ctrl+Space（前）/ Ctrl+Option+Space（次） |
+| オンにする / オフにする（別々） | ImeOn（ひらがなキー）/ ImeOff（IME オフ）（ms-ime.md §2.2）。新 IME: ImeOn（ひらがな）/ ImeOff（半角英数）（Mozc: オン = (英数)・(ひらがな)・(カタカナ)・F13・ON、オフ = OFF） | (変換) でオンにできる。オフだけのキーは資料に無い（機能「日本語入力OFF」はある） | (かな)（ひらがなへ）/ (英数)（英字へ） |
+| ひらがな・カタカナ・英数の入力モード | (ひらがな)、(カタカナ)、(英数)（かな英数）、(無変換)（かな切替）、Shift+(無変換)（英数切替）。新 IME の US 配列: Ctrl+CapsLock（ひらがな）、Shift+CapsLock（英数）、Alt+CapsLock（カタカナ。出典で食い違う、詳細は ms-ime.md §1.2） | (無変換)（半角英数の固定入力）、Shift+(無変換)（固定入力英字の順次切替）、Ctrl+(無変換)（固定入力カナの順次切替）、(変換)（漢字／半角モード切替） | Ctrl+Shift+J（ひらがな）/ K（カタカナ）/ L（全角英字）/ '（英字）、Option+Shift+Z/X、Ctrl+Shift+; は出典で食い違う（詳細は macos.md §3） |
+| 一時的な英数入力 | 和英混在入力の設定「Shift キー単独で英数モードに切り替える」。一時的かどうかは資料に無い（Mozc: 設定「シフトキーでの入力切替」、既定は英数字） | Shift+文字キー（英語入力モード）。(Caps Lock英数) で英語入力モードのオン/オフ | Shift（「Shiftキーの動作」が英字モードのとき。Return で元に戻る） |
 
 ### 2.2 入力中（変換前）
 
-| 機能 | ゆらぎ | MS-IME | ATOK | macOS |
-|---|---|---|---|---|
-| 変換 | Space（単独） | Space、Shift+Space、(変換) | Space、Shift+Space、(変換) | Space |
-| 全確定 | Enter | Enter、Ctrl+M、Ctrl+Enter | Enter、Ctrl+M（Shift+Enter は出典で食い違う、詳細は atok.md §1.3） | Return（Mozc: Ctrl+M も） |
-| 部分確定（先頭の文節） | Ctrl+↓ | キー設定の表に無い（② の Ctrl+↓・Ctrl+N は文字末尾） | ↓、Ctrl+N（Mozc の atok.tsv では全確定） | 資料に無い |
-| 1 字ずつ確定 | 無し | Shift+↓（1文字確定）（Mozc: 割り当て無し） | Shift+↓（1 音確定） | 資料に無い |
-| 1 打 / 1 字消す（左） | BS | BS、Ctrl+H、Shift+BS、Ctrl+BS | BS、Ctrl+H | Delete、Ctrl+H |
-| カーソルの右を消す | 無し | Del、Ctrl+G | Del、Ctrl+G | 資料に無い（Mozc: Del、Ctrl+D） |
-| 全部消す | Esc | Esc、Shift+Esc、Ctrl+Z | Esc、Ctrl+[ | Esc、Clear |
-| カーソル移動 ←→ | 無し（アプリへ通す） | ←→、Shift+←→、Ctrl+K/L、Ctrl+S/D | ←→、Ctrl+K/L | ←→、Ctrl+S/D（Mozc: Ctrl+B/F、Option+J/L。Ctrl+D は右を消す） |
-| 先頭 / 末尾へ | 無し | Home/End、Ctrl+A/F、Ctrl+←/→、Ctrl+↑/↓、末尾は Ctrl+N も（Mozc: Ctrl+E で先頭、Ctrl+X で末尾も） | Ctrl+←/→ | 資料に無い（Mozc: Ctrl+A/E、Home/End、Ctrl+←/→） |
-| ひらがな | F6 | F6、Ctrl+U | F6、Ctrl+U | F6、Ctrl+J |
-| 全角カタカナ | F7 | F7、Ctrl+I | F7、Ctrl+I | F7、Ctrl+K |
-| 半角カタカナ | F8 | F8、Ctrl+O（機能名は「半角」） | F8、Ctrl+O（機能名は「半角（後）変換」） | F8、Ctrl+;（入力モードで半角カタカナを有効にしたとき。既定は半角英字） |
-| 全角英数 | F9 | F9、Ctrl+P | F9、Ctrl+P | F9、Ctrl+L |
-| 半角英数 | F10 | F10、Ctrl+T | F10、Ctrl+@ | F10、Ctrl+:（ローマ字に変換）、F8、Ctrl+;（ローマ字（半角英字）に変換。既定）（Mozc: F10、Ctrl+:、Ctrl+'） |
-| 予測を出す | Tab | Tab（Mozc: サジェスト表示中は ↓ も）。新 IME: Tab・Shift+Tab・↓・↑ で予測候補ウィンドウに入る | Tab（推測変換）。推測候補が出ているときは Tab・↓ でほかの推測候補 | 推測候補は自動表示。キーで選ぶ方法は資料に無い（Mozc: Tab、サジェスト表示中は ↓・Ctrl+N） |
-| 予測を選んで確定 | 候補窓で選ぶ | キー設定の表に無い（Mozc: Shift+Enter で最初のサジェスト）。新 IME: 予測候補ウィンドウで Enter | Shift+Enter、Ctrl+Enter（自動表示候補確定。入力中の Shift+Enter は出典で食い違う、詳細は atok.md §1.3） | 資料に無い（Mozc: Shift+Enter で最初のサジェスト） |
-| 学習を使わずに変換 | 無し | キー設定の表に無い（F2 は ③④⑤ の文字編集）（Mozc: F2） | 資料に無い（F2〜F5 は辞書セット変換。無学習全文確定は割付けなし） | 資料に無い（Mozc: F2） |
-| 連想変換 | 無し | キー設定の表に無い | Ctrl+Tab | 資料に無い |
-| 全角空白 / 半角空白 | 入力なしの Space で全角のみ | Ctrl+Space（半角、②〜⑥）、Ctrl+Shift+Space（全角）、入力なしの Shift+Space（別幅） | 資料に無い（Shift+Space は次候補） | 資料に無い（Mozc: Option+Space で全角） |
+| 機能 | MS-IME | ATOK | macOS |
+|---|---|---|---|
+| 変換 | Space、Shift+Space、(変換) | Space、Shift+Space、(変換) | Space |
+| 全確定 | Enter、Ctrl+M、Ctrl+Enter | Enter、Ctrl+M（Shift+Enter は出典で食い違う、詳細は atok.md §1.3） | Return（Mozc: Ctrl+M も） |
+| 部分確定（先頭の文節） | キー設定の表に無い（② の Ctrl+↓・Ctrl+N は文字末尾） | ↓、Ctrl+N（Mozc の atok.tsv では全確定） | 資料に無い |
+| 1 字ずつ確定 | Shift+↓（1文字確定）（Mozc: 割り当て無し） | Shift+↓（1 音確定） | 資料に無い |
+| 1 打 / 1 字消す（左） | BS、Ctrl+H、Shift+BS、Ctrl+BS | BS、Ctrl+H | Delete、Ctrl+H |
+| カーソルの右を消す | Del、Ctrl+G | Del、Ctrl+G | 資料に無い（Mozc: Del、Ctrl+D） |
+| 全部消す | Esc、Shift+Esc、Ctrl+Z | Esc、Ctrl+[ | Esc、Clear |
+| カーソル移動 ←→ | ←→、Shift+←→、Ctrl+K/L、Ctrl+S/D | ←→、Ctrl+K/L | ←→、Ctrl+S/D（Mozc: Ctrl+B/F、Option+J/L。Ctrl+D は右を消す） |
+| 先頭 / 末尾へ | Home/End、Ctrl+A/F、Ctrl+←/→、Ctrl+↑/↓、末尾は Ctrl+N も（Mozc: Ctrl+E で先頭、Ctrl+X で末尾も） | Ctrl+←/→ | 資料に無い（Mozc: Ctrl+A/E、Home/End、Ctrl+←/→） |
+| ひらがな | F6、Ctrl+U | F6、Ctrl+U | F6、Ctrl+J |
+| 全角カタカナ | F7、Ctrl+I | F7、Ctrl+I | F7、Ctrl+K |
+| 半角カタカナ | F8、Ctrl+O（機能名は「半角」） | F8、Ctrl+O（機能名は「半角（後）変換」） | F8、Ctrl+;（入力モードで半角カタカナを有効にしたとき。既定は半角英字） |
+| 全角英数 | F9、Ctrl+P | F9、Ctrl+P | F9、Ctrl+L |
+| 半角英数 | F10、Ctrl+T | F10、Ctrl+@ | F10、Ctrl+:（ローマ字に変換）、F8、Ctrl+;（ローマ字（半角英字）に変換。既定）（Mozc: F10、Ctrl+:、Ctrl+'） |
+| 予測を出す | Tab（Mozc: サジェスト表示中は ↓ も）。新 IME: Tab・Shift+Tab・↓・↑ で予測候補ウィンドウに入る | Tab（推測変換）。推測候補が出ているときは Tab・↓ でほかの推測候補 | 推測候補は自動表示。キーで選ぶ方法は資料に無い（Mozc: Tab、サジェスト表示中は ↓・Ctrl+N） |
+| 予測を選んで確定 | キー設定の表に無い（Mozc: Shift+Enter で最初のサジェスト）。新 IME: 予測候補ウィンドウで Enter | Shift+Enter、Ctrl+Enter（自動表示候補確定。入力中の Shift+Enter は出典で食い違う、詳細は atok.md §1.3） | 資料に無い（Mozc: Shift+Enter で最初のサジェスト） |
+| 学習を使わずに変換 | キー設定の表に無い（F2 は ③④⑤ の文字編集）（Mozc: F2） | 資料に無い（F2〜F5 は辞書セット変換。無学習全文確定は割付けなし） | 資料に無い（Mozc: F2） |
+| 連想変換 | キー設定の表に無い | Ctrl+Tab | 資料に無い |
+| 全角空白 / 半角空白 | Ctrl+Space（半角、②〜⑥）、Ctrl+Shift+Space（全角）、入力なしの Shift+Space（別幅） | 資料に無い（Shift+Space は次候補） | 資料に無い（Mozc: Option+Space で全角） |
 
 ### 2.3 変換中
 
-| 機能 | ゆらぎ | MS-IME | ATOK | macOS |
-|---|---|---|---|---|
-| 次の候補 | Space、↓ | Space、(変換)（③ では拡張候補、④ では次の候補）、↓・Ctrl+X（④）（Mozc: Space・↓・Ctrl+X・(変換) とも次の候補） | Space、Shift+Space、Ctrl+↓、(変換)（候補ウィンドウ表示中は次の候補群） | Space、↓、Ctrl+N |
-| 前の候補 | ↑ | Shift+Space、Ctrl+↑、Shift+(変換)（③④）、↑・Ctrl+E（④）（Mozc: Shift+Tab も） | ↑、Ctrl+↑ | ↑、Shift+Space、Ctrl+P（Mozc: Shift+Tab・Ctrl+E・Option+I も） |
-| 次 / 前のページ | PgDn / PgUp | PgDn/PgUp、Shift+↓/↑（④） | (変換) / Shift+(変換)（候補群）。グループの移動は Tab・Ctrl+J / Shift+Tab | Shift+↓/↑、Ctrl+V/R、Page Down/Page Up |
-| 番号で選ぶ | 1〜9 | 数字キーはキー設定の表に無い。新 IME: 数字（Mozc: 設定「候補選択ショートカット」、既定 1〜9） | 1〜9 | 数字キー → Return で確定 |
-| 全候補（一覧）表示 | 無し | Tab（④ で候補表示切替）。新 IME: Tab でテーブル表示に広げる | Ctrl+Space（全候補を表示） | 資料に無い（候補ウインドウは Space を繰り返すと出る。Tab は候補の並べ方の切り替え） |
-| 前 / 次の文節へ | ← / → | ← / →、Ctrl+S / Ctrl+D | **Shift+← / Shift+→** | 出典で食い違う（詳細は macos.md §2）。Apple の表は 前 = ↓・Ctrl+F、次 = ↑・Ctrl+B、候補選択ウインドウの説明は ← / →（Mozc: ← / →、Ctrl+B / Ctrl+F、Ctrl+S / Ctrl+D） |
-| 先頭 / 最後の文節へ | 無し | Home/End、Ctrl+A/F、Ctrl+←/→（③） | Ctrl+← / Ctrl+→ | 資料に無い（Mozc: Home/End、Ctrl+A、Ctrl+←/→） |
-| 文節を縮める / 伸ばす | Shift+← / Shift+→ | Shift+←/→、Ctrl+K/L（⑤ では ↑/↓、Ctrl+E/X も） | **← / →**、Ctrl+K/L | Shift+←/→、Ctrl+I・Ctrl+W/O（Mozc: Ctrl+Q でも縮める） |
-| 全確定 | Enter | Enter、Ctrl+M、Ctrl+Enter | Enter、Ctrl+M | Return（Mozc: Ctrl+M も） |
-| 先頭の文節だけ確定 | Ctrl+↓ | Ctrl+↓、Ctrl+N | ↓、Ctrl+N | 資料に無い |
-| 先頭 / 末尾の 1 字を確定 | 無し | Shift+↓（③⑤⑥ の「先頭確定」。1 字か文節かは資料に無い）（Mozc: Shift+↓ は次のページ） | PgDn / PgUp | 資料に無い |
-| 変換をやめる（読みに戻す） | Esc、BS | Esc・Ctrl+Z・Ctrl+BS・Shift+BS（文節戻し）、Shift+Esc（全戻し）（Mozc: BS・Ctrl+H・Del・Ctrl+G も） | BS、Ctrl+H（変換取消）、Insert（全変換取消。[W36] の表には無い）。Esc・Ctrl+[ は全文字削除 | Esc（読みに戻す）、Ctrl+Delete・(かな) 2 回（変換を取り消す）。Windows風は Ctrl+Z も（Mozc: BS・Ctrl+H も） |
-| 注目文節を消す | 無し | キー設定の表に無い | Shift+Del | 資料に無い |
-| 字種（F6〜F10 / Ctrl 系） | F6〜F10 | F6〜F10、Ctrl+U/I/O/P/T | F6〜F10、Ctrl+U/I/O/P/@ | F6〜F10、Ctrl+J/K/L/;/: |
-| 候補の学習を消す | Shift+F6 | Ctrl+Del（④ で単語削除）（Mozc: 予測候補の表示中に Ctrl+Del で履歴から削除） | Ctrl+Del（単語削除） | 資料に無い（Mozc: 予測候補の表示中に Ctrl+Del） |
-| 次を打つと確定 | ○ | 資料に無い（Mozc: ○） | 資料に無い | 資料に無い（Mozc: ○） |
+| 機能 | MS-IME | ATOK | macOS |
+|---|---|---|---|
+| 次の候補 | Space、(変換)（③ では拡張候補、④ では次の候補）、↓・Ctrl+X（④）（Mozc: Space・↓・Ctrl+X・(変換) とも次の候補） | Space、Shift+Space、Ctrl+↓、(変換)（候補ウィンドウ表示中は次の候補群） | Space、↓、Ctrl+N |
+| 前の候補 | Shift+Space、Ctrl+↑、Shift+(変換)（③④）、↑・Ctrl+E（④）（Mozc: Shift+Tab も） | ↑、Ctrl+↑ | ↑、Shift+Space、Ctrl+P（Mozc: Shift+Tab・Ctrl+E・Option+I も） |
+| 次 / 前のページ | PgDn/PgUp、Shift+↓/↑（④） | (変換) / Shift+(変換)（候補群）。グループの移動は Tab・Ctrl+J / Shift+Tab | Shift+↓/↑、Ctrl+V/R、Page Down/Page Up |
+| 番号で選ぶ | 数字キーはキー設定の表に無い。新 IME: 数字（Mozc: 設定「候補選択ショートカット」、既定 1〜9） | 1〜9 | 数字キー → Return で確定 |
+| 全候補（一覧）表示 | Tab（④ で候補表示切替）。新 IME: Tab でテーブル表示に広げる | Ctrl+Space（全候補を表示） | 資料に無い（候補ウインドウは Space を繰り返すと出る。Tab は候補の並べ方の切り替え） |
+| 前 / 次の文節へ | ← / →、Ctrl+S / Ctrl+D | **Shift+← / Shift+→** | 出典で食い違う（詳細は macos.md §2）。Apple の表は 前 = ↓・Ctrl+F、次 = ↑・Ctrl+B、候補選択ウインドウの説明は ← / →（Mozc: ← / →、Ctrl+B / Ctrl+F、Ctrl+S / Ctrl+D） |
+| 先頭 / 最後の文節へ | Home/End、Ctrl+A/F、Ctrl+←/→（③） | Ctrl+← / Ctrl+→ | 資料に無い（Mozc: Home/End、Ctrl+A、Ctrl+←/→） |
+| 文節を縮める / 伸ばす | Shift+←/→、Ctrl+K/L（⑤ では ↑/↓、Ctrl+E/X も） | **← / →**、Ctrl+K/L | Shift+←/→、Ctrl+I・Ctrl+W/O（Mozc: Ctrl+Q でも縮める） |
+| 全確定 | Enter、Ctrl+M、Ctrl+Enter | Enter、Ctrl+M | Return（Mozc: Ctrl+M も） |
+| 先頭の文節だけ確定 | Ctrl+↓、Ctrl+N | ↓、Ctrl+N | 資料に無い |
+| 先頭 / 末尾の 1 字を確定 | Shift+↓（③⑤⑥ の「先頭確定」。1 字か文節かは資料に無い）（Mozc: Shift+↓ は次のページ） | PgDn / PgUp | 資料に無い |
+| 変換をやめる（読みに戻す） | Esc・Ctrl+Z・Ctrl+BS・Shift+BS（文節戻し）、Shift+Esc（全戻し）（Mozc: BS・Ctrl+H・Del・Ctrl+G も） | BS、Ctrl+H（変換取消）、Insert（全変換取消。[W36] の表には無い）。Esc・Ctrl+[ は全文字削除 | Esc（読みに戻す）、Ctrl+Delete・(かな) 2 回（変換を取り消す）。Windows風は Ctrl+Z も（Mozc: BS・Ctrl+H も） |
+| 注目文節を消す | キー設定の表に無い | Shift+Del | 資料に無い |
+| 字種（F6〜F10 / Ctrl 系） | F6〜F10、Ctrl+U/I/O/P/T | F6〜F10、Ctrl+U/I/O/P/@ | F6〜F10、Ctrl+J/K/L/;/: |
+| 候補の学習を消す | Ctrl+Del（④ で単語削除）（Mozc: 予測候補の表示中に Ctrl+Del で履歴から削除） | Ctrl+Del（単語削除） | 資料に無い（Mozc: 予測候補の表示中に Ctrl+Del） |
+| 次を打つと確定 | 資料に無い（Mozc: ○） | 資料に無い | 資料に無い（Mozc: ○） |
 
 ### 2.4 確定後・その他
 
-| 機能 | ゆらぎ | MS-IME | ATOK | macOS |
-|---|---|---|---|---|
-| 確定取り消し | 無し | Ctrl+BS（① の確定取消） | Ctrl+BS（確定のアンドゥ） | 資料に無い（Mozc: Ctrl+BS） |
-| 再変換 | 無し | (変換)（①）。新 IME: Ctrl+ImeOn も | Shift+(変換)（Mac は Ctrl+Shift+Y） | Ctrl+Shift+R、Option+Shift+R、(かな) 2 回 |
-| 単語登録を開く | 無し（設定ウィンドウから） | Ctrl+F7（①）（Mozc: 割り当て無し） | Ctrl+F7 | キーは資料に無い（入力メニュー「ユーザ辞書を編集」） |
-| 設定を開く | 無し（メニューから） | キー設定の表に無い（Ctrl+F10 は ① のメニュー） | Ctrl+F12 | キーは資料に無い（入力メニュー） |
-| IME パッド・文字パレット・絵文字 | 無し | F5・Ctrl+Y（IME パッドの部首・コード変換）。新 IME: Win+.（絵文字。OS の機能） | Ctrl+F11（文字パレット） | Command+Control+Space（文字ビューア） |
-| 辞書を引く | 無し | 資料に無い | End（情報ウィンドウ）、Shift+Ctrl+End（電子辞典の部分一致検索） | 資料に無い |
+| 機能 | MS-IME | ATOK | macOS |
+|---|---|---|---|
+| 確定取り消し | Ctrl+BS（① の確定取消） | Ctrl+BS（確定のアンドゥ） | 資料に無い（Mozc: Ctrl+BS） |
+| 再変換 | (変換)（①）。新 IME: Ctrl+ImeOn も | Shift+(変換)（Mac は Ctrl+Shift+Y） | Ctrl+Shift+R、Option+Shift+R、(かな) 2 回 |
+| 単語登録を開く | Ctrl+F7（①）（Mozc: 割り当て無し） | Ctrl+F7 | キーは資料に無い（入力メニュー「ユーザ辞書を編集」） |
+| 設定を開く | キー設定の表に無い（Ctrl+F10 は ① のメニュー） | Ctrl+F12 | キーは資料に無い（入力メニュー） |
+| IME パッド・文字パレット・絵文字 | F5・Ctrl+Y（IME パッドの部首・コード変換）。新 IME: Win+.（絵文字。OS の機能） | Ctrl+F11（文字パレット） | Command+Control+Space（文字ビューア） |
+| 辞書を引く | 資料に無い | End（情報ウィンドウ）、Shift+Ctrl+End（電子辞典の部分一致検索） | 資料に無い |
 
 ### 2.5 系統ごとの違いのまとめ
 
-- **MS-IME 系**（旧 MS-IME、Google 日本語入力の既定）: ←→ が文節移動、Shift+←→ が伸縮。ゆらぎは今この系統。
+- **MS-IME 系**（旧 MS-IME、Google 日本語入力の既定）: ←→ が文節移動、Shift+←→ が伸縮。
   azooKey（macOS）は Shift+←→ が伸縮で、候補選択中の → は選んだ文節を確定して次の文節へ移る（← の動作は others.md §5.1 の表に無い）。
 - **ATOK 系**: ←→ が伸縮、Shift+←→ が文節移動（逆）。↓ が部分確定（MS-IME 系では ↓ は候補一覧での次の候補）。Shift+Space が次候補、Ctrl+Space が全候補表示。
 - **macOS 系**: Ctrl+J/K/L/;/: の字種、Ctrl+N/P（候補）、Ctrl+B/F（文節）、Ctrl+H（削除）。Mozc の kotoeri.tsv は Google による模倣で、Ctrl+B/F の向きなど Apple の資料と違う所がある（macos.md §2）。
 - **Ctrl+英字** は 3 系統で意味が違う（例: Ctrl+K は MS-IME/ATOK で縮める・カーソル左、macOS でカタカナ）。
 - **Space** はどの系統も変換と次の候補（旧 MS-IME の ③ では拡張候補）。**Shift+Space** は MS-IME 系で前候補、ATOK(Win) で次候補、ATOK(Mac)・macOS で前候補。入力なしでは旧 MS-IME で別幅の空白（Mozc は 3 プリセットとも InsertAlternateSpace）。
 
-
 ---
 
-## 3. 主要 IME にあってゆらぎに無いもの
-
-キー操作以外も含む。
-
-- **入力・編集**: 入力中のカーソル移動とカーソル位置での挿入・削除、確定取り消し、再変換（`ITfFnReconversion`）、入力モード（ひらがな・カタカナ・全角英数・半角英数）の固定、
-  半角空白を入れるキー、学習を使わない変換（Mozc の F2）、1 字ずつの確定、注目文節の削除、オン/オフを別々のキーに
-- **候補・予測**: 候補窓を出さない変換中（2 回目の Space で出す）、全候補の一覧表示と候補のグループ移動、入力中に自動で出るサジェスト、
-  連想変換・郵便番号・日付・計算・絵文字・単漢字、クラウド候補
-- **設定・ツール**: 句読点・記号の種類、数字・記号の全角/半角、辞書の入出力とシステム辞書の選択、設定と辞書の同期、単語登録・設定を開くキー、
-  学習しない一時モード、アプリごとの設定（ATOK）、校正・電子辞典・IME パッド・手書き
-- **親指シフト**: 同時打鍵の判定時間の設定（他のソフトはミリ秒か押下時間の % で変えられる）、親指キーの単独打鍵の暴発対策（Lacaille の「初回無効」、awase の単独打鍵の抑止）、配列の切り替えと編集
-
----
-
-## 4. プリセットを作るときの資料
+## 3. プリセットを作るときの資料
 
 | プリセット | 元にするもの | 出典の状況 |
 |---|---|---|
@@ -152,16 +137,16 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 - **Space**: どのプリセットでも Space は変換・次候補。ibus-anthy と fcitx5-anthy は、親指キーの単独打鍵（ibus-anthy はタイムアウトか文字キーなしで離したとき、fcitx5-anthy はタイムアウトしたとき）を
   通常のキー表で処理する（others.md §4.1・§4.2）。右親指を space にすれば、キー表の Space が Space の単独打鍵として働く。
   やまぶきR には、右親指を Space にして単独打鍵で変換する実例がある（others.md §3.2）。awase で Space を親指キーにしたときに単独打鍵で変換をどう起こすかは資料に無い（others.md §3.5）。
-  NICOLA 規格の単独打鍵（任意仕様）「左親指＝無変換・右親指＝変換」は、スペースバー 1 本のゆらぎでは使えない。
+  NICOLA 規格の単独打鍵（任意仕様）「左親指＝無変換・右親指＝変換」は、左右の親指キーをスペースバー 1 つで兼ねると使えない。
 - **Alt**: ATOK は Alt を修飾に使えない。Alt+`` ` `` は新 MS-IME（US 配列）と CorvusSKK でオン/オフ、libkkc で直接入力。Mozc の 3 プリセットの表には無い。
-- **新 MS-IME の変換中の編集キー**（文節伸縮・部分確定・Ctrl+英字）と Ctrl+Space / Ctrl+Shift+Space の空白は、公式の一覧が無い。実機で確かめた結果は ms-ime.md §1.5。
-  ATOK Windows の Insert・Ctrl+Insert の現行の割り当て。macOS の Tab で推測候補を選べるか、Windows風のときの Ctrl+J/K/L。
+- **公式の一覧が無いもの**: 新 MS-IME の変換中の編集キー（文節伸縮・部分確定・Ctrl+英字）と Ctrl+Space / Ctrl+Shift+Space の空白。実機で見た動きは ms-ime.md §1.5。
+- **資料に無いこと**: ATOK Windows の Insert・Ctrl+Insert の現行の割り当て。macOS の Tab で推測候補を選べるか、Windows風のときの Ctrl+J/K/L。
   Mozc で同じ（状態, キー）が重複したときの優先。Japanist の状態 × キーの全体表。
 - **出典で食い違うこと**: ATOK Windows の Ctrl+F8・Shift+F8（変換辞書切替メニュー）と入力中の Shift+Enter（atok.md §1.1・§1.3）。macOS の文節の移動のキーと Ctrl+B/F の向き（macos.md §2）。
 
 ---
 
-## 5. 編集画面の先行例
+## 4. 編集画面の先行例
 
 - **Mozc**: 状態・キー・コマンドの 3 列。キーは実際に押して入れる。プリセットからのインポート、TSV の読み書き。
 - **macSKK**: 既定は編集できず、複製して編集する。変えた行を太字で示し、行ごとに既定へ戻せる。

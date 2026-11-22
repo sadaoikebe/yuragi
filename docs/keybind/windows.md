@@ -283,7 +283,6 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 | HT82K28 | Holtek HT82K28（PS/2 キーボード用コントローラ）のデータシート | https://datasheetq.com/pdf-html/407717/Holtek/5page/HT82K28.html |
 | FREEBSD | FreeBSD の USB キーボードドライバの変更（最後に押したキーだけを繰り返す） | https://lists.freebsd.org/pipermail/svn-src-stable/2020-February/052250.html |
 | KBD101 | `kbd101.c`（Microsoft Windows-driver-samples、日本語 101 配列） | https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/101/kbd101.c |
-| KBD106 | `kbd106.c`（同、日本語 106 配列） | https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c |
 | KBDH | `kbd.h`（Windows SDK。`KBDNLS_*`、`T29`・`T3A`） | https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/kbd.h |
 | KBDEDIT | KbdEdit マニュアル「Special NLS functions」「NLS functions editor」 | http://www.kbdedit.com/manual/low_level_special_nls_functions.html 、http://www.kbdedit.com/manual/low_level_special_nls_functions_editor.html |
 | SPICE | spice-gtk `src/spice-widget.c`（日本語キーの down/up の注記） | https://gitlab.freedesktop.org/spice/spice-gtk/-/blob/master/src/spice-widget.c |

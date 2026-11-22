@@ -251,8 +251,8 @@ Shift+↓ の 1 文字確定・先頭確定、Ctrl+↓・Ctrl+N の文節確定�
 | Shift+ImeOff | – | 全角英数 | 全角英数 | 全角英数 | 全角英数 | 全角英数 |
 | ローマ字 | 入力方式 | 入力方式 | 入力方式 | 入力方式 | 入力方式 | 入力方式 |
 
-「カタカナキー」「ひらがなキー」「入力方式」は画面の機能名のまま。ImeOn・ImeOff の 7 行は英語表示の画面（[SCREEN]）から、ほかの行と同じ機能名
-（Hiragana key＝ひらがなキー、Input Method＝入力方式、Reconv＝再変換、Katakana key＝カタカナキー、ToggleKana＝かな変換、FullAlphanumeric＝全角英数）に直した。
+「カタカナキー」「ひらがなキー」「入力方式」は画面の機能名のまま。ImeOn・ImeOff の 7 行は英語表示の画面（[SCREEN]）にあり、ほかの行と同じ機能名で書く
+（Hiragana key＝ひらがなキー、Input Method＝入力方式、Reconv＝再変換、Katakana key＝カタカナキー、ToggleKana＝かな変換、FullAlphanumeric＝全角英数）。
 「IME オフ」は画面の「IME OFF」。
 
 ### 2.3 カーソル・文節操作（矢印、Home/End、PageUp/Down）

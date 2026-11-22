@@ -36,7 +36,7 @@ def search(path: Path, query: str) -> list[LearnedPair]:
 
 
 def forget(path: Path, reading: str, surface: str) -> bool:
-    """The same suppression as Shift+F6 on the candidate; False if nothing was learned."""
+    """The same suppression as forget_candidate on the candidate; False if nothing was learned."""
     return LearningStore(path).suppress(reading, surface)
 
 

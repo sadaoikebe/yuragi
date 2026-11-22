@@ -7,6 +7,7 @@
 
 - [DESIGN.md](DESIGN.md) — 全体の設計（構成、置き場所、通信、ブローカー、エンジン、TIP、インストール・更新・アンインストールの手順、利用者に見えるもの、実地試験、定数）
 - [CONVERSION.md](CONVERSION.md) — 変換の仕様（キーとトークン、同時打鍵の判定、左右交互、変換、セッション、文節と候補、学習、n-best、LM、設定）
+- [KEYBIND.md](KEYBIND.md) — キーバインドの設計（局面とコマンド、プリセット、TIP の食べる表と送り直し）。前提にした Windows のキー入力と各 IME の資料は [keybind/](keybind/)
 - [EVALUATION.md](EVALUATION.md) — 変換の評価と診断、実打鍵の記録と再生
 - [PERFORMANCE.md](PERFORMANCE.md) — CPU・GPU での LM の速さと精度の調査（モデルの比較、較正、遅い PC、GPU と電池）
 

@@ -1,4 +1,4 @@
-"""IME commands and the phases they can be assigned to (KEYBIND §4)."""
+"""IME commands and the phases they can be assigned to (KEYBIND §3)."""
 
 from __future__ import annotations
 
