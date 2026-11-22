@@ -66,8 +66,8 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
   （`admin_ui.SETTINGS` などの表）。DPI 対応を申告する。`--runtime-dir` と `--config` で置き場所を変えられる。
 
 - キー入力（TSF に届くキー、Alt、PreservedKey、US 配列の読み替え）の前提は [keybind/windows.md](keybind/windows.md)。
-  TIP のキーの扱いを変えたら、ブランチ `keyprobe` のプローブと `checks.py`（そのブランチの `tools/keyprobe/README.md`）で実機の動きを確かめる。
-  MS-IME の動きを見る道具は main の `tools/keyprobe/` にある。
+  その前提は、ゆらぎとは別の確認用の TIP と `checks.py` で実機で確かめる。MS-IME の動きを見る道具も同じ所にある（`tools/keyprobe/README.md`）。
+  どちらも、ゆらぎ本体のコードには手を入れない。
 
 > **注意**: TIP の登録は `ITfInputProcessorProfileMgr` だけで行う。HKCU への手書きの登録や、古い
 > `Register` / `AddLanguageProfile` との二重登録をすると、一覧に出ても別のエンジンを掴んだり、
