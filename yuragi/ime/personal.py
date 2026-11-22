@@ -125,6 +125,7 @@ class PersonalLexicon:
         self.skipped = 0  # lines of the file that are not a valid word (shown to the user)
         self._signature: object = ()  # never equal to a stat signature or None
         self._original: dict[str, list[Entry] | None] = {}  # reading -> list before overlay
+        self.added_readings: tuple[str, ...] = ()  # sorted additions to the base reading index
         self._lock = threading.Lock()
 
     def sync(self, lex: MozcLex) -> None:
@@ -170,5 +171,6 @@ class PersonalLexicon:
                 lex.prefixes.update(reading[:i] for i in range(1, len(reading) + 1))
             self.count = len(words)
             self.skipped = skipped
+            self.added_readings = tuple(sorted(r for r, base in self._original.items() if base is None))
             self._signature = signature
             self.revision += 1

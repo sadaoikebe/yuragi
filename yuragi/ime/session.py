@@ -37,7 +37,9 @@ from .numbers import is_digit, number_spellings
 from .personal import PersonalLexicon
 from .symbols import symbol_spellings
 from .symbol_readings import load_symbols
-from .predict import DEFAULT_MODE as DEFAULT_PREDICTION, MAX_TAILS, ReadingIndex, predict
+from .predict import (DEFAULT_MODE as DEFAULT_PREDICTION, HISTORY_MIN_KANA, MAX_TAILS,
+                      PREVIEW_DELAY_MS, PREVIEW_TAIL_TOKENS, PreviewBudget, ReadingIndex,
+                      predict)
 
 PREDICTION = "predict"  # Segment.context of the predictions' segment
 
@@ -296,6 +298,14 @@ def _append_context(context: str, text: str) -> str:
     return context[-CONTEXT_CHARS:] if len(context) > 4 * CONTEXT_CHARS else context
 
 
+@dataclass(frozen=True)
+class Suggestion:
+    index: int  # the suffix begins at this segment
+    rows: list[Candidate]
+    personal_revision: int | None
+    learning_revision: int | None
+
+
 @dataclass
 class ImeSession:
     fsm: ChordFsm = field(default_factory=ChordFsm)
@@ -342,9 +352,12 @@ class ImeSession:
     _next_alias: int = -1
     clock: Callable[[], datetime] = datetime.now  # date rows; fixed in transcripts
     personal: PersonalLexicon | None = None  # the user's word list, shared
-    prediction: str = DEFAULT_PREDICTION  # "off" or "tab" (predict.py)
+    prediction: str = DEFAULT_PREDICTION
     predict_index: ReadingIndex = field(default_factory=ReadingIndex)  # shared
     predicting: bool = False  # the focused candidates are predictions
+    suggest_at: int | None = None
+    suggestion: Suggestion | None = None
+    _suggest_dirty: bool = False
     _word_starts: set[int] = field(default_factory=set)  # 1-best word boundaries
     # Thumb directions constrained before a partial commit or a press split.
     # Keyed by the remaining tokens' press number, cleared on reset.
@@ -700,11 +713,70 @@ class ImeSession:
         self._reading_edit = False
         self._clear_cands()
         self._refresh()
+        self._clear_suggestion()
 
     def _segment_revert(self) -> None:
         if self.focus >= 0:
             self._cursor = None
             self._show_edited_segment(self.focus, self.segments[self.focus].selected.reading)
+
+    def _clear_suggestion(self) -> None:
+        self.suggest_at = self.suggestion = None
+        self._suggest_dirty = False
+
+    def schedule_suggestion(self, now_ms: int) -> None:
+        """Start the idle delay when new input is ready, after any chord decision."""
+        if self.prediction != "auto":
+            return
+        if (self.phase != "composing" or self._await is not None or self._alnum_held
+                or self._cursor is not None
+                or len(self.tokens) < HISTORY_MIN_KANA):
+            self._clear_suggestion()
+        elif self.fsm.state != "S1":
+            self._suggest_dirty |= self.suggest_at is not None or self.suggestion is not None
+            self.suggest_at = self.suggestion = None
+        elif self._suggest_dirty:
+            self._suggest_dirty = False
+            self.suggest_at = now_ms + PREVIEW_DELAY_MS
+
+    def suggest(self, now_ms: int, *, busy: bool = False) -> None:
+        """One bounded peek at stable input. The ranges and preedit stay untouched."""
+        if self.suggest_at is None or now_ms < self.suggest_at:
+            return
+        self.suggest_at = None
+        if busy or self._lex is None:
+            return
+        try:
+            budget = PreviewBudget()
+            lattice = self._lattice()
+            end = len(lattice)
+            learning = self._learning_view
+            if self._learning is not None and learning is not None:
+                if self._learning.revision != learning.revision:
+                    learning = None
+            added_readings = self.personal.added_readings if self.personal is not None else ()
+            # Use only already decoded clause boundaries. Opening the explicit
+            # list can afford to decode a head split in the middle of a clause.
+            tail_begin = max(0, end - PREVIEW_TAIL_TOKENS)
+            for pos in range(end - 1, tail_begin - 1, -1):
+                if lattice[pos]["kind"] == "literal":
+                    tail_begin = pos + 1
+                    break
+            starts = [(i, s.start) for i, s in enumerate(self.segments)
+                      if tail_begin <= s.start <= end - HISTORY_MIN_KANA]
+            for index, start in starts[-MAX_TAILS:]:
+                if budget.exhausted():
+                    return
+                tail = restrict(lattice, start, end, press_pins(lattice, start, end, self.segments[:index]))
+                rows = predict(tail, self._lex, self.predict_index, learning,
+                               added_readings=added_readings, budget=budget)
+                if rows:
+                    self.suggestion = Suggestion(index, rows,
+                                                 self.personal.revision if self.personal else None,
+                                                 learning.revision if learning else None)
+                    return
+        except Exception as exc:
+            print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
 
     def _predict_key(self) -> None:
         """Open the predictions for the trailing reading, if there are any."""
@@ -712,6 +784,14 @@ class ImeSession:
             return
         self._sync_personal()
         learning = self._learning.snapshot() if self._learning is not None else None
+        personal_revision = self.personal.revision if self.personal is not None else None
+        if (self.suggestion is not None and self.suggestion.personal_revision == personal_revision
+                and self.suggestion.learning_revision == (learning.revision if learning else None)):
+            index = self.suggestion.index
+            self._start_prediction(self.segments[index].start, self.segments[-1].end,
+                                   self.segments[:index], self.suggestion.rows)
+            return
+        added_readings = self.personal.added_readings if self.personal is not None else ()
         lattice = self._lattice()
         run = len(lattice)  # the trailing kana run: no literal inside a prediction
         while run > 0 and lattice[run - 1]["kind"] != "literal":
@@ -733,27 +813,32 @@ class ImeSession:
                 tail = restrict(lattice, start, len(lattice),
                                 press_pins(lattice, start, len(lattice), head))
                 found = predict(tail, self._lex, self.predict_index, learning,
-                                self.personal.revision if self.personal is not None else None)
+                                added_readings=added_readings)
             except Exception as exc:
                 print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
                 return
             if not found:
                 continue
-            stream = CandidateStream(iter(found))
-            stream.ensure(0)
             if head_request is not None:
                 self._display_key = head_request.key
                 self._learning_view = head_request.learning
                 self._word_starts = {start for run in head_picks or () for start in run.word_starts}
-            self.segments = head + [Segment(start, len(lattice), found[0], fixed=True,
-                                            choices=stream, context=PREDICTION)]
-            self.segments[-1].mark_shown()
-            self.converted = True
-            self.predicting = True
-            self.focus = len(head)
-            self.composition = "".join(s.selected.surface for s in self.segments)
-            self._open_cands()
+            self._start_prediction(start, len(lattice), head, found)
             return
+
+    def _start_prediction(self, start: int, end: int, head: list[Segment],
+                          rows: list[Candidate]) -> None:
+        self._clear_suggestion()
+        stream = CandidateStream(iter(rows))
+        stream.ensure(0)
+        self.segments = head + [Segment(start, end, rows[0], fixed=True,
+                                        choices=stream, context=PREDICTION)]
+        self.segments[-1].mark_shown()
+        self.converted = True
+        self.predicting = True
+        self.focus = len(head)
+        self.composition = "".join(s.selected.surface for s in self.segments)
+        self._open_cands()
 
     def _to_script(self, script: str) -> None:
         """F6-F10: give the focused clause one fixed spelling (MS-IME's gestures).
@@ -1431,6 +1516,8 @@ class ImeSession:
     def _refresh(self, *, picks: list[KanaRun] | None = None,
                  request: ConversionRequest | None = None) -> None:
         """Rebuild the composition from one conversion and its learning view."""
+        self._clear_suggestion()
+        self._suggest_dirty = self.prediction == "auto" and not self.converted
         self.predicting = False
         if request is None:
             request = self._conversion_input(self._parts())
@@ -1491,6 +1578,7 @@ class ImeSession:
     def _clear_input(self) -> None:
         """The input is gone (committed); the connection's state stays."""
         self._end_alnum_hold()
+        self._clear_suggestion()
         self.tokens.clear()
         self.segments.clear()
         self._partial = False

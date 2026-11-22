@@ -144,6 +144,12 @@ static void OrderOfReplies() {
     assert(current > old);
     assert(!f.Answer(old) && f.Waiting(current));
     assert(f.Answer(current));
+
+    const auto suggestion = f.Next(1400, false);
+    assert(!f.Waiting() && f.Waiting(suggestion));
+    const auto key = f.Next(1401);
+    assert(f.Waiting() && f.Answer(suggestion) && f.Waiting(key));
+    assert(f.Answer(key) && !f.Waiting());
 }
 
 static void CarryFollowsOnlyTheReplayAndItsRoot() {

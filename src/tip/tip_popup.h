@@ -18,10 +18,12 @@ public:
     HWND Window() const { return hwnd_; }
     bool HasRows() const { return !rows_.empty(); }
 
-    void SetRows(std::vector<Row> rows, int selected = -1, std::wstring footer = {}) {
+    void SetRows(std::vector<Row> rows, int selected = -1, std::wstring footer = {},
+                 bool numbered = true) {
         rows_ = std::move(rows);
         selected_ = selected;
         footer_ = std::move(footer);
+        numbered_ = numbered;
         layout_dirty_ = true;
     }
 
@@ -151,7 +153,7 @@ private:
             SelectFont(dc, small_font_);
             for (const auto& row : rows_) notes = std::max(notes, TextWidth(dc, row.note));
             layout_ = tip_logic::MeasurePopup(metrics_, work_width, (int)rows_.size(), selected_,
-                                              text, notes, TextWidth(dc, footer_), notice_);
+                                              text, notes, TextWidth(dc, footer_), notice_, numbered_);
             ReleaseDC(hwnd_, dc);
             measured_work_width_ = work_width;
             layout_dirty_ = false;
@@ -199,7 +201,7 @@ private:
             const COLORREF secondary = selected && colors_.selected_text != colors_.text
                                      ? colors_.selected_text : colors_.secondary;
             SelectFont(dc, small_font_);
-            if (!notice_) {
+            if (!notice_ && numbered_) {
                 Text(dc, std::to_wstring(i + 1), {row.left + metrics_.padding, row.top,
                      layout_.text_left - metrics_.number_column / 2, row.bottom}, secondary, DT_RIGHT);
             }
@@ -290,6 +292,7 @@ private:
     RECT caret_{}, work_{};
     std::vector<Row> rows_;
     std::wstring footer_;
+    bool numbered_ = true;
     int selected_ = -1, measured_work_width_ = 0;
     bool layout_dirty_ = true, changing_monitor_ = false;
     const bool notice_;

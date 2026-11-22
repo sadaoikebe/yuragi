@@ -931,7 +931,7 @@ private:
             TF_SELECTION selection{};
             selection.range = caret; selection.style.ase = TF_AE_NONE;
             caret_hr = ctx->SetSelection(ec, 1, &selection);
-            if (!commit && reply.converted && !reply.candidates.empty())
+            if (!commit && reply.ShowsCandidates())
                 PlacePopup(ec, ctx, caret, candidate_, g_log);
         }
         if (commit || text.empty()) hr = End(ec, state_);
@@ -1580,8 +1580,12 @@ private:
                 FocusMoved();
                 return;
             }
-            // DESIGN「タイマー」: the FSM's chord deadline, or the LM's next look.
-            if (!direct_) SendRequest("timeout", "\"t\":" + std::to_string(NowMs()));
+            if (direct_) return;
+            std::string at = "\"t\":" + std::to_string(NowMs());
+            if (timer_pending_)
+                SendRequest("timeout", at);
+            else if (!in_flight_.Waiting() && buffered_.empty() && !KeysWaiting())
+                SendRequest("suggest", at, false);
         } else if (id == kTimerNotice) {
             HideNotice();
         } else if (id == kTimerReplay) {
@@ -1604,6 +1608,12 @@ private:
     void CancelReplyTimer() {
         if (hwnd_ && reply_timer_) KillTimer(hwnd_, reply_timer_);
         reply_timer_ = 0;
+    }
+
+    void ArmReplyTimer(ULONGLONG at) {
+        // A queued WM_TIMER survives KillTimer. Give each deadline its own ID.
+        reply_timer_ = ++next_reply_timer_;
+        ArmTimer(reply_timer_, at);
     }
 
     // -- connection -------------------------------------------------------------------------
@@ -1696,6 +1706,15 @@ private:
             if (!buffered_.empty()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
             return m.seq == wanted;
         }
+        if (m.suggestion_only) {
+            if (state_ && m.seq == in_flight_.Last()) {
+                NoteCandidates(m);
+                state_->show_candidates = m.ShowsCandidates();
+                RequestCandidatePosition();
+                if (m.suggest_at) ArmReplyTimer(*m.suggest_at);
+            }
+            return m.seq == wanted;
+        }
         if (tip_logic::CommitsVisibleText(m)) FinishLocal(false);
         if (m.error) {
             sent_keys_.clear();
@@ -1723,10 +1742,10 @@ private:
     // -- sending ---------------------------------------------------------------------------
     // A numbered request whose reply is applied when it comes (timer polls,
     // resets). Only while keys go to the broker at all.
-    long long SendRequest(const std::string& op, const std::string& extra = "") {
+    long long SendRequest(const std::string& op, const std::string& extra = "", bool blocking = true) {
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return 0;
-        long long seq = in_flight_.Next(NowMs());
-        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), tip_logic::KEY_BUDGET_MS)) {
+        long long seq = in_flight_.Next(NowMs(), blocking);
+        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), blocking ? tip_logic::KEY_BUDGET_MS : 0)) {
             in_flight_.Answer(seq);
             return 0;
         }
@@ -1814,7 +1833,16 @@ private:
         fsm_idle_ = r.fsm_idle;
         composing_ = phase_ != tip_logic::Phase::Empty && phase_ != tip_logic::Phase::Direct;
         timer_pending_ = r.has_timer && !r.direct;
-        if (!r.direct && r.converted && !r.candidates.empty()) {
+        NoteCandidates(r);
+        CancelReplyTimer();
+        if (timer_pending_)
+            ArmReplyTimer(r.timer);
+        else if (!r.direct && r.suggest_at)
+            ArmReplyTimer(*r.suggest_at);
+    }
+
+    void NoteCandidates(const Message& r) {
+        if (r.ShowsCandidates()) {
             std::vector<TipPopup::Row> rows;
             rows.reserve(r.candidates.size());
             for (size_t i = 0; i < r.candidates.size(); ++i) {
@@ -1822,21 +1850,16 @@ private:
                                 ? Utf8ToWide(r.candidate_notes[i]) : std::wstring()});
             }
             std::wstring footer;
-            if (r.page > 0 || r.has_next_page) {
+            if (r.suggesting) {
+                footer = L"Tab で選択";
+            } else if (r.page > 0 || r.has_next_page) {
                 footer = std::to_wstring((long long)std::max(0, r.page) + 1) + L" ページ";
                 if (r.has_next_page) footer += L"  ▾";
             }
-            candidate_.SetRows(std::move(rows), r.cand_index, std::move(footer));
+            candidate_.SetRows(std::move(rows), r.cand_index, std::move(footer), !r.suggesting);
             Log(L"candidate reply client=%p seq=%lld", static_cast<void*>(this), r.seq);
         } else {
             HideCands();
-        }
-        CancelReplyTimer();
-        if (timer_pending_) {
-            // A queued WM_TIMER survives KillTimer. A fresh ID prevents an old
-            // notification from polling a conversion in the new input context.
-            reply_timer_ = ++next_reply_timer_;
-            ArmTimer(reply_timer_, r.timer);
         }
     }
 
@@ -1859,7 +1882,7 @@ private:
             state_ = std::make_shared<CompositionState>(ctx, edit_cookie_ != TF_INVALID_COOKIE);
             AdviseLayout(ctx);
         }
-        state_->show_candidates = !r.direct && r.converted && !r.candidates.empty();
+        state_->show_candidates = r.ShowsCandidates();
         ctx->Release();
         state_->pending.push_back(r);
         RequestEdit(EditSession::Apply, state_, sync);
@@ -1882,7 +1905,7 @@ private:
                 state->pending.clear();
                 state->BreakContinuity();
                 PostMessageW(hwnd_, kKeysMessage, 0, 0);
-            }
+            } else if (kind == EditSession::Position) state->position_pending = false;
             Log(L"edit refused hr=%08lx result=%08lx", hr, result);
         }
         es->Release();

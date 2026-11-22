@@ -3,7 +3,7 @@
 Three settings, each one of a few values (the first is the default):
 
   learning     "on" or "off": learn from conversions (DESIGN「学習履歴のファイル」)
-  prediction   "tab" or "off": Tab on unconverted input offers continuations
+  prediction   "auto", "tab" or "off": continuations of unconverted input
   lm_rescore   true or false: rescore the candidates with the language model
 
 A key the engine does not know is ignored. No file means the defaults; a file
@@ -23,7 +23,7 @@ CONFIG_NAME = "config.json"
 
 SETTINGS = {
     "learning": ("on", "off"),
-    "prediction": ("tab", "off"),
+    "prediction": ("auto", "tab", "off"),
     "lm_rescore": (True, False),
 }
 DEFAULTS = {name: values[0] for name, values in SETTINGS.items()}

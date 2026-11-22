@@ -176,13 +176,17 @@ struct Message {
     std::optional<Phase> phase;
     std::string input_mode;
     bool predicting = false, error = false, has_next_page = false;
+    bool suggesting = false, suggestion_only = false;
     bool fsm_idle = true;
     int n_tokens = 0, focus = -1, page = 0, cand_index = 0;
     int caret = -1, commit_caret = -1;
     bool has_timer = false;
     uint64_t timer = 0;
+    std::optional<uint64_t> suggest_at;
     std::vector<std::string> candidates, candidate_notes;
     std::vector<Segment> segments;
+
+    bool ShowsCandidates() const { return !direct && (converted || suggesting) && !candidates.empty(); }
 };
 
 inline bool ReadInt(const tip_json::Value& v, const char* key, int& out) {
@@ -237,6 +241,8 @@ inline bool ParseMessage(const std::string& line, Message& m) {
         if (v.Get("phase").text == kPhaseNames[i]) m.phase = (Phase)i;
     ReadText(v, "input_mode", m.input_mode);
     ReadBool(v, "predicting", m.predicting);
+    ReadBool(v, "suggesting", m.suggesting);
+    ReadBool(v, "suggestion_only", m.suggestion_only);
     ReadBool(v, "error", m.error);
     ReadBool(v, "has_next_page", m.has_next_page);
     const auto& fsm = v.Get("fsm");
@@ -252,6 +258,7 @@ inline bool ParseMessage(const std::string& line, Message& m) {
         m.has_timer = true;
         m.timer = (uint64_t)timer;
     }
+    if (v.Get("suggest_at").Int(timer) && timer >= 0) m.suggest_at = (uint64_t)timer;
     const auto& candidates = v.Get("candidates").array;
     const auto& notes = v.Get("candidate_notes").array;
     for (size_t i = 0; i < candidates.size(); ++i) {
@@ -499,9 +506,9 @@ inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
 // requests went out (one reader, one broker, one engine thread).
 class InFlight {
 public:
-    long long Next(uint64_t now) {
+    long long Next(uint64_t now, bool blocking = true) {
         long long seq = ++last_;
-        sent_.push_back({seq, now});
+        sent_.push_back({seq, now, blocking});
         return seq;
     }
     // A reply for seq: true when it is the oldest one in flight (as it must be);
@@ -512,7 +519,9 @@ public:
         sent_.pop_front();
         return true;
     }
-    bool Waiting() const { return !sent_.empty(); }
+    bool Waiting() const {
+        return std::any_of(sent_.begin(), sent_.end(), [](const Sent& s) { return s.blocking; });
+    }
     bool Waiting(long long seq) const {
         for (const auto& s : sent_)
             if (s.seq == seq) return true;
@@ -525,6 +534,7 @@ private:
     struct Sent {
         long long seq;
         uint64_t at;
+        bool blocking;  // a suggestion only changes the popup
     };
     std::deque<Sent> sent_;
     long long last_ = 0;
@@ -605,8 +615,8 @@ struct PopupLayout {
 };
 
 inline PopupLayout MeasurePopup(const PopupMetrics& m, int work_width, int rows, int selected,
-                                int text, int notes, int footer, bool notice) {
-    const int left = m.inset + m.padding + (notice ? 0 : m.number_column);
+                                int text, int notes, int footer, bool notice, bool numbered = true) {
+    const int left = m.inset + m.padding + (notice || !numbered ? 0 : m.number_column);
     const int right_padding = m.inset + m.padding;
     const int limit = std::min(m.max_width, work_width);
     const int note_width = std::min({notes, m.note_max,

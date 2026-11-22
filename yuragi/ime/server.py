@@ -19,6 +19,7 @@ Reply: {"composition":"...","commit":"...","phase":"composing","fsm":"S1","pendi
 eat: whether the down was consumed (present on down replies). While the LM
       is pending, a down that could be consumed is reserved for later dispatch.
 predicting: the candidates are predictions (Tab acted; the TIP eats that Tab).
+suggest_at: optional idle deadline for the TIP to send {"op":"suggest","t":...}.
 pending: the conversion awaits the LM (engine); poll with timeout at "timer".
 """
 
@@ -30,6 +31,7 @@ import json
 import sys
 from pathlib import Path
 
+from yuragi.ime.bunsetsu import candidate_note
 from yuragi.ime.session import ImeSession
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
@@ -41,6 +43,8 @@ from yuragi.ime.zenz import CONTEXT_CHARS
 
 def dispatch(sess: ImeSession, msg: dict) -> dict:
     """Shared protocol path for the engine, the stdio host and transcript tests."""
+    if msg.get("op") == "suggest":
+        return suggestion_reply(sess, msg)
     commit = apply_op(sess, msg)
     reply = snapshot(sess, msg.get("op"), eat=sess.key_eat, key_global=sess.key_global)
     set_reply_commit(sess, msg, reply, commit)
@@ -88,7 +92,30 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
         commit = sess.set_direct(msg["direct"], commit=msg.get("commit") is True) or ""
     elif op == "set_mode":
         commit = sess.set_mode(msg.get("mode")) or ""
+    sess.schedule_suggestion(t)
     return commit
+
+
+def suggestion_fields(sess: ImeSession) -> dict:
+    fields = {}
+    if sess.suggest_at is not None:
+        fields["suggest_at"] = sess.suggest_at
+    if sess.suggestion is not None:
+        rows = sess.suggestion.rows
+        fields.update(suggesting=True, candidates=[c.surface for c in rows], cand_index=-1,
+                      candidate_kinds=[c.kind for c in rows])
+        notes = [candidate_note(c) for c in rows]
+        if any(notes):
+            fields["candidate_notes"] = notes
+    return fields
+
+
+def suggestion_reply(sess: ImeSession, msg: dict, *, busy: bool = False) -> dict:
+    sess.suggest(int(msg.get("t", 0)), busy=busy)
+    reply = {"suggestion_only": True, **suggestion_fields(sess)}
+    if "seq" in msg:
+        reply["seq"] = msg["seq"]
+    return reply
 
 
 def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
@@ -118,6 +145,7 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
     }
     if any(sess.candidate_notes):
         reply["candidate_notes"] = sess.candidate_notes
+    reply.update(suggestion_fields(sess))
     if (caret := sess.caret) is not None:
         reply["caret"] = caret
     if op == "down" and eat is not None:
@@ -140,8 +168,8 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--personal-file", type=Path, default=DEFAULT_PERSONAL_PATH,
                         help="the user's word list (JSONL; edit in the management window)")
     parser.add_argument("--prediction", choices=PREDICTION_MODES, default=DEFAULT_PREDICTION,
-                        help="Tab on unconverted input offers continuations from history "
-                             "and the dictionary (tab, the default) or does nothing (off)")
+                        help="offer continuations automatically (auto, the default), "
+                             "on Tab (tab), or never (off)")
     lm = parser.add_argument_group("LM: zenz-v2.5 (on by default in the engine)")
     lm.add_argument("--lm-rescore", action="store_true", default=None,
                     help="convert with zenz on Space (needs torch+transformers)")
@@ -274,10 +302,9 @@ def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
                       prediction=getattr(args, "prediction", DEFAULT_PREDICTION))
     sess.load()
     if sess.prediction != "off":
+        # Sort the base readings once. Personal additions have their own small index.
+        sess.predict_index.keys(sess._lex)
         sess._sync_personal()
-        # The sorted reading index, once at start rather than on the first Tab.
-        sess.predict_index.keys(sess._lex, sess.personal.revision
-                                if sess.personal is not None else None)
     if with_lm and args.lm_rescore:
         # The LM is optional equipment: a machine without torch/transformers
         # (e.g. a fresh install) still gets a working IME, without the LM.
@@ -299,7 +326,7 @@ def process_request(sess: ImeSession, msg: dict, *, log_text=False, lm_timing=Fa
         print(json.dumps({"lm": {k: round(v, 3) if isinstance(v, float) else v
                                  for k, v in converter.last.items()}}),
               file=sys.stderr, flush=True)
-    if log_text:
+    if log_text and "composition" in reply:
         print(json.dumps({"composition": reply["composition"], "commit": reply["commit"]},
                          ensure_ascii=False), file=sys.stderr, flush=True)
     return reply

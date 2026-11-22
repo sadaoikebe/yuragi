@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 
-from .server import apply_op, set_reply_commit, snapshot
+from .server import apply_op, set_reply_commit, snapshot, suggestion_reply
 from .session import ConversionRequest, ImeSession
 from .zenz import KanaRun
 
@@ -88,6 +88,10 @@ class LmWorker:
     def available(self) -> bool:
         with self._cond:
             return self.state == "ready"
+
+    def busy(self) -> bool:
+        with self._cond:
+            return bool(self._wanted or self._slots or self._running is not None)
 
     def wait_until_loaded(self) -> bool:
         with self._cond:
@@ -277,6 +281,8 @@ class ConnectionPipeline:
 
     def handle(self, msg: dict) -> dict:
         op = msg.get("op")
+        if op == "suggest":
+            return suggestion_reply(self.sess, msg, busy=self.worker.busy())
         if "t" in msg:
             self.last_t = int(msg["t"])
         if op == "reset" or (op == "set_direct" and msg["direct"] != self.sess.direct
