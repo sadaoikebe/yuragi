@@ -48,8 +48,10 @@ class KeyRepeatTest(unittest.TestCase):
         self.send("down", VK_SPACE, step=400)
         converted = self.send("down", VK_SPACE)
         self.assertTrue(converted["converted"])
-        # Held on, it goes on to the next candidate (USAGE「押しっぱなし」).
-        self.assertEqual(self.send("down", VK_SPACE)["composition"], converted["candidates"][1])
+        # Held on, it opens the window on the next candidate (USAGE「押しっぱなし」).
+        following = self.send("down", VK_SPACE)
+        self.assertEqual((following["cand_index"], following["composition"]),
+                         (1, following["candidates"][1]))
 
 
 if __name__ == "__main__":

@@ -55,7 +55,7 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("commit_one_char", "先頭の一字を確定", COMPOSING, until="noop"),
     Command("commit_to_focus", "注目文節まで確定", CONVERTED),
     Command("delete_before", "前字削除", COMPOSING, run=lambda s: s._delete_before()),
-    Command("alnum_mode", "英数の続き", INPUT, until="noop"),
+    Command("alnum_mode", "英数の続き", INPUT, run=lambda s: s._hold_alnum(), keeps_resizing=True),
     Command("delete_after", "後字削除", COMPOSING, until="noop"),
     Command("cursor_left", "カーソルを左へ", COMPOSING, until="noop"),
     Command("cursor_right", "カーソルを右へ", COMPOSING, until="noop"),

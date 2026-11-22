@@ -154,15 +154,14 @@ class DocumentContextTest(ContextCase):
                 numbers = {"latest": seq, "stale": old_seq}
                 extra = {} if after == "missing" else {"after_commit_seq": numbers.get(after, after)}
                 self.assertEqual(k.tap("W", left_context=text, **extra)["composition"], winner)
-                reply = k.tap(SPACE)
-                self.assertEqual(reply["candidates"][0], winner)
+                self.assertEqual(k.tap(SPACE)["composition"], winner)
                 self.assertEqual(self.reviewer.calls[-1], (expected_text, "か", winner))
 
     def test_auto_commit_uses_selected_right_id_and_appends_once(self):
         k = self.keys
         k.tap("J", left_context="文章の")
         k.tap(SPACE)
-        k.tap(DOWN)  # 別語尾 has an RID whose next word is 河.
+        k.tap(SPACE)  # the window opens on the next row: 別語尾 has an RID whose next word is 河.
         r = k.tap("W", left_context="無視する")
         self.assertEqual((r["commit"], r["composition"]), ("別語尾", "河"))
         k.tap(SPACE)
@@ -196,7 +195,7 @@ class DocumentContextTest(ContextCase):
                     reply = k.send("down", ENTER)
                 self.assertEqual(reply["commit"], expected_commit)
                 self.assertEqual(k.tap("W", after_commit_seq=reply["seq"])["composition"], winner)
-                self.assertEqual(k.tap(SPACE)["candidates"][0], winner)
+                self.assertEqual(k.tap(SPACE)["composition"], winner)
 
     def test_a_literal_inside_input_overrides_its_starting_pos(self):
         k = self.keys
@@ -288,8 +287,8 @@ class PipelineContextTest(ContextCase):
         self.worker.clock.now += 1
         with redirect_stderr(io.StringIO()):
             r = k.send("timeout")
-        self.assertEqual((r["pending"], r["composition"], r["candidates"][0]),
-                         (False, "川", "川"))
+        self.assertEqual((r["pending"], r["composition"]), (False, "川"))
+        self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
 
     def test_reset_drops_queued_context_and_delayed_commit(self):
         k = self.keys
@@ -318,8 +317,8 @@ class PipelineContextTest(ContextCase):
         seq = k.commit()
         k.tap("W", left_context="外語尾", after_commit_seq=seq)
         r = k.tap(SPACE)
-        self.assertEqual((r["pending"], r["composition"], r["candidates"][0]),
-                         (False, "川", "川"))
+        self.assertEqual((r["pending"], r["composition"]), (False, "川"))
+        self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
         self.assertEqual(self.reviewer.calls, [("外語尾", "か", "川")])
 
 
@@ -335,7 +334,7 @@ class ConnectionContextTest(EngineCase):
                 k.tap("J")
                 k.tap(SPACE)
             first.tap(0x7B)
-            self.assertEqual(second.tap(DOWN)["composition"], "別語尾")
+            self.assertEqual(second.tap(SPACE)["composition"], "別語尾")
             seq = first.commit()
             self.assertEqual(seq, second.commit())
             self.assertEqual(first.tap("W", left_context="尾", after_commit_seq=seq)["composition"],

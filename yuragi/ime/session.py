@@ -350,6 +350,7 @@ class ImeSession:
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
     key_global: str | None = field(default=None, init=False)
     input_mode: str = "hiragana"
+    _alnum_held: bool = False  # Shift+CapsLock: 英数の続き until the input ends
 
     @property
     def phase(self) -> str:
@@ -449,6 +450,7 @@ class ImeSession:
             return None
         if self.direct:
             self.set_direct(False)
+        self._end_alnum()  # Ctrl+CapsLock keeps the input; later keys type kana (MS-IME)
         if mode == "katakana":
             return self._then(self._finish_pending(), self._commit_katakana)
         self.input_mode = mode
@@ -526,11 +528,16 @@ class ImeSession:
 
         self.key_eat = True
         kind, key = classify(chord.vk)
+        if self._alnum_held and self.converted and chord.vk != SPACE.vk:
+            # MS-IME commits the conversion and drops the character: the IME is off.
+            self._forget_fsm_down(chord.vk)
+            return self._then(self._finish_pending(), self._commit)
         alnum = self._alnum_continues()
         if alnum and chord == SPACE:
             pending = self._finish_pending()
             self._forget_fsm_down(chord.vk)
-            return self._then(pending, lambda: self._ingest([ThumbTap()]))
+            tap = [Literal(" ", alnum=True)] if self._alnum_held else [ThumbTap()]
+            return self._then(pending, lambda: self._ingest(tap))
         literal = literal_character(chord.vk, bool(chord.mods & SHIFT))
         if alnum and kind == "M":
             literal = alnum_character(chord.vk, bool(chord.mods & SHIFT))
@@ -562,7 +569,7 @@ class ImeSession:
         return None
 
     def _alnum_continues(self) -> bool:
-        """英数の続き: the input ends in a half-width ASCII literal.
+        """英数の続き: Shift+CapsLock held it, or the input ends in a half-width ASCII literal.
 
         Only Shift+letter and the continuation itself type one (every other
         key types kana or a full-width literal), so the tail is the state.
@@ -570,8 +577,27 @@ class ImeSession:
         commits the conversion and starts a new input.
         """
         return (not self.converted and self._await is None and bool(self.tokens)
-                and isinstance(self.tokens[-1], Literal)
-                and self.tokens[-1].alnum)
+                and (self._alnum_held or (isinstance(self.tokens[-1], Literal)
+                                          and self.tokens[-1].alnum)))
+
+    def _hold_alnum(self) -> None:
+        """Shift+CapsLock with input (MS-IME's 英数 mode): the input and any
+        conversion stay; later keys type half-width alphanumerics."""
+        self._alnum_held = True
+
+    def _end_alnum(self) -> None:
+        """A mode change ends 英数の続き, held or not; the input stays."""
+        self._alnum_held = False
+        if self.tokens and isinstance(self.tokens[-1], Literal) and self.tokens[-1].alnum:
+            self.tokens[-1] = replace(self.tokens[-1], alnum=False)
+
+    def _end_alnum_hold(self) -> None:
+        """The input ended while held: MS-IME is left off, so the reply to an
+        eaten key asks the TIP to turn off. A passed key or an op only clears it."""
+        if self._alnum_held:
+            self._alnum_held = False
+            if self.key_eat:
+                self.key_global = "ime_off"
 
     def _then(self, text: str | None, rest: Callable[[], str | None]) -> str | None:
         """Run the rest of a key event now, or after the awaited conversion resolves."""
@@ -610,7 +636,7 @@ class ImeSession:
         self.converted = True
         if picks is not None or self._display_key != request.key:
             self._refresh(picks=picks, request=request)
-        self._open_cands()
+        self._clear_cands()  # the first conversion keeps the candidate window closed (MS-IME)
 
     def finish_conversion(self, picks: list[KanaRun] | None) -> str:
         """Resolve the awaited conversion (picks None: the Viterbi 1-best).
@@ -825,6 +851,8 @@ class ImeSession:
         if self.tokens:
             self.tokens.pop()
             self._refresh()
+            if not self.tokens:
+                self._end_alnum_hold()
 
     def _pass_empty_key(self, chord: Chord) -> None:
         if chord.mods in (0, SHIFT):
@@ -1198,6 +1226,7 @@ class ImeSession:
 
     def _clear_input(self) -> None:
         """The input is gone (committed); the connection's state stays."""
+        self._end_alnum_hold()
         self.tokens.clear()
         self.segments.clear()
         self._partial = False

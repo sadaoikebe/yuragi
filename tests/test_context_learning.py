@@ -103,7 +103,9 @@ class ContextLearningTest(unittest.TestCase):
         reply = keys.tap("2")
         return reply["segments"][reply["focus"]]["surface"]
 
-    def assert_head(self, reply, surface):
+    def assert_head(self, keys, reply, surface):
+        if reply["phase"] == "converting":  # the first conversion keeps the window closed
+            return self.assert_hidden_head(keys, reply, surface)
         self.assertEqual(reply["segments"][reply["focus"]]["surface"], surface)
         self.assertEqual(reply["candidates"][0], surface)
 
@@ -126,7 +128,7 @@ class ContextLearningTest(unittest.TestCase):
                         keys.tap(key)
                     result = keys.tap(SPACE)
                     if expected is not None:
-                        self.assert_head(result, expected)
+                        self.assert_head(keys, result, expected)
                     if surface is None:
                         break
                     self.pick(keys, result, surface)
@@ -170,12 +172,12 @@ class ContextLearningTest(unittest.TestCase):
                 for key in "AGL":
                     k.tap(key)
                 result = k.tap(SPACE)
-                self.assert_head(result, expected)
+                self.assert_head(k, result, expected)
                 if left:
                     # Cancel conversion but keep the connected position of this input.
                     while k.tap(ESC)["phase"] != "composing":  # closes the window first
                         pass
-                    self.assert_head(k.tap(SPACE), expected)
+                    self.assert_head(k, k.tap(SPACE), expected)
                     self.pick(k, k.tap(LEFT), "構成")
                 k.commit()
                 if left:
@@ -223,13 +225,13 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual([(p.reading, p.surface) for p in learning_admin.pairs(self.path)],
                          [("こうせい", "校正")])
 
-        _, other = convert("しりょうこうせいが", "資料構成が")
-        self.assert_head(other, "資料構成が")
+        keys, other = convert("しりょうこうせいが", "資料構成が")
+        self.assert_head(keys, other, "資料構成が")
         keys, replayed = convert("げんこうこうせいが", "原稿構成が")
-        self.assert_head(replayed, "原稿校正が")
-        self.assert_head(keys.tap(DELETE, mods=["ctrl"]), "原稿構成が")
-        _, reopened = convert("げんこうこうせいが", "原稿構成が")
-        self.assert_head(reopened, "原稿構成が")
+        self.assert_head(keys, replayed, "原稿校正が")
+        self.assert_head(keys, keys.tap(DELETE, mods=["ctrl"]), "原稿構成が")
+        keys, reopened = convert("げんこうこうせいが", "原稿構成が")
+        self.assert_head(keys, reopened, "原稿構成が")
 
     def test_partial_remainder_does_not_count_as_standalone_repeat(self):
         self.learn("公正", "厚生")
@@ -307,7 +309,7 @@ class ContextLearningTest(unittest.TestCase):
         self.pick(k, k.tap(SPACE), "原稿の")
         left = s.segments[0]
         self.assert_hidden_head(k, k.tap(RIGHT), "構成")
-        self.assert_head(k.tap(DELETE, mods=["ctrl"]), "校正")
+        self.assert_head(k, k.tap(DELETE, mods=["ctrl"]), "校正")
         self.assertIs(s.segments[0], left)
         self.assertTrue(left.fixed)
         self.assertFalse(s._learning.has_pair("こうせい", "構成"))
@@ -382,7 +384,7 @@ class ContextLearningTest(unittest.TestCase):
         self.plain(s, "こうせい")
         with patch.object(s.lm.model, "review", side_effect=RuntimeError("外部本文")):
             with redirect_stderr(io.StringIO()) as log:
-                self.assert_head(k.tap(SPACE), "構成")
+                self.assert_head(k, k.tap(SPACE), "構成")
         self.assertNotIn("外部本文", log.getvalue())
 
     def test_lm_uses_displayed_text_for_later_runs_and_partial_keeps_evidence(self):
@@ -446,7 +448,7 @@ class ContextLearningTest(unittest.TestCase):
                     self.assertEqual(k.send("timeout")["composition"], "")
                     self.assertEqual(len(self.rows()), count)
                 else:
-                    self.assert_head(reply, "校正")
+                    self.assert_head(k, reply, "校正")
 
     def test_compaction_retains_context_losers_and_pair_representatives(self):
         # Rows from before choices were told apart (no "choice"; legacy left
@@ -572,8 +574,8 @@ class LearningConnectionTest(EngineCase):
             keys.tap("R", after_commit_seq=seq, left_context="原稿の")
             for key in "AGL":
                 keys.tap(key)
-            reply = keys.tap(SPACE)
-            self.assertEqual((reply["composition"], reply["candidates"][0]), (winner, winner))
+            self.assertEqual(keys.tap(SPACE)["composition"], winner)
+            self.assertEqual(keys.tap(SPACE)["candidates"][0], winner)  # the window opens
 
 
 if __name__ == "__main__":

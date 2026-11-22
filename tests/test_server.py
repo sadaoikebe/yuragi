@@ -52,7 +52,9 @@ class ServerTest(unittest.TestCase):
         self.send("down", vk=ord("K"), t=20)  # still in the NICOLA window
         converted = self.send("down", vk=0x20, t=30, mods=["shift"])
         self.assertEqual((converted["phase"], converted["eat"], converted["commit"]),
-                         ("selecting", True, ""))
+                         ("converting", True, ""))
+        self.send("down", vk=0x20, t=32)  # opens the window
+        self.send("up", vk=0x20, t=34)
         self.send("down", vk=ord("3"), t=40)
         previous = self.send("down", vk=0x20, t=50, mods=["shift"])
         self.assertEqual(previous["cand_index"], 1)

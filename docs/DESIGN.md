@@ -4,6 +4,10 @@
 コードのコメントは、この文書の節を名前で参照する（DESIGN「見張り」など）。数値は「定数」の表にまとめ、
 本文は名前で書く。変換の中身（打鍵の判定、変換、候補、学習）は [CONVERSION.md](CONVERSION.md)。
 
+利用者に見える動きで迷ったときは、MS-IME（新 MS-IME を実機で見た動き）に合わせることを目安にする。
+ゆらぎ独自なのは、親指シフトの入力（文字キーと Space の同時打鍵、文字の面）。MS-IME の動きは [keybind/ms-ime.md](keybind/ms-ime.md) にまとめ、
+そこに無い動きは、作る前に実機で確かめる。
+
 ---
 
 ## 1. 構成
@@ -127,7 +131,7 @@ TIP → ブローカー（プロトコル 1）:
 | `converted` | 候補を開いた変換中か |
 | `direct` / `input_mode` / `pass_through` | 直接入力か / かなの入力モード / この down・up をアプリに渡すか |
 | `phase` | キー表の局面（`empty` `composing` `converting` `selecting` `resizing` `predicting` `direct`） |
-| `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前 |
+| `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前。Shift+CapsLock の英数の続きが入力ごと終わったときの `ime_off` も（[KEYBIND.md](KEYBIND.md) §6.5） |
 | `eat_pending` / `resolved_keys` | LM 待ちで打鍵を保留した / 保留していた打鍵の元の `seq` と最終の `eat`。コマンドだったときは `global` も（[KEYBIND.md](KEYBIND.md) §8.1） |
 | `fsm` / `n_tokens` / `timer` | 同時打鍵の判定の状態 / トークン数 / 次に `timeout` を送る時刻（無ければ null） |
 | `segments` | 各文節・リテラルの `start/end`（トークン位置）、`surface/reading`、`literal/fixed`、`display_start/display_end`（表示のコードポイント位置。TIP が UTF-16 の位置に直す）。半開区間 |

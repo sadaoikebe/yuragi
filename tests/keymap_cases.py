@@ -26,6 +26,8 @@ def key_cases():
                     session._ingest([Plain("k")] * count)
                 if phase in ("converting", "selecting", "resizing"):
                     dispatch(session, {"op": "down", "vk": 0x20, "mods": ["shift"]})
+                    if phase == "selecting":  # the second press opens the window
+                        dispatch(session, {"op": "down", "vk": 0x20, "mods": ["shift"]})
                     if phase in ("converting", "resizing"):
                         dispatch(session, {"op": "down", "vk": 0x25, "mods": ["shift"]})
                     if phase == "converting":

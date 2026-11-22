@@ -16,8 +16,9 @@ from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 
-VK_SPACE, VK_RETURN, VK_LEFT, VK_DOWN = 0x20, 0x0D, 0x25, 0x28
+VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
+VK_CAPITAL = 0x14
 
 
 class Keys:
@@ -113,7 +114,9 @@ class PartialCommitTest(unittest.TestCase):
 
     def test_shrink_then_expand_reconverts_before_opening_candidates(self):
         k = self.typed("わたしはがっこうにいく")
-        original = k.convert()
+        k.convert()
+        listed = k.convert()["candidates"]
+        k.tap(VK_UP)  # back to the first row, the window still open
         shrunk = k.tap(VK_LEFT, ["shift"])
         self.assertEqual((shrunk["phase"], shrunk["candidates"]), ("resizing", []))
         self.assertEqual(self.surfaces(shrunk), ["わたし", "は", "学校に", "行く"])
@@ -128,7 +131,7 @@ class PartialCommitTest(unittest.TestCase):
                          [(0, 4), (4, 9), (9, 11)])
         for reply, index in ((k.convert(), 1), (k.tap(VK_DOWN), 2)):
             self.assertEqual((reply["phase"], reply["cand_index"]), ("selecting", index))
-            self.assertEqual(reply["segments"][0]["surface"], original["candidates"][index])
+            self.assertEqual(reply["segments"][0]["surface"], listed[index])
 
     def test_expand_displays_both_changed_readings_and_preserves_new_boundaries(self):
         k = self.typed("わたしはがっこうにいく")
@@ -178,6 +181,7 @@ class PartialCommitTest(unittest.TestCase):
     def test_candidate_and_segment_edges_depend_on_the_phase(self):
         k = self.typed("わたしはがっこうにいく")
         original = k.convert()
+        k.convert()  # the second Space opens the window
         last = k.tap(VK_END)
         self.assertEqual((last["phase"], last["focus"], last["has_next_page"]),
                          ("selecting", 0, False))
@@ -232,7 +236,7 @@ class PartialCommitTest(unittest.TestCase):
             with self.subTest(key=key, mods=mods):
                 k = self.typed("わたしはがっこうにいく")
                 k.convert()
-                chosen = k.tap(VK_DOWN)
+                chosen = k.convert()  # the window opens on the next row
                 closed = k.tap(key, mods)
                 self.assertEqual((closed["phase"], closed["candidates"], closed["composition"],
                                   closed["focus"]),
@@ -244,6 +248,66 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(k.tap(0x76, ["ctrl"]).get("global"), "open_word_register")
         k = self.typed("わたし")
         self.assertIsNone(k.tap(0x76, ["ctrl"]).get("global"))
+
+    def test_first_space_converts_and_the_second_opens_the_window(self):
+        k = self.typed("わたしはがっこうにいく")
+        first = k.convert()
+        self.assertEqual((first["phase"], first["candidates"]), ("converting", []))
+        second = k.convert()
+        self.assertEqual((second["phase"], second["cand_index"]), ("selecting", 1))
+        self.assertEqual(second["segments"][0]["surface"], second["candidates"][1])
+
+    # Shift+CapsLock with input is MS-IME's 英数 mode (ms-ime.md §1.5): the input
+    # stays, later keys type half-width, and the IME is off once the input ends.
+    def test_shift_capslock_types_alphanumerics_and_the_end_turns_the_ime_off(self):
+        k = Keys(self.session())
+        k.send("down", ord("K"))  # awaiting the chord decision
+        held = k.tap(VK_CAPITAL, ["shift"])
+        k.send("up", ord("K"))
+        self.assertEqual((held["phase"], held["eat"], held["composition"]),
+                         ("composing", True, "き"))
+        k.plain("a")
+        spaced = k.convert()  # a half-width space, not a conversion
+        self.assertEqual((spaced["phase"], spaced["composition"]), ("composing", "きa "))
+        done = k.tap(VK_RETURN)
+        self.assertEqual((k.committed, done["eat"], done.get("global")), ("きa ", True, "ime_off"))
+        self.assertIsNone(k.tap(VK_RETURN).get("global"))
+
+    def test_shift_capslock_ends_when_backspace_empties_the_input(self):
+        k = self.typed("きし")
+        k.tap(VK_CAPITAL, ["shift"])
+        self.assertEqual([k.tap(0x08).get("global") for _ in range(2)], [None, "ime_off"])
+        self.assertEqual(k.committed, "")
+
+    def test_ctrl_capslock_after_shift_capslock_types_kana_again(self):
+        k = Keys(self.session())
+        k.plain("k")
+        k.tap(VK_CAPITAL, ["shift"])
+        k.plain("a")
+        dispatch(k.s, {"op": "set_mode", "mode": "hiragana"})  # the TIP's Ctrl+CapsLock
+        k.plain("k")
+        k.idle()
+        done = k.tap(VK_RETURN)
+        self.assertEqual((k.committed, done.get("global")), ("きaき", None))
+
+    def test_shift_capslock_keeps_the_conversion_until_a_character(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        listed = k.convert()
+        held = k.tap(VK_CAPITAL, ["shift"])
+        self.assertEqual((held["phase"], held["composition"]), ("selecting", listed["composition"]))
+        self.assertEqual(k.convert()["cand_index"], 2)  # the candidate keys still work
+        ended = k.tap(ord("W"))  # MS-IME commits and drops the character
+        self.assertEqual((ended["phase"], ended["composition"], ended.get("global")),
+                         ("empty", "", "ime_off"))
+        self.assertEqual(k.committed, held["composition"].replace(
+            listed["segments"][0]["surface"], listed["candidates"][2], 1))
+
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        k.tap(VK_LEFT, ["shift"])
+        self.assertEqual(k.tap(VK_CAPITAL, ["shift"])["phase"], "resizing")
+        self.assertEqual(k.convert()["phase"], "converting")
 
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
         k = self.typed("わたしはがっこうにいく")

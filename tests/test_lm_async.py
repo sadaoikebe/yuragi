@@ -346,7 +346,7 @@ class DeadlineTest(unittest.TestCase):
         self.assertEqual((commits, final_state(reply)),
                          run_reference(self.session, head + tail.events, PickyModel()))
 
-    def test_completed_prefetch_opens_candidates_in_the_space_reply(self):
+    def test_completed_prefetch_converts_in_the_space_reply(self):
         pipe, worker, _ = self.pipeline()
         worker.eager_prefetch = True
         for event in Typist().kana("きしゃ").space().events:
@@ -354,26 +354,25 @@ class DeadlineTest(unittest.TestCase):
         self.assertEqual(len(worker.jobs), 1)
         self.assertFalse(reply["pending"])
         self.assertTrue(reply["converted"])
-        self.assertTrue(reply["candidates"])
 
     def test_candidate_number_waits_for_conversion(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
-        keys = Typist().kana("きしゃ").space()
+        keys = Typist().kana("きしゃ").space().space()  # the second Space opens the window
         for event in keys.events:
             reply = pipe.handle(event)
         self.assertEqual((reply["phase"], reply["pending"]), ("composing", True))
-        digit = pipe.handle({"op": "down", "vk": ord("2"), "t": keys.t + 10})
+        digit = pipe.handle({"op": "down", "vk": ord("3"), "t": keys.t + 10})
         self.assertEqual((digit["eat"], digit["pending"], digit["commit"]), (True, True, ""))
         worker.complete(pipe.job)
         selected = pipe.handle(TERMINAL)
         self.assertEqual((selected["phase"], selected["cand_index"], selected["commit"]),
-                         ("selecting", 1, ""))
-        self.assertEqual(selected["composition"], selected["candidates"][1])
+                         ("selecting", 2, ""))
+        self.assertEqual(selected["composition"], selected["candidates"][2])
 
         # Releasing a number used as a command must leave the next stroke
         # waiting for its own timeout, even if that timeout is already due.
         next_key = pipe.handle({"op": "down", "vk": ord("K"), "t": keys.t + 20})
-        released = pipe.handle({"op": "up", "vk": ord("2"), "t": next_key["timer"] + 1})
+        released = pipe.handle({"op": "up", "vk": ord("3"), "t": next_key["timer"] + 1})
         self.assertNotIn("eat", released)
         self.assertEqual((released["composition"], released["timer"]), ("", next_key["timer"]))
 
