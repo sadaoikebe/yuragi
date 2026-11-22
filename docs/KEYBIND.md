@@ -9,6 +9,7 @@
 | [keybind/windows.md](keybind/windows.md) | この設計が前提にする Windows・TSF のキー入力の動き（キーの届き方、Alt、PreservedKey、`kbd101` の読み替え、繰り返し） |
 | [keybind/ime-impl.md](keybind/ime-impl.md) | 既存の IME（Mozc、CorvusSKK、SampleIME など）が、キーをどう受け取り、繰り返しと up をどう扱っているか |
 | [keybind/ime-survey.md](keybind/ime-survey.md) | 主要な日本語 IME のキー操作とカスタマイズの比較。IME ごとの全表は `keybind/` の各ファイル |
+| [keybind/reconversion.md](keybind/reconversion.md) | 再変換の仕組み（`ITfFnReconversion`、IMM32 の `IMR_RECONVERTSTRING`）と、Mozc・MS-IME の動き、アプリごとの違い |
 | [DESIGN.md](DESIGN.md) | 全体の構成・通信・TIP の規則 |
 
 ---
