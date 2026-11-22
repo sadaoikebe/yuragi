@@ -219,6 +219,9 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 
 - `` ` ``（HID の使用番号 0x35）は 0x29、CapsLock（0x39）は 0x3A、左 Ctrl・Shift・Alt は 0x1D・0x2A・0x38。どの接続でも同じ（[KBDIN] の表）。
 - JIS 固有のキー: International1–5（0x87–0x8B）は 0x73・0x70・0x7D・0x79・0x7B、LANG1・LANG2（0x90・0x91）は 0x72・0x71（[KBDIN]）。
+- 101/102 設定の `kbd101.dll` では、0x79 の変換用仮想キーは 0xFF（割り当てなし）、0x7B は
+  `VK_OEM_PA1`（0xEB）。この組み合わせを受けた新 MS-IME は未確定文字を保って通した。
+  `VK_CONVERT`（0x1C）・`VK_NONCONVERT`（0x1D）が直接届けば、101/102 設定でも変換・無変換を処理する。
 - Fn キーとその層はキーボードの中で処理され、Windows には届かない（[EC]）。
 
 ---

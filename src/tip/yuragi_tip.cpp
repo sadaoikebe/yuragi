@@ -1679,7 +1679,8 @@ private:
         if (m.hello || m.event == "state" || (m.has_seq && !m.engine)) broker_state_ = m.state;
         // DESIGN「使えない間の打鍵」: a ready engine has opened a new session, in kana input.
         if (!was_ready && broker_state_ == "ready") {
-            if (katakana_) pending_mode_seq_ = SendRequest("set_mode", "\"mode\":\"katakana\"");
+            if (input_mode_ != "hiragana")
+                pending_mode_seq_ = SendRequest("set_mode", "\"mode\":" + tip_json::Quote(input_mode_));
             if (direct_) pending_mode_seq_ = SendRequest("set_direct", "\"direct\":true");
         }
         if (!m.has_seq) {
@@ -1819,7 +1820,7 @@ private:
     void NoteReply(const Message& r) {
         bool mode_changed = direct_ != r.direct;
         direct_ = r.direct;
-        if (!r.input_mode.empty()) katakana_ = r.input_mode == "katakana";
+        if (!r.input_mode.empty()) input_mode_ = r.input_mode;
         phase_ = r.phase.value_or(r.direct ? tip_logic::Phase::Direct :
                  r.predicting ? tip_logic::Phase::Predicting :
                  r.converted ? tip_logic::Phase::Selecting :
@@ -2066,7 +2067,7 @@ private:
 
     Decision Decide(const Stroke& key, bool buffer = true) {
         using namespace tip_logic;
-        if (!tm_ || key.chord.mods.win) return {};
+        if (!tm_ || key.chord.mods.win || UntranslatedJisKey(key.raw, (uint32_t)key.flags)) return {};
         const bool can_hold = HoldDuringCarry(key.chord, key.raw, (uint32_t)key.flags,
                                               keymap_.global.count(key.chord.Code()) != 0);
         if (buffer && carry_.Active()) return {can_hold ? Action::Buffer : Action::Pass};
@@ -2314,12 +2315,13 @@ private:
             return true;
         }
         if (!tip_logic::Toggles(CurrentMode())) return false;
-        bool mode = command == GlobalCommand::Hiragana || command == GlobalCommand::Katakana;
+        const char* mode = command == GlobalCommand::Hiragana ? "hiragana" :
+                           command == GlobalCommand::Katakana ? "katakana" :
+                           command == GlobalCommand::FullAlnum ? "full_alnum" : nullptr;
         bool direct = command == GlobalCommand::Toggle ? !direct_ : command == GlobalCommand::Off;
         if (mode) {
-            bool katakana = command == GlobalCommand::Katakana;
-            pending_mode_seq_ = SendRequest("set_mode", katakana ? "\"mode\":\"katakana\"" : "\"mode\":\"hiragana\"");
-            if (!pending_mode_seq_) katakana_ = katakana;
+            pending_mode_seq_ = SendRequest("set_mode", "\"mode\":" + tip_json::Quote(mode));
+            if (!pending_mode_seq_) input_mode_ = mode;
         } else {
             pending_mode_seq_ = SendRequest("set_direct", direct ? "\"direct\":true,\"commit\":true" :
                                                                   "\"direct\":false");
@@ -2451,7 +2453,8 @@ private:
     DWORD layout_cookie_ = TF_INVALID_COOKIE;
     Notice notice_ = Notice::None;
     bool stopped_told_ = false;
-    bool direct_ = false, katakana_ = false;
+    bool direct_ = false;
+    std::string input_mode_ = "hiragana";
     bool composing_ = false, pending_ = false, timer_pending_ = false;
     bool fsm_idle_ = true;
     tip_logic::KeyTable keymap_ = tip_logic::DefaultKeyTable();

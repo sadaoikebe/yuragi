@@ -75,7 +75,7 @@
 
 - 表を引くときは、今の局面に無ければ親をたどり、最後に `global` を見る。子の局面には、親と違う行だけを書けばよい。
 - `converting` と `selecting` の違いは、候補窓が開いているかだけ。1 回目の変換では候補窓を出さず（`converting`）、2 回目の Space（`next_candidate`）で開く（MS-IME と同じ）。
-- **変換候補の窓を開くのは、候補を選ぶ操作だけ**（`next_candidate`・`prev_candidate`）。注目文節や文節の境界を変える操作
+- **変換候補の窓を開くのは、候補を選ぶ操作だけ**（`next_candidate`・`prev_candidate`・`open_candidates`）。注目文節や文節の境界を変える操作
   （文節の移動、伸縮、先頭の文節の確定、字種の変換）は、候補窓を閉じる。
 - 自動表示の予測候補は、入力中のキー操作と未確定文字を変えない。Tab・↓ などの `predict` で表示済みの候補に
   フォーカスを入れると `predicting` に移り、候補番号で選べる。自動表示が間に合わなかったときも `predict` は使える。
@@ -124,7 +124,7 @@
 | コマンド | 局面 | 作った | 中身 |
 |---|---|---|---|
 | `ime_toggle` / `ime_on` / `ime_off` | global（`ime_toggle` は predicting にも割り当て可） | ○ / ○ / ○ | 直接入力とかな入力の切り替え。入力があれば確定してから切り替える。TIP が実行 |
-| `mode_hiragana` / `mode_katakana` | global | ○ / ○ | ひらがな／カタカナの入力モードにする（直接入力ならオンにする）。TIP が実行 |
+| `mode_hiragana` / `mode_katakana` / `mode_full_alnum` | global | ○ | ひらがな／全角カタカナ／全角英数の入力モードにする。直接入力ならオンにする。TIP が実行 |
 | `open_settings` / `open_word_register` | global（`open_word_register` は empty にも割り当て可） | ○ / ○ | 設定ウィンドウを開く（後者は単語登録のタブ）。TIP が実行 |
 | `open_menu` | empty | ○ | タスクバーの右クリックと同じ IME メニューを開く。TIP が実行 |
 | `insert_space` | empty, composing | ○ | 空白を入れる（幅は入力モードに従う。ひらがなでは全角） |
@@ -141,6 +141,8 @@
 | `commit_to_focus` | converting 以降 | × | 注目文節までを確定する |
 | `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力はカーソルの前の 1 打、変換済みは表示の末尾の 1 字を消す |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
+| `cycle_kana_mode` / `toggle_alnum_width` | empty | ○ | 未確定文字が無いときに、かなの字種または英数の幅の入力モードを変える |
+| `cycle_kana_script` / `cycle_alnum_width` | composing 以降 | ○ | 無変換・Shift+無変換。未変換の入力の字種、または変換中の注目文節の字種を変える |
 | `delete_after` | composing、editing | ○ | カーソルの後の 1 打を消す。文節内入力で入力全体の末尾なら確定して通す |
 | `cursor_left` / `cursor_right` / `cursor_home` / `cursor_end` | composing、editing | ○ | 左右へ 1 打、または入力・注目文節の先頭・末尾に移動する |
 | `cursor_left_or_pass` / `cursor_right_or_pass` / `delete_before_or_pass` | editing | ○ | 左右へ移動、または前字を削除する。入力全体の端でこれ以上動けなければ確定して通す |
@@ -150,6 +152,7 @@
 | `cancel_resize` | resizing | ○ | 文節長変更前の境界と表記を戻す |
 | `to_hiragana` / `to_katakana` / `to_half_katakana` / `to_full_alnum` / `to_half_alnum` | composing 以降 | ○ | 字種を変える（MS-IME の F6–F10） |
 | `close_candidates` | selecting | ○ | 候補窓を閉じて `converting` に戻る。変換はそのまま |
+| `open_candidates` | converting | ○ | 選んでいた候補で候補窓を開く |
 | `next_candidate` / `prev_candidate` | converting 以降、predicting | ○ | 次／前の候補。`converting` では候補窓を開く |
 | `next_page` / `prev_page` | selecting 以降 | ○ | 次／前の 9 件 |
 | `select_candidate_1` … `select_candidate_9` | selecting 以降 | ○ | 番号の候補を選ぶ |
@@ -255,8 +258,10 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
 
 MS-IME のプリセットは、新 MS-IME を実機で見た動き（[keybind/ms-ime.md](keybind/ms-ime.md) §1.5。食べるか、確定して通すか、そのまま通すか）のとおりにする。
 働きの名前と、実機で見ていないキーは、旧 MS-IME のテンプレート「Microsoft IME」のキー設定の表（ms-ime.md §2）による。
-US 配列に無いキー（変換・無変換・かな・英数・半角/全角・ひらがな・カタカナ）の行は持たず、
-新 MS-IME の US 配列での代わり（オン/オフの Alt+`` ` ``、入力モードの Ctrl/Shift/Alt+CapsLock。ms-ime.md §1.2、§1.5）を使う。
+オン/オフの Alt+`` ` `` と、入力モードの Ctrl/Shift/Alt+CapsLock は新 MS-IME の US 配列と同じ。
+変換・無変換は `Convert`／`NonConvert` の仮想キーコードが届いたときに使える。
+`kbd101` が INT4 を 0xFF、INT5 を `VK_OEM_PA1` として届けたときは、未確定文字を保ってそのままアプリに通す。
+変換キーによる再変換と、他の JIS 専用キーの割り当ては別途扱う。実機での違いは [keybind/ms-ime.md](keybind/ms-ime.md) に記す。
 TIP はどちらのファイルも読まない（§8）。
 
 ### 5.2 プリセットの形式

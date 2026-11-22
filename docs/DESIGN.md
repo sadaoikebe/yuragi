@@ -129,7 +129,7 @@ TIP → ブローカー（プロトコル 1）:
 |---|---|
 | `composition` / `commit` | 変換中の表示 / この要求で確定した文字 |
 | `converted` | 変換中か。文節内入力も含む |
-| `direct` / `input_mode` / `pass_through` | 直接入力か / かなの入力モード / この down・up をアプリに渡すか |
+| `direct` / `input_mode` / `pass_through` | 直接入力か / 入力モード（`hiragana`・`katakana`・`half_katakana`・`full_alnum`） / この down・up をアプリに渡すか |
 | `phase` | キー表の局面（`empty` `composing` `converting` `selecting` `resizing` `editing` `predicting` `direct`） |
 | `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前。Shift+CapsLock の英数の続きが入力ごと終わったときの `ime_off` も（[KEYBIND.md](KEYBIND.md) §6.5） |
 | `eat_pending` / `resolved_keys` | LM 待ちで打鍵を保留した / 保留していた打鍵の元の `seq` と最終の `eat`。コマンドだったときは `global` も（[KEYBIND.md](KEYBIND.md) §8.1） |

@@ -48,10 +48,11 @@ PREDICTION = "predict"  # Segment.context of the predictions' segment
 class Literal:
     text: str
     alnum: bool = False
+    frozen: bool = False  # a spelling left before subsequent input by NonConvert
 
     def __post_init__(self) -> None:
-        if len(self.text) != 1:
-            raise ValueError("a literal token must contain exactly one character")
+        if not self.text or (len(self.text) != 1 and not self.frozen):
+            raise ValueError("invalid literal input unit")
 
 
 _HALF_KATAKANA: dict[str, str] = {}
@@ -64,13 +65,24 @@ for _code in range(0xFF66, 0xFF9E):
             _HALF_KATAKANA.setdefault(_full, _half + _mark)
 
 
+KANA_SCRIPTS = ("hiragana", "katakana", "half_katakana")
+
+
+def katakana(hiragana: str) -> str:
+    return "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in hiragana)
+
+
 def half_katakana(hiragana: str) -> str:
     """F8: ひらがな → ﾊﾝｶｸｶﾀｶﾅ (a kana with no half-width form stays full-width)."""
-    out = []
-    for ch in hiragana:
-        kata = chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch
-        out.append(_HALF_KATAKANA.get(kata, kata))
-    return "".join(out)
+    return "".join(_HALF_KATAKANA.get(c, c) for c in katakana(hiragana))
+
+
+def kana_script(reading: str, script: str) -> str:
+    if script == "katakana":
+        return katakana(reading)
+    if script == "half_katakana":
+        return half_katakana(reading)
+    return reading
 
 
 def alnum_spelling(keys: str, current: str | None, *, full: bool) -> str:
@@ -91,6 +103,10 @@ def half_width_ascii(text: str) -> bool:
 def to_full_width(text: str) -> str:
     return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in text)
 
+
+def to_half_width(text: str) -> str:
+    return "".join(chr(ord(c) - 0xFEE0) if "！" <= c <= "～" else " " if c == "　" else c
+                   for c in text)
 
 def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
     if isinstance(tok, Literal):
@@ -368,6 +384,7 @@ class ImeSession:
     key_global: str | None = field(default=None, init=False)
     commit_caret_back: int = field(default=0, init=False)  # distance from the latest commit's end
     input_mode: str = "hiragana"
+    _input_script: str | None = None  # current unconverted run styled with NonConvert
     _alnum_held: bool = False  # Shift+CapsLock: 英数の続き until the input ends
     max_tokens: int | None = None
 
@@ -467,22 +484,32 @@ class ImeSession:
         return text
 
     def set_mode(self, mode: str) -> str | None:
-        if mode not in ("hiragana", "katakana"):
+        if mode not in (*KANA_SCRIPTS, "full_alnum"):
             return None
         if self.direct:
             self.set_direct(False)
         self._end_alnum()  # Ctrl+CapsLock keeps the input; later keys type kana (MS-IME)
-        if mode == "katakana":
-            return self._then(self._finish_pending(), self._commit_katakana)
+        if mode != "hiragana":
+            return self._then(self._finish_pending(), lambda: self._commit_mode(mode))
         self.input_mode = mode
         if not self.converted and self.tokens:
             self._refresh()
         return None
 
-    def _commit_katakana(self) -> str:
+    def _commit_mode(self, mode: str) -> str:
         text = self._commit()
-        self.input_mode = "katakana"
+        self.input_mode = mode
         return text
+
+    def _cycle_kana_mode(self) -> None:
+        index = KANA_SCRIPTS.index(self.input_mode) if self.input_mode in KANA_SCRIPTS else -1
+        self.input_mode = KANA_SCRIPTS[(index + 1) % len(KANA_SCRIPTS)]
+
+    def _toggle_alnum_width(self) -> None:
+        if self.input_mode == "full_alnum":
+            self.set_direct(True)
+        else:
+            self.input_mode = "full_alnum"
 
     def on_key(
         self, down: bool, vk: int, now_ms: int, mods: list[str] | None = None,
@@ -554,13 +581,17 @@ class ImeSession:
             self._forget_fsm_down(chord.vk)
             return self._then(self._finish_pending(), self._commit)
         alnum = self._alnum_continues()
+        if self.input_mode == "full_alnum" and not self._alnum_held and chord == SPACE:
+            return self._then(self._finish_pending(), lambda: self._ingest([Literal("　")]))
         if alnum and chord == SPACE:
             pending = self._finish_pending()
             self._forget_fsm_down(chord.vk)
             tap = [Literal(" ", alnum=True)] if self._alnum_held else [ThumbTap()]
             return self._then(pending, lambda: self._ingest(tap))
         literal = literal_character(chord.vk, bool(chord.mods & SHIFT))
-        if alnum and kind == "M":
+        if self.input_mode == "full_alnum" and not self._alnum_held and kind == "M":
+            literal = to_full_width(alnum_character(chord.vk, bool(chord.mods & SHIFT)))
+        elif alnum and kind == "M":
             literal = alnum_character(chord.vk, bool(chord.mods & SHIFT))
         if literal is not None:
             pending = self._finish_pending()
@@ -664,6 +695,7 @@ class ImeSession:
             except Exception as exc:
                 print(f"LM conversion failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         self.converted = True
+        self._input_script = None
         self._cursor = None
         self._reading_edit = False
         if picks is not None or self._display_key != request.key:
@@ -729,6 +761,7 @@ class ImeSession:
         if self.prediction != "auto":
             return
         if (self.phase != "composing" or self._await is not None or self._alnum_held
+                or self._input_script is not None or self.input_mode == "full_alnum"
                 or self._cursor is not None
                 or len(self.tokens) < HISTORY_MIN_KANA):
             self._clear_suggestion()
@@ -829,6 +862,7 @@ class ImeSession:
     def _start_prediction(self, start: int, end: int, head: list[Segment],
                           rows: list[Candidate]) -> None:
         self._clear_suggestion()
+        self._input_script = None
         stream = CandidateStream(iter(rows))
         stream.ensure(0)
         self.segments = head + [Segment(start, end, rows[0], fixed=True,
@@ -839,6 +873,72 @@ class ImeSession:
         self.focus = len(head)
         self.composition = "".join(s.selected.surface for s in self.segments)
         self._open_cands()
+
+    def _script_units(self, segment: Segment, script: str) -> list[str]:
+        tokens = self.tokens[segment.start:segment.end]
+        if script in KANA_SCRIPTS and not segment.literal:
+            return [kana_script(c, script) for c in segment.selected.reading]
+        if script in KANA_SCRIPTS:
+            return [token.text for token in tokens]
+        units = []
+        for token in tokens:
+            if isinstance(token, Literal) and token.frozen:
+                units.append(token.text)
+                continue
+            text = to_half_width(token.text) if isinstance(token, Literal) else token.key
+            if script == "full_alnum":
+                text = "　" if text == " " else to_full_width(text)
+            units.append(text)
+        return units
+
+    def _cycle_jis_script(self, *, alnum: bool) -> None:
+        if self.predicting:
+            self._cancel_conversion()
+        if not self.segments:
+            return
+        if not self.converted:
+            current = self._input_script or self.input_mode
+            if alnum:
+                self._input_script = "half_alnum" if current == "full_alnum" else "full_alnum"
+            else:
+                index = KANA_SCRIPTS.index(current) if current in KANA_SCRIPTS else -1
+                self._input_script = KANA_SCRIPTS[(index + 1) % len(KANA_SCRIPTS)]
+            self._clear_cands()
+            self._show_input_reading()
+            self._update_composition()
+            return
+
+        if self.focus < 0:
+            return
+        segment = self.segments[self.focus]
+        if segment.literal and not alnum:
+            return
+        if alnum:
+            full = "".join(self._script_units(segment, "full_alnum"))
+            script = "half_alnum" if segment.selected.surface == full else "full_alnum"
+        else:
+            selected = segment.selected
+            forms = [kana_script(selected.reading, style) for style in KANA_SCRIPTS]
+            script = (KANA_SCRIPTS[(forms.index(selected.surface) + 1) % len(forms)]
+                      if selected.kind == "kana" and selected.surface in forms else "hiragana")
+        surface = "".join(self._script_units(segment, script))
+        self._clear_cands()
+        self.editing = False
+        self._cursor = None
+        segment.fixed, segment.raw = True, False
+        segment.index = -1
+        selected = segment.selected
+        self._set_selection(self.focus, Candidate(surface, selected.reading, selected.score,
+                                                  selected.lid, selected.rid, "alnum" if alnum else "kana"))
+
+    def _freeze_input_script(self) -> None:
+        """Keep the spelling of the last input run when another run starts."""
+        if self._input_script is None:
+            return
+        for segment in self.segments:
+            units = self._script_units(segment, self._input_script)
+            self.tokens[segment.start:segment.end] = [Literal(text, frozen=True) for text in units]
+        self._input_script = None
 
     def _to_script(self, script: str) -> None:
         """F6-F10: give the focused clause one fixed spelling (MS-IME's gestures).
@@ -981,7 +1081,15 @@ class ImeSession:
             prefix = sum(len(segment.selected.surface) for segment in self.segments[:self.focus])
             return prefix + (end if self._cursor is None else self._cursor) - start
         if not self.converted and self._reading_edit:
-            return len(self.tokens) if self._cursor is None else self._cursor
+            end = len(self.tokens) if self._cursor is None else self._cursor
+            length = 0
+            for segment in self.segments:
+                count = min(end, segment.end) - segment.start
+                if count <= 0:
+                    break
+                script = self._input_script or self.input_mode
+                length += sum(len(c) for c in self._script_units(segment, script)[:count])
+            return length
         return None
 
     def _move_cursor(self, delta: int, *, pass_at_edge: bool = False) -> str | None:
@@ -1417,6 +1525,7 @@ class ImeSession:
         return insert or None
 
     def _insert_token(self, token: Token | Literal) -> None:
+        self._freeze_input_script()
         start, end = self._edit_bounds()
         index = end if self._cursor is None else self._cursor
         if isinstance(token, (AmbShift, Literal)):
@@ -1474,6 +1583,8 @@ class ImeSession:
         return self._ingest([Literal(text)])
 
     def _convert(self) -> None:
+        if self.predicting:
+            self._cancel_conversion()
         request = self.conversion_request() if self.lm_deferred else None
         if request is not None:
             self._await = request
@@ -1535,17 +1646,17 @@ class ImeSession:
         self.composition = "".join(s.selected.surface for s in self.segments)
 
     def _show_input_reading(self) -> None:
-        if not self._reading_edit and self.input_mode != "katakana":
+        script = self._input_script or self.input_mode
+        if not self._reading_edit and self._input_script is None and script not in KANA_SCRIPTS[1:]:
             return
         for index, segment in enumerate(self.segments):
-            if segment.literal:
-                continue
-            if self._reading_edit:
+            if self._reading_edit and not segment.literal:
                 self._make_raw(index, segment.selected.reading)
-            if self.input_mode == "katakana":
-                surface = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c
-                                  for c in segment.selected.surface)
+            if self._input_script is not None or not segment.literal:
+                surface = "".join(self._script_units(segment, script))
                 segment.selected = replace(segment.selected, surface=surface)
+                if self._input_script is not None:
+                    segment.mark_shown()
         self._display_key = None  # conversion must compute the regular candidates
 
     def _sync_personal(self) -> None:
@@ -1579,6 +1690,7 @@ class ImeSession:
         """The input is gone (committed); the connection's state stays."""
         self._end_alnum_hold()
         self._clear_suggestion()
+        self._input_script = None
         self.tokens.clear()
         self.segments.clear()
         self._partial = False
@@ -1657,9 +1769,8 @@ class ImeSession:
         if self._alnum_held:
             return self._commit(reset_input=False)
         head = self.segments[0]
-        text = head.selected.reading[0]  # the typed kana, not the live conversion
-        if not head.literal and self.input_mode == "katakana":
-            text = chr(ord(text) + 0x60) if "ぁ" <= text <= "ゖ" else text
+        # Commit the first input unit, which can display two half-width characters.
+        text = self._script_units(head, self._input_script or self.input_mode)[0]
         self._note_commit(text)
         if len(kept) == 1:
             self._clear_input()

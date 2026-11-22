@@ -62,13 +62,14 @@ inline constexpr std::array<const char*, 8> kPhaseNames = {
     "empty", "composing", "converting", "selecting", "resizing", "predicting", "editing", "direct"
 };
 
-enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, Settings, Words, Menu };
+enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, FullAlnum, Settings, Words, Menu };
 inline GlobalCommand ParseGlobal(const std::string& id) {
     if (id == "ime_toggle") return GlobalCommand::Toggle;
     if (id == "ime_on") return GlobalCommand::On;
     if (id == "ime_off") return GlobalCommand::Off;
     if (id == "mode_hiragana") return GlobalCommand::Hiragana;
     if (id == "mode_katakana") return GlobalCommand::Katakana;
+    if (id == "mode_full_alnum") return GlobalCommand::FullAlnum;
     if (id == "open_settings") return GlobalCommand::Settings;
     if (id == "open_word_register") return GlobalCommand::Words;
     if (id == "open_menu") return GlobalCommand::Menu;
@@ -421,8 +422,14 @@ inline bool KanaLockKey(uint32_t vk, uint32_t flags) {
     return vk == 0x15 && ((flags >> 16) & 0xFF) == 0x3A; // kbd101 already changed the lock
 }
 
+inline bool UntranslatedJisKey(uint32_t vk, uint32_t flags) {
+    const unsigned scan = (flags >> 16) & 0x1FF;  // include the extended bit
+    return (scan == 0x79 && vk == 0xFF) || (scan == 0x7B && vk == 0xEB);
+}
+
 inline bool HoldDuringCarry(Chord chord, uint32_t raw_vk, uint32_t flags, bool is_global) {
     return !chord.mods.win && !ModifierVk(raw_vk) && !KanaLockKey(raw_vk, flags) &&
+           !UntranslatedJisKey(raw_vk, flags) &&
            (!chord.mods.alt || chord.mods.ctrl || is_global);
 }
 

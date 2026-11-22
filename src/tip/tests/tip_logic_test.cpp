@@ -115,6 +115,13 @@ static void EatingKeys() {
     assert(WantKey(caps, {Phase::Empty, true}, table) == Take::Send);
     assert(WantKey(caps, {Phase::Predicting, false}, table) == Take::Send);
 
+    const Chord width = NormalizeKey(0x1D, shift);
+    assert(take(width.vk, width.mods, Phase::Composing) == Take::Send);
+    assert(UseGlobal(width.Code(), {Phase::Direct, false}, table) == GlobalUse::Run);
+    assert(table.GlobalAt(Phase::Direct, width.Code()) == GlobalCommand::FullAlnum);
+    assert(!HoldDuringCarry({0xEB, none}, 0xEB, 0x7B0000, false));
+    assert(HoldDuringCarry({0x1D, none}, 0x1D, 0x7B0000, false));
+
     auto toggle = Parse(R"({"seq":1,"eat":false,"global":"ime_toggle"})");
     assert(toggle.eat == false && toggle.global == GlobalCommand::Toggle);
     auto final = Parse(R"({"seq":4,"phase":"empty","commit":"x","global":"future_command",
