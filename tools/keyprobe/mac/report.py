@@ -37,7 +37,8 @@ LEGEND = """\
 | `確定「感じ」` | 「感じ」を確定し、キーは食べた（確定した文字が表示と違うときもある） |
 | `確定「感じ」→通す:…` | 確定してから、キーをアプリに通した |
 | `確定「感じ」 →あ` | 確定してから、キーで次の入力を始めた |
-| `–` | 食べて、何も変わらなかった |
+| `–` | IME が食べて、何も変わらなかった（英字（ABC）では同じキーでアプリにコマンドか文字が届くので、食べたと分かる） |
+| `·` | 何も起きなかった。英字（ABC）でも何も起きないキーなので、IME が食べたのか、テキスト入力の仕組みが捨てたのかは区別できない |
 | `か^んじ` | 入力中の文字。`^` はカーソル（末尾にあるときは書かない） |
 | `*今日／雨です` | 変換中。`／` は文節の区切り、`*` は注目文節 |
 | `+窓` / `-窓` | 候補（予測候補）の窓が開いた / 閉じた |
@@ -49,6 +50,14 @@ LEGEND = """\
 def lit(x):
     names = {"\u3000": "全角空白", " ": "空白", "\xa0": "NBSP"}
     return names.get(x) or (repr(x)[1:-1] if any(ord(c) < 32 for c in x) else x)
+
+
+QUIET = set()  # keys that do nothing even with the ABC input source (set in main)
+
+
+def nothing(r):
+    b, a = r["before"], r["after"]
+    return (not r["events"] and a["segs"] == b["segs"] and a["text"] == b["text"] and a["source"] == b["source"])
 
 
 def cell(r):
@@ -75,8 +84,10 @@ def cell(r):
         out.append("→英字" if a["source"] == "ABC" else "→ひらがな")
     if bool(a["panels"]) != bool(b["panels"]) and ac:
         out.append("+窓" if a["panels"] else "-窓")
-    s = " ".join(out) or "–"
-    return "`" + s.replace("`", "ˋ") + "`" if s != "–" else s
+    if not out:
+        return "·" if r["state"] == "abc" or r["name"] in QUIET else "–"
+    s = " ".join(out)
+    return "`" + s.replace("`", "ˋ") + "`"
 
 
 def load(path):
@@ -108,14 +119,19 @@ def main():
     for path in sys.argv[1:]:
         every |= {st for st, _ in load(path)}
     keys = list(dict.fromkeys(k for _, k in default))
+    QUIET.update(k for (st, k), r in default.items() if st == "abc" and nothing(r))
     print("# macOS 日本語入力プログラムの状態 × キーの表（実機）\n")
-    print("[macos.md](macos.md) §10 の元データ。`tools/keyprobe/mac/report.py` で作った（手で直さない）。"
+    print("[macos.md](macos.md) の元データ。`tools/keyprobe/mac/report.py` で作った（手で直さない）。"
           "採り方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。\n")
     print("- 環境: MacBook Air (M1)、macOS 27.2.1、US 配列、入力ソース「日本語 - ローマ字入力」。2026-11-22。"
           "キーは試験アプリの中で合成した（システムが先に取るキーは届かない。Control＋Space など）。")
     print("- 設定: ライブ変換オフ、推測候補表示オン、タイプミス修正オン、学習なし（プライベートモード）。")
-    print("- **制御文字の確定**（`確定「\\x01」` など）は合成したキーでの結果。Home・End・Control＋Q などで入力を捨てて制御文字を確定した。"
-          "本物のキーで確かめたのは、予測候補を選んでいるときの Home と入力中の Control＋Q で、同じだった（[macos.md](macos.md) §10.8）。\n")
+    print("- `確定「\\x01」` などは、入力を捨てて制御文字を確定する動き。予測候補を選んでいるときの Home と入力中の Control＋Q は、"
+          "本物のキーでも同じになる。ほかのキーは合成したキーでだけ見ている。")
+    print("- Command 付きのキー（`Cmd+…`）は、この表の試験の窓（メニューが無い）ではテキスト欄に届かないので `·` になる。"
+          "メニューを持つアプリでの動きは [macos.md](macos.md) §1。")
+    print("- 候補窓（④）の候補の並びは 1 かんじ（ひらがな）、2 感じ、3 漢字、4 幹事、5 かんじ、6 監事、7 カンジ、8 寛治、9 完二。"
+          "1 と 5 はどちらも「かんじ」なので、同じ結果になる。\n")
     print("**状態の作り方**\n")
     print("| 状態 | 作り方 |\n|---|---|")
     for s, p in PREP.items():

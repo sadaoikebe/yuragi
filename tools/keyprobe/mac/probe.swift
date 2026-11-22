@@ -1,4 +1,4 @@
-// Prototype: a window whose view implements NSTextInputClient and logs everything the
+// A window whose view implements NSTextInputClient and logs everything the
 // input method does (one JSON object per line on stdout), driven by synthetic key events.
 //
 //   probe <inject> <input-source-id> "<keys>" [shot-dir]

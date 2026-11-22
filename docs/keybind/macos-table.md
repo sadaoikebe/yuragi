@@ -1,10 +1,12 @@
 # macOS 日本語入力プログラムの状態 × キーの表（実機）
 
-[macos.md](macos.md) §10 の元データ。`tools/keyprobe/mac/report.py` で作った（手で直さない）。採り方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。
+[macos.md](macos.md) の元データ。`tools/keyprobe/mac/report.py` で作った（手で直さない）。採り方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。
 
 - 環境: MacBook Air (M1)、macOS 27.2.1、US 配列、入力ソース「日本語 - ローマ字入力」。2026-11-22。キーは試験アプリの中で合成した（システムが先に取るキーは届かない。Control＋Space など）。
 - 設定: ライブ変換オフ、推測候補表示オン、タイプミス修正オン、学習なし（プライベートモード）。
-- **制御文字の確定**（`確定「\x01」` など）は合成したキーでの結果。Home・End・Control＋Q などで入力を捨てて制御文字を確定した。本物のキーで確かめたのは、予測候補を選んでいるときの Home と入力中の Control＋Q で、同じだった（[macos.md](macos.md) §10.8）。
+- `確定「\x01」` などは、入力を捨てて制御文字を確定する動き。予測候補を選んでいるときの Home と入力中の Control＋Q は、本物のキーでも同じになる。ほかのキーは合成したキーでだけ見ている。
+- Command 付きのキー（`Cmd+…`）は、この表の試験の窓（メニューが無い）ではテキスト欄に届かないので `·` になる。メニューを持つアプリでの動きは [macos.md](macos.md) §1。
+- 候補窓（④）の候補の並びは 1 かんじ（ひらがな）、2 感じ、3 漢字、4 幹事、5 かんじ、6 監事、7 カンジ、8 寛治、9 完二。1 と 5 はどちらも「かんじ」なので、同じ結果になる。
 
 **状態の作り方**
 
@@ -34,7 +36,8 @@
 | `確定「感じ」` | 「感じ」を確定し、キーは食べた（確定した文字が表示と違うときもある） |
 | `確定「感じ」→通す:…` | 確定してから、キーをアプリに通した |
 | `確定「感じ」 →あ` | 確定してから、キーで次の入力を始めた |
-| `–` | 食べて、何も変わらなかった |
+| `–` | IME が食べて、何も変わらなかった（英字（ABC）では同じキーでアプリにコマンドか文字が届くので、食べたと分かる） |
+| `·` | 何も起きなかった。英字（ABC）でも何も起きないキーなので、IME が食べたのか、テキスト入力の仕組みが捨てたのかは区別できない |
 | `か^んじ` | 入力中の文字。`^` はカーソル（末尾にあるときは書かない） |
 | `*今日／雨です` | 変換中。`／` は文節の区切り、`*` は注目文節 |
 | `+窓` / `-窓` | 候補（予測候補）の窓が開いた / 閉じた |
@@ -59,7 +62,7 @@
 | End | `通す:scrollToEndOfDocument` | – | `かんじ` | `確定「\x04」` | `通す:scrollToEndOfDocument` | `通す:scrollToEndOfDocument` |
 | PageUp | `通す:scrollPageUp` | `*感じ` | `*感じ` | – | `通す:scrollPageUp` | `通す:scrollPageUp` |
 | PageDown | `通す:scrollPageDown` | `*感じ` | `*感じ` | – | `通す:scrollPageDown` | `通す:scrollPageDown` |
-| Eisu | `→英字` | `確定「かんじ」 →英字` | `確定「かんじ」 →英字` | `確定「感情」 →英字` | `→英字` | – |
+| Eisu | `→英字` | `確定「かんじ」 →英字` | `確定「かんじ」 →英字` | `確定「感情」 →英字` | `→英字` | · |
 | Kana | – | – | – | – | – | `→ひらがな` |
 | F1 | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
 | F2 | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
@@ -98,14 +101,14 @@
 | Shift+End | `通す:moveToEndOfDocumentAndModifySelection` | – | – | – | `通す:moveToEndOfDocumentAndModifySelection` | `通す:moveToEndOfDocumentAndModifySelection` |
 | Shift+PageUp | `通す:pageUpAndModifySelection` | – | – | – | `通す:pageUpAndModifySelection` | `通す:pageUpAndModifySelection` |
 | Shift+PageDown | `通す:pageDownAndModifySelection` | – | – | – | `通す:pageDownAndModifySelection` | `通す:pageDownAndModifySelection` |
-| Shift+Eisu | `→英字` | `確定「かんじ」 →英字` | `確定「かんじ」 →英字` | `確定「感情」 →英字` | `→英字` | – |
+| Shift+Eisu | `→英字` | `確定「かんじ」 →英字` | `確定「かんじ」 →英字` | `確定「感情」 →英字` | `→英字` | · |
 | Shift+Kana | – | – | – | – | – | `→ひらがな` |
 | Shift+a | `A` | `かんじA` | `かんA^じ` | `確定「感情」 →A -窓` | `A` | `通す:A` |
-| Ctrl+Space | – | – | – | – | – | – |
+| Ctrl+Space | · | · | · | · | · | · |
 | Ctrl+Return | `通す:insertLineBreak` | – | – | – | `通す:insertLineBreak` | `通す:insertLineBreak` |
 | Ctrl+Esc | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` |
 | Ctrl+Delete | – | – | – | – | `*感じ +窓` | `通す:deleteBackwardByDecomposingPreviousCharacter` |
-| Ctrl+Tab | – | – | – | – | – | – |
+| Ctrl+Tab | · | · | · | · | · | · |
 | Ctrl+Left | `通す:moveToLeftEndOfLine` | – | – | – | `通す:moveToLeftEndOfLine` | `通す:moveToLeftEndOfLine` |
 | Ctrl+Right | `通す:moveToRightEndOfLine` | – | – | – | `通す:moveToRightEndOfLine` | `通す:moveToRightEndOfLine` |
 | Ctrl+Up | `通す:scrollPageUp` | `*感じ` | `*感じ` | – | `通す:scrollPageUp` | `通す:scrollPageUp` |
@@ -114,7 +117,7 @@
 | Ctrl+' | – | `kanji -窓` | `kanji -窓` | `-窓` | – | `通す:insertSingleQuoteIgnoringSubstitution` |
 | Ctrl+, | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
 | Ctrl+. | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
-| Ctrl+/ | – | – | – | – | – | – |
+| Ctrl+/ | · | · | · | · | · | · |
 | Ctrl+[ | `通す:noop` | `(空)` | `(空)` | `かんじ -窓` | `通す:noop` | `通す:noop` |
 | Ctrl+] | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
 | Ctrl+- | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
@@ -135,7 +138,7 @@
 | Ctrl+n | `通す:moveDown` | `*感情` | `*感情` | `*🫨` | `通す:moveDown` | `通す:moveDown` |
 | Ctrl+o | `通す:insertNewlineIgnoringFieldEditor,moveBackward` | – | – | – | `通す:insertNewlineIgnoringFieldEditor,moveBackward` | `通す:insertNewlineIgnoringFieldEditor,moveBackward` |
 | Ctrl+p | `通す:moveUp` | – | – | – | `通す:moveUp` | `通す:moveUp` |
-| Ctrl+q | – | `確定「\x11」` | `確定「\x11」` | `確定「\x11」` | – | – |
+| Ctrl+q | · | `確定「\x11」` | `確定「\x11」` | `確定「\x11」` | · | · |
 | Ctrl+r | `通す:noop` | `*感じ` | `*感じ` | – | `通す:noop` | `通す:noop` |
 | Ctrl+s | `通す:noop` | `かん^じ` | `か^んじ` | – | `通す:noop` | `通す:noop` |
 | Ctrl+t | `通す:transpose` | – | – | – | `通す:transpose` | `通す:transpose` |
@@ -145,7 +148,7 @@
 | Ctrl+x | `通す:noop` | `*感情` | `*感情` | `*🫨` | `通す:noop` | `通す:noop` |
 | Ctrl+y | `通す:yank` | – | – | – | `通す:yank` | `通す:yank` |
 | Ctrl+z | `通す:noop` | – | – | – | `通す:noop` | `通す:noop` |
-| Ctrl+Shift+Space | – | – | – | – | – | – |
+| Ctrl+Shift+Space | · | · | · | · | · | · |
 | Ctrl+Shift+Left | `通す:moveToLeftEndOfLineAndModifySelection` | – | – | – | `通す:moveToLeftEndOfLineAndModifySelection` | `通す:moveToLeftEndOfLineAndModifySelection` |
 | Ctrl+Shift+Right | `通す:moveToRightEndOfLineAndModifySelection` | – | – | – | `通す:moveToRightEndOfLineAndModifySelection` | `通す:moveToRightEndOfLineAndModifySelection` |
 | Ctrl+Shift+j | – | – | – | – | – | `通す:noop` |
@@ -184,12 +187,12 @@
 | Opt+Shift+r | – | – | – | – | – | `通す:‰` |
 | Opt+Shift+8 | `°` | `かんじ°` | `かん°^じ` | `確定「感情」 →°` | `°` | `通す:°` |
 | Opt+Shift+9 | `〔` | `かんじ〔` | `かん〔^じ` | `確定「感情」 →〔` | `〔` | `通す:·` |
-| Cmd+Left | – | – | – | – | – | – |
-| Cmd+Right | – | – | – | – | – | – |
-| Cmd+Up | – | – | – | – | – | – |
-| Cmd+Down | – | – | – | – | – | – |
-| Cmd+Delete | – | – | – | – | – | – |
-| Cmd+z | – | – | – | – | – | – |
+| Cmd+Left | · | · | · | · | · | · |
+| Cmd+Right | · | · | · | · | · | · |
+| Cmd+Up | · | · | · | · | · | · |
+| Cmd+Down | · | · | · | · | · | · |
+| Cmd+Delete | · | · | · | · | · | · |
+| Cmd+z | · | · | · | · | · | · |
 | Ctrl+Opt+Space | ` ` | `かんじ ` | `かん ^じ` | `確定「感情」 → ` | ` ` | `通す:空白` |
 | Ctrl+Shift+Delete | `通す:deleteBackwardByDecomposingPreviousCharacter` | – | – | – | `通す:deleteBackwardByDecomposingPreviousCharacter` | `通す:deleteBackwardByDecomposingPreviousCharacter` |
 
@@ -253,11 +256,11 @@
 | Shift+Eisu | `確定「感じ」 →英字` | `確定「漢字」 →英字` | `確定「今日は雨です」 →英字` | `確定「今日は雨です」 →英字` | `確定「今日は雨です」 →英字` |
 | Shift+Kana | – | – | – | – | – |
 | Shift+a | `確定「感じ」 →A` | `確定「漢字」 →A -窓` | `確定「今日は雨です」 →A` | `確定「今日は雨です」 →A` | `確定「今日は雨です」 →A` |
-| Ctrl+Space | – | – | – | – | – |
+| Ctrl+Space | · | · | · | · | · |
 | Ctrl+Return | – | – | – | – | – |
 | Ctrl+Esc | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` |
 | Ctrl+Delete | – | – | – | – | – |
-| Ctrl+Tab | – | – | – | – | – |
+| Ctrl+Tab | · | · | · | · | · |
 | Ctrl+Left | – | – | – | – | – |
 | Ctrl+Right | – | – | – | – | – |
 | Ctrl+Up | `+窓` | `*kanji` | `+窓` | `+窓` | `+窓` |
@@ -266,7 +269,7 @@
 | Ctrl+' | `*kanji` | `*kanji -窓` | `*kyouha／雨です` | `今日は／*amedesu` | `*kyou／は／雨です` |
 | Ctrl+, | – | – | – | – | – |
 | Ctrl+. | – | – | – | – | – |
-| Ctrl+/ | – | – | – | – | – |
+| Ctrl+/ | · | · | · | · | · |
 | Ctrl+[ | `かんじ` | `かんじ -窓` | `きょうはあめです` | `きょうはあめです` | `きょうはあめです` |
 | Ctrl+] | – | – | – | – | – |
 | Ctrl+- | – | – | – | – | – |
@@ -297,7 +300,7 @@
 | Ctrl+x | `+窓` | `*幹事` | `+窓` | `+窓` | `+窓` |
 | Ctrl+y | – | – | – | – | – |
 | Ctrl+z | – | – | – | – | – |
-| Ctrl+Shift+Space | – | – | – | – | – |
+| Ctrl+Shift+Space | · | · | · | · | · |
 | Ctrl+Shift+Left | – | – | – | – | – |
 | Ctrl+Shift+Right | – | – | – | – | – |
 | Ctrl+Shift+j | – | – | – | – | – |
@@ -336,12 +339,12 @@
 | Opt+Shift+r | – | – | – | – | – |
 | Opt+Shift+8 | `確定「感じ」 →°` | `確定「漢字」 →°` | `確定「今日は雨です」 →°` | `確定「今日は雨です」 →°` | `確定「今日は雨です」 →°` |
 | Opt+Shift+9 | `確定「感じ」 →〔` | `確定「漢字」 →〔` | `確定「今日は雨です」 →〔` | `確定「今日は雨です」 →〔` | `確定「今日は雨です」 →〔` |
-| Cmd+Left | – | – | – | – | – |
-| Cmd+Right | – | – | – | – | – |
-| Cmd+Up | – | – | – | – | – |
-| Cmd+Down | – | – | – | – | – |
-| Cmd+Delete | – | – | – | – | – |
-| Cmd+z | – | – | – | – | – |
+| Cmd+Left | · | · | · | · | · |
+| Cmd+Right | · | · | · | · | · |
+| Cmd+Up | · | · | · | · | · |
+| Cmd+Down | · | · | · | · | · |
+| Cmd+Delete | · | · | · | · | · |
+| Cmd+z | · | · | · | · | · |
 | Ctrl+Opt+Space | `確定「感じ」 → ` | `確定「漢字」 → ` | `確定「今日は雨です」 → ` | `確定「今日は雨です」 → ` | `確定「今日は雨です」 → ` |
 | Ctrl+Shift+Delete | – | – | – | – | – |
 
@@ -407,11 +410,11 @@
 | Shift+Eisu | `確定「今日は雨です」 →英字` | `確定「今日は雨です」 →英字` | `確定「今日は雨です」 →英字` | `確定「きょうは雨です」 →英字` |
 | Shift+Kana | – | – | – | – |
 | Shift+a | `今日は雨ですA` | `今日は雨ですA -窓` | `今日は雨ですA -窓` | `きょうは雨ですA -窓` |
-| Ctrl+Space | – | – | – | – |
+| Ctrl+Space | · | · | · | · |
 | Ctrl+Return | – | – | – | – |
 | Ctrl+Esc | `通す:cancel` | `通す:cancel` | `通す:cancel` | `通す:cancel` |
 | Ctrl+Delete | – | – | – | – |
-| Ctrl+Tab | – | – | – | – |
+| Ctrl+Tab | · | · | · | · |
 | Ctrl+Left | – | – | – | – |
 | Ctrl+Right | – | – | – | – |
 | Ctrl+Up | `*今日は／雨です +窓` | `*kyouha／雨です` | `*kyouha／雨です` | `*ｋｙｏｕｈａ／雨です` |
@@ -420,7 +423,7 @@
 | Ctrl+' | `kyouhaamedesu` | `*kyouha／雨です -窓` | `*kyouha／雨です -窓` | `*kyouha／雨です -窓` |
 | Ctrl+, | – | – | – | – |
 | Ctrl+. | – | – | – | – |
-| Ctrl+/ | – | – | – | – |
+| Ctrl+/ | · | · | · | · |
 | Ctrl+[ | `今日は／あめです` | `きょうはあめです -窓` | `きょうはあめです -窓` | `きょうはあめです -窓` |
 | Ctrl+] | – | – | – | – |
 | Ctrl+- | – | – | – | – |
@@ -451,7 +454,7 @@
 | Ctrl+x | `*今日は／雨です +窓` | `*きょうは／雨です` | `*きょうは／雨です` | `*教派／雨です` |
 | Ctrl+y | – | – | – | – |
 | Ctrl+z | – | – | – | – |
-| Ctrl+Shift+Space | – | – | – | – |
+| Ctrl+Shift+Space | · | · | · | · |
 | Ctrl+Shift+Left | – | – | – | – |
 | Ctrl+Shift+Right | – | – | – | – |
 | Ctrl+Shift+j | – | – | – | – |
@@ -490,12 +493,12 @@
 | Opt+Shift+r | – | – | – | – |
 | Opt+Shift+8 | `今日は雨です°` | `今日は雨です° -窓` | `今日は雨です° -窓` | `きょうは雨です° -窓` |
 | Opt+Shift+9 | `今日は雨です〔` | `今日は雨です〔 -窓` | `今日は雨です〔 -窓` | `きょうは雨です〔 -窓` |
-| Cmd+Left | – | – | – | – |
-| Cmd+Right | – | – | – | – |
-| Cmd+Up | – | – | – | – |
-| Cmd+Down | – | – | – | – |
-| Cmd+Delete | – | – | – | – |
-| Cmd+z | – | – | – | – |
+| Cmd+Left | · | · | · | · |
+| Cmd+Right | · | · | · | · |
+| Cmd+Up | · | · | · | · |
+| Cmd+Down | · | · | · | · |
+| Cmd+Delete | · | · | · | · |
+| Cmd+z | · | · | · | · |
 | Ctrl+Opt+Space | `kyouhaamedesu  +窓` | `今日はamedesu ` | `今日はamedesu ` | `きょうはamedesu ` |
 | Ctrl+Shift+Delete | – | – | – | – |
 
