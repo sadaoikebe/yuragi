@@ -32,7 +32,7 @@ class Command:
 
 
 COMMANDS = MappingProxyType({c.id: c for c in (
-    Command("ime_toggle", "IME オン／オフ", GLOBAL, where="tip"),
+    Command("ime_toggle", "IME オン／オフ", GLOBAL | {"predicting"}, where="tip"),
     Command("ime_on", "IME オン", GLOBAL, where="tip"),
     Command("ime_off", "IME オフ", GLOBAL, where="tip"),
     Command("mode_hiragana", "ひらがな入力", GLOBAL, where="tip"),

@@ -141,6 +141,12 @@ inline KeyTable DefaultKeyTable() {
     return ParseKeyTable(json).value(); // generated from the engine preset at build time
 }
 
+struct ResolvedKey {
+    long long seq;
+    bool eat;
+    std::optional<GlobalCommand> global;
+};
+
 // One line from the broker. Every field has a default; a field that is absent
 // or of another type takes it (DESIGN「互換の規則」: unknown fields are ignored, missing ones
 // default, nothing is counted or rejected).
@@ -160,7 +166,8 @@ struct Message {
     bool direct = false, pass_through = false, converted = false, pending = false;
     bool eat_pending = false;
     std::optional<bool> eat;
-    std::vector<std::pair<long long, bool>> resolved_keys;
+    std::optional<GlobalCommand> global;
+    std::vector<ResolvedKey> resolved_keys;
     std::optional<Phase> phase;
     std::string input_mode;
     bool predicting = false, error = false, has_next_page = false;
@@ -186,6 +193,11 @@ inline void ReadText(const tip_json::Value& v, const char* key, std::string& out
     const auto& x = v.Get(key);
     if (x.kind == tip_json::Value::String) out = x.text;
 }
+inline std::optional<GlobalCommand> ReadGlobal(const tip_json::Value& v) {
+    auto command = ParseGlobal(v.Get("global").text);
+    if (command == GlobalCommand::None) return std::nullopt;
+    return command;
+}
 
 // false only when the line is not a JSON object.
 inline bool ParseMessage(const std::string& line, Message& m) {
@@ -209,10 +221,11 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadBool(v, "pending", m.pending);
     ReadBool(v, "eat_pending", m.eat_pending);
     if (v.Get("eat").kind == tip_json::Value::Boolean) m.eat = v.Get("eat").boolean;
+    m.global = ReadGlobal(v);
     for (const auto& result : v.Get("resolved_keys").array) {
         long long seq;
         if (result.Get("seq").Int(seq) && result.Get("eat").kind == tip_json::Value::Boolean)
-            m.resolved_keys.emplace_back(seq, result.Get("eat").boolean);
+            m.resolved_keys.push_back({seq, result.Get("eat").boolean, ReadGlobal(result)});
     }
     for (size_t i = 0; i < kPhaseNames.size(); ++i)
         if (v.Get("phase").text == kPhaseNames[i]) m.phase = (Phase)i;
@@ -430,12 +443,28 @@ private:
     std::optional<uint64_t> started_;
 };
 
+enum class GlobalUse { None, Run, Ask };
+
+inline GlobalUse UseGlobal(unsigned code, const Local& local, const KeyTable& table) {
+    if (!table.global.count(code)) return GlobalUse::None;
+    if (local.phase == Phase::Direct) return GlobalUse::Run;
+    if (!local.unsettled)
+        return table.Overrides(local.phase, code) ? GlobalUse::None : GlobalUse::Run;
+    for (size_t i = 0; i < table.phases.size(); ++i)
+        if (table.Overrides(static_cast<Phase>(i), code)) return GlobalUse::Ask;
+    return GlobalUse::Run;
+}
+
 enum class Take { Pass, Send };
 
 inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
     if (local.phase == Phase::Direct || chord.mods.win || ModifierVk(chord.vk) ||
         (chord.mods.alt && !chord.mods.ctrl)) return Take::Pass;
-    if (table.GlobalAt(local.phase, chord.Code()) != GlobalCommand::None) return Take::Pass;
+    switch (UseGlobal(chord.Code(), local, table)) {
+        case GlobalUse::Run: return Take::Pass;
+        case GlobalUse::Ask: return Take::Send;
+        case GlobalUse::None: break;
+    }
     if (Typing(chord)) return Take::Send;
     auto sends = [&](Phase phase) { return table.Sends(phase, chord.Code()); };
     if (sends(local.phase)) return Take::Send;

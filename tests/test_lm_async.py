@@ -384,6 +384,28 @@ class DeadlineTest(unittest.TestCase):
         self.assertEqual(reply["resolved_keys"], [{"seq": 11, "eat": True}, {"seq": 12, "eat": False}])
         self.assertNotIn("resolved_keys", pipe.handle({"op": "timeout", "t": keys.t + 30}))
 
+    def test_poll_returns_toggle_for_the_key_after_a_deferred_commit(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        keys = Typist().kana("きしゃ").space()
+        for event in keys.events:
+            pipe.handle(event)
+        requests = ((11, VK_RETURN, []), (12, 0x14, ["shift"]), (13, VK_RETURN, []))
+        for seq, vk, mods in requests:
+            reply = pipe.handle({"op": "down", "vk": vk, "mods": mods, "seq": seq,
+                                 "t": keys.t + seq})
+            self.assertTrue(reply["eat_pending"])
+            self.assertNotIn("global", reply)
+
+        worker.complete(pipe.job)
+        reply = pipe.handle({"op": "timeout", "t": keys.t + 20, "seq": 14})
+        self.assertTrue(reply["commit"])
+        self.assertNotIn("global", reply)
+        self.assertEqual(reply["resolved_keys"], [
+            {"seq": 11, "eat": True},
+            {"seq": 12, "eat": False, "global": "ime_toggle"},
+            {"seq": 13, "eat": False},
+        ])
+
     def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
         keys = Typist().kana("きしゃ").key("down", VK_SPACE, 150)

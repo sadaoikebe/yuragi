@@ -208,6 +208,7 @@
     ["predicting", "Ctrl+H", "cancel_conversion"],
     ["predicting", "Ctrl+Delete", "forget_candidate"],
     ["predicting", "Ctrl+B", "noop"],
+    ["predicting", "Shift+CapsLock", "ime_toggle"],
     ["predicting", "1", "select_candidate_1"],
     ["predicting", "2", "select_candidate_2"],
     ["predicting", "3", "select_candidate_3"],

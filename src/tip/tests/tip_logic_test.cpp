@@ -111,12 +111,23 @@ static void EatingKeys() {
     assert(take(0xF3, none, Phase::Composing) == Take::Pass);
     assert(take(0xC0, none, Phase::Composing) == Take::Send);  // repeats after Alt up
     auto caps = NormalizeKey(0xF0, none);
-    assert(table.Overrides(Phase::Composing, caps.Code()));
-    assert(!table.Overrides(Phase::Empty, caps.Code()));
+    auto ctrl_caps = NormalizeKey(0x14, ctrl);
+    assert(UseGlobal(caps.Code(), {Phase::Empty, true}, table) == GlobalUse::Ask);
+    assert(UseGlobal(ctrl_caps.Code(), {Phase::Empty, true}, table) == GlobalUse::Run);
+    assert(UseGlobal(caps.Code(), {Phase::Empty, false}, table) == GlobalUse::Run);
+    assert(UseGlobal(caps.Code(), {Phase::Composing, false}, table) == GlobalUse::None);
+    assert(WantKey(caps, {Phase::Empty, true}, table) == Take::Send);
+    assert(WantKey(caps, {Phase::Predicting, false}, table) == Take::Send);
 
-    auto final = Parse(R"({"seq":3,"phase":"empty","commit":"x","resolved_keys":[{"seq":2,"eat":false}]})");
+    auto toggle = Parse(R"({"seq":1,"eat":false,"global":"ime_toggle"})");
+    assert(toggle.eat == false && toggle.global == GlobalCommand::Toggle);
+    auto final = Parse(R"({"seq":4,"phase":"empty","commit":"x","global":"future_command",
+        "resolved_keys":[{"seq":2,"eat":false,"global":"ime_toggle"},{"seq":3,"eat":false}]})");
     assert(final.phase == Phase::Empty && !final.eat && final.commit == "x");
-    assert((final.resolved_keys == std::vector<std::pair<long long, bool>>{{2, false}}));
+    assert(!final.global && final.resolved_keys.size() == 2);
+    const auto& [seq, eat, global] = final.resolved_keys[0];
+    assert(seq == 2 && !eat && global == GlobalCommand::Toggle);
+    assert(!final.resolved_keys[1].global);
     auto pending = Parse(R"({"seq":2,"eat":true,"eat_pending":true,"pending":true})");
     assert(pending.eat_pending && pending.eat == true);
 }

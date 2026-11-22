@@ -42,7 +42,7 @@ from yuragi.ime.zenz import CONTEXT_CHARS
 def dispatch(sess: ImeSession, msg: dict) -> dict:
     """Shared protocol path for the engine, the stdio host and transcript tests."""
     commit = apply_op(sess, msg)
-    reply = snapshot(sess, msg.get("op"), eat=sess.key_eat)
+    reply = snapshot(sess, msg.get("op"), eat=sess.key_eat, key_global=sess.key_global)
     set_reply_commit(sess, msg, reply, commit)
     if "seq" in msg:
         reply["seq"] = msg["seq"]
@@ -88,7 +88,8 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
     return commit
 
 
-def snapshot(sess: ImeSession, op, *, eat: bool | None = None) -> dict:
+def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
+             key_global: str | None = None) -> dict:
     """The reply for the session's state; the caller fills in commit."""
     reply = {
         "direct": sess.direct,
@@ -114,6 +115,8 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None) -> dict:
     }
     if op == "down" and eat is not None:
         reply["eat"] = eat
+        if key_global is not None:
+            reply["global"] = key_global
     return reply
 
 

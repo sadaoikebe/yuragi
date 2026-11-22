@@ -43,14 +43,17 @@ class Keymap:
                 command = COMMANDS[command.until]
             rows[phase][chord.code] = command
 
+        # Keep global fallbacks separate from bindings scoped to a phase.
         for phase, parent in PARENT.items():
-            rows[phase] = rows[parent] | rows[phase]
+            if parent != "global":
+                rows[phase] = rows[parent] | rows[phase]
         self._rows = MappingProxyType({phase: MappingProxyType(row) for phase, row in rows.items()})
 
     def lookup(self, phase: str, chord: Chord) -> Command | None:
         if not 0 <= chord.vk <= 0xFF:
             return None
-        return self._rows[phase].get(chord.code)
+        code = chord.code
+        return self._rows[phase].get(code) or self._rows["global"].get(code)
 
     def command_for(self, phase: str, chord: Chord) -> Command:
         command = self.lookup(phase, chord)
@@ -68,7 +71,7 @@ class Keymap:
             row = {"eat": [], "pass": []}
             for code, command in sorted(commands.items()):
                 chord = Chord(code & 0xFF, code >> 8)
-                if not chord.typing and command.where == "engine":
+                if not chord.typing:
                     row["pass" if command.key == "pass" else "eat"].append(code)
             if phase in INPUT:
                 row["rest"] = "eat"
@@ -113,26 +116,29 @@ def default_keymap() -> Keymap:
 
 def startup_keymap(data_dir: Path) -> Keymap:
     """Carry the previous tip.json toggle through to the negotiated table."""
+    base = default_keymap()
     try:
         config = json.loads((data_dir / "tip.json").read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
-        return default_keymap()
+        return base
     if not isinstance(config, dict):
-        return default_keymap()
+        return base
     vk = config.get("toggle_vk", VK_OEM_3)
     mods = config.get("toggle_mods", ["alt"])
     if type(vk) is not int or not (0 < vk <= 0xFF) or vk in MODIFIER_VKS:
-        return default_keymap()
+        return base
     if not isinstance(mods, list) or any(m not in ("shift", "ctrl", "alt") for m in mods):
-        return default_keymap()
+        return base
     chord = Chord(vk, modifier_bits(mods, set()))
     if chord == Chord(VK_OEM_3, ALT) or chord.typing:
-        return default_keymap()
+        return base
     try:
         Chord.parse(str(chord))
     except ValueError:
-        return default_keymap()
-    rows = (row for row in _default_bindings() if row != ("global", "Alt+`", "ime_toggle"))
+        return base
+    rows = (row for row in _default_bindings()
+            if row != ("global", "Alt+`", "ime_toggle")
+            and (row[0] == "global" or Chord.parse(row[1]) != chord))
     return Keymap((*rows, ("global", str(chord), "ime_toggle")))
 
 

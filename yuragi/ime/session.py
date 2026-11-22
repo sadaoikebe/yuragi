@@ -347,6 +347,7 @@ class ImeSession:
     keymap: Keymap = field(default_factory=default_keymap)
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
+    key_global: str | None = field(default=None, init=False)
     input_mode: str = "hiragana"
 
     @property
@@ -466,6 +467,7 @@ class ImeSession:
         provide the state.
         """
         self.key_eat = None if down else False
+        self.key_global = None
         if self.direct:
             self.key_eat = False
             return None
@@ -505,6 +507,8 @@ class ImeSession:
     def _dispatch_chord(self, chord: Chord) -> str | None:
         command = self.keymap.command_for(self.phase, chord)
         self.key_eat = command.key == "eat" and command.where == "engine"
+        if command.where == "tip":
+            self.key_global = command.id
         self._forget_fsm_down(chord.vk)
         if command.key == "pass" and self.phase == "empty":
             self._pass_empty_key(chord)

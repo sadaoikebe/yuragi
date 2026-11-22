@@ -1092,7 +1092,11 @@ class Tip final : public ITfTextInputProcessorEx,
         bool preserved = false;
     };
     struct TestedKey { Stroke key; Decision decision; uint64_t generation; };
-    struct SentKey { Stroke key; long long replay_after = 0; };
+    struct SentKey {
+        Stroke key;
+        long long replay_after = 0;
+        std::optional<tip_logic::GlobalCommand> run_after;
+    };
     struct Registration { GUID guid; TF_PRESERVEDKEY key; unsigned code; };
     static constexpr LPARAM kReplayMarker = 0x59555247; // YURG, in KEYBDINPUT.dwExtraInfo
 
@@ -1715,8 +1719,8 @@ private:
         }
         Log(L"reply client=%p seq=%lld t=%llu pending=%d",
             static_cast<void*>(this), m.seq, NowMs(), m.pending);
-        if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.seq);
-        for (const auto& [seq, eat] : m.resolved_keys) KeyResult(seq, eat, m.seq);
+        if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.global, m.seq);
+        for (const auto& [seq, eat, global] : m.resolved_keys) KeyResult(seq, eat, global, m.seq);
         if (pending_mode_seq_ && m.seq >= pending_mode_seq_ && !m.pending) {
             pending_mode_seq_ = 0;
             mode_edit_seq_ = m.seq;
@@ -2053,12 +2057,12 @@ private:
             return {};
         }
         if (ModifierVk(key.raw) || KanaLockKey(key.raw, (uint32_t)key.flags)) return {};
-        auto global = GlobalFor(key.chord.Code());
         if (buffer && KeysWaiting() && can_hold)
             return {Action::Buffer};
-        if (global != GlobalCommand::None) return {Action::Global, global};
         if (ready && !direct_ && WantKey(key.chord, local, keymap_) == Take::Send)
             return {Action::Send};
+        auto global = GlobalFor(key.chord.Code());
+        if (global != GlobalCommand::None) return {Action::Global, global};
         return {};
     }
 
@@ -2079,11 +2083,16 @@ private:
             PostMessageW(hwnd_, kKeysMessage, 0, 0);
         }
     }
-    void KeyResult(long long seq, bool eat, long long reply_seq) {
+    void KeyResult(long long seq, bool eat, std::optional<tip_logic::GlobalCommand> global,
+                   long long reply_seq) {
         auto key = sent_keys_.find(seq);
         if (key == sent_keys_.end()) return;
-        if (eat) sent_keys_.erase(key);
-        else key->second.replay_after = reply_seq;
+        if (eat && !global) {
+            sent_keys_.erase(key);
+        } else {
+            key->second.run_after = global;
+            key->second.replay_after = reply_seq;
+        }
     }
     void FlushReleases() {
         while (!releases_.empty()) {
@@ -2107,12 +2116,11 @@ private:
         }
         if (!sent_keys_.empty()) {
             auto sent = sent_keys_.begin();
-            auto after = sent->second.replay_after;
+            auto [key, after, global] = sent->second;
             if (!after || !state_ || state_->applied_seq < after) return;
-            auto key = sent->second.key;
             sent_keys_.erase(sent);
-            if (!ReplayHeld(key)) return;
-            if (replay_ || retry_replay_) return;
+            if ((!global || !RunGlobal(*global)) && !ReplayHeld(key)) return;
+            if (replay_ || retry_replay_ || pending_mode_seq_) return;
         }
         if (state_ && !state_->pending.empty()) return;
         while (!buffered_.empty() && !KeysWaiting()) {

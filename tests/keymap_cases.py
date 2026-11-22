@@ -5,7 +5,7 @@ import sys
 from unittest.mock import patch
 
 from yuragi.chord.fsm import Plain
-from yuragi.chord.keys import ALT_VKS
+from yuragi.chord.keys import ALT_VKS, Chord
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
@@ -35,7 +35,11 @@ def key_cases():
                 reply = dispatch(session, {"op": "down", "vk": vk, "mods": mods, "t": 100})
                 # A key which commits before passing must still be sent. Alt
                 # alone is observed out of band, so WantKey always passes it.
-                send = vk not in ALT_VKS and (reply["eat"] or bool(reply["commit"]))
+                # A phase-specific TIP command needs to reach the engine to
+                # resolve it. A plain global fallback can run in the TIP.
+                code = Chord(vk, flags).code
+                scoped_global = "global" in reply and code in session.keymap._rows[phase]
+                send = vk not in ALT_VKS and (reply["eat"] or bool(reply["commit"]) or scoped_global)
                 yield f"{phase} {vk} {flags} {int(send)}\n"
 
 

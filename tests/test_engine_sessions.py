@@ -14,7 +14,9 @@ import time
 import unittest
 
 from yuragi.engine import Engine, argument_parser
+from yuragi.chord.keys import Chord
 from yuragi.ime import config, server
+from yuragi.ime.keymap import startup_keymap
 from yuragi.ime.lm_async import LmWorker
 from yuragi.ime.zenz import ZenzConverter
 from yuragi.ime.session import ImeSession
@@ -84,6 +86,32 @@ class KeyDispatchTest(EngineCase):
         self.assertEqual((reply["phase"], reply["composition"], reply["commit"]),
                          ("composing", "宇", ""))
         self.assertNotIn("global", reply)
+
+    def test_shift_caps_lock_without_input_requests_toggle(self):
+        engine = self.engine()
+        self.open(engine, 1)
+        reply = self.request(engine, 1, {"op": "down", "vk": 0x14, "mods": ["shift"]})
+        self.assertIs(reply["eat"], False)
+        self.assertEqual(reply["global"], "ime_toggle")
+        self.assertEqual((reply["phase"], reply["commit"]), ("empty", ""))
+
+    def test_tip_toggle_takes_priority_over_composing_binding(self):
+        (self.dir / "tip.json").write_text('{"toggle_vk": 32, "toggle_mods": ["ctrl"]}',
+                                          encoding="utf-8")
+        engine = self.engine()
+        engine.keymap = startup_keymap(self.dir)
+        self.open(engine, 1)
+        self.type_a(engine, 1)
+
+        reply = self.request(engine, 1, {"op": "down", "vk": 32, "mods": ["ctrl"], "t": 100})
+        self.assertIs(reply["eat"], False)
+        self.assertEqual(reply["global"], "ime_toggle")
+        self.assertEqual((reply["phase"], reply["composition"], reply["commit"]),
+                         ("composing", "宇", ""))
+        chord = Chord.parse("Ctrl+Space")
+        table = engine.keymap.eat_table()
+        self.assertIn({"code": chord.code, "command": "ime_toggle"}, table["global"])
+        self.assertNotIn(chord.code, table["phases"]["composing"]["eat"])
 
 
 class SlowModel:
