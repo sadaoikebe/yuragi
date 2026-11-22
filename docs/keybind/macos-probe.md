@@ -190,11 +190,11 @@
 
 ## 9. 作るもの
 
-置き場所は `tools/keyprobe/mac/`（Windows 版と並べる）。
+置き場所は `tools/keyprobe/mac/`（Windows 版と並べる）。いまは試作（`probe.swift` と、記録を 1 キー 1 行に縮める `summary.py`）だけが入っている。使い方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。下の表は、これから作るもの。
 
 | ファイル | 中身 |
 |---|---|
-| `probe.swift` | 試験アプリ。`swiftc` で 1 ファイルをビルドする（Xcode のプロジェクトは作らない）。引数でキーの列を受け取り、JSON の行を標準出力に書く。記録だけのモード（人が押す用）も持つ |
+| `probe.swift` | 試験アプリ。`swiftc` で 1 ファイルをビルドする（Xcode のプロジェクトは作らない）。引数でキーの列を受け取り、JSON の行を標準出力に書く（ここまでは試作にある）。記録だけのモード（人が押す用）を足す |
 | `seq.py` | `msime_tsf_seq.py` に当たる。キーの列を送り、キーごとの記録と候補ウインドウの画像を `out/` に出す |
 | `table.py` | `msime_tsf_table.py` に当たる。状態 × キーの表を `out/mac_table.jsonl` に書く |
 | `README.md` | 使い方と「してはいけないこと」（§7） |
@@ -205,7 +205,7 @@
 
 進める順:
 
-1. 試作を `tools/keyprobe/mac/` に整えて入れる（キーの列を送るコマンドまで）。
+1. 試作を `tools/keyprobe/mac/` に入れる（キーの列を送るコマンドまで）。済み。
 2. 既定の設定で、状態 × キーの表を採る。§8 の上半分が埋まる。
 3. `defaults write` で設定が切り替わるかを確かめる（§6）。
 4. 設定の組（ライブ変換、Windows風、Shiftキーの動作）ごとに表を採り直す。
