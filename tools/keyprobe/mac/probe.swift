@@ -21,6 +21,7 @@ var recording: [[String: Any]]? = nil
 var realEvents: [[String: Any]] = []
 var lastReal = Date.distantPast
 var injecting = false
+let altText = NSTextView(frame: .zero)  // guide step "textview": a real NSTextView takes the keys instead of the probe view
 
 func emit(_ d: [String: Any]) {
     if recording != nil { recording!.append(d); return }
@@ -53,7 +54,10 @@ class ProbeView: NSView, NSTextInputClient {
     override var acceptsFirstResponder: Bool { true }
     var banner = ""
 
+    var passFlags = true  // false: do not give modifier changes to the input method (guide step "noflags")
+
     override func flagsChanged(with e: NSEvent) {
+        if !passFlags { emit(["ev": "flagsChanged", "code": Int(e.keyCode), "passed": false]); super.flagsChanged(with: e); return }
         let h = inputContext?.handleEvent(e) ?? false
         emit(["ev": "flagsChanged", "code": Int(e.keyCode), "mods": e.modifierFlags.rawValue & 0xFFFF_0000, "handled": h])
     }
@@ -171,6 +175,7 @@ func tokens(_ s: String) -> [(String, Int, CGEventFlags)] {
                 case "Ctrl": f.insert(.maskControl)
                 case "Opt": f.insert(.maskAlternate)
                 case "Cmd": f.insert(.maskCommand)
+                case "Caps": f.insert(.maskAlphaShift)
                 default: fatalError("modifier \(p)")
                 }
             }
@@ -253,6 +258,12 @@ win.makeKeyAndOrderFront(nil)
 win.makeFirstResponder(view)
 app.activate(ignoringOtherApps: true)
 
+// the system-wide input source (what the globe key and the input menu change)
+DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.Carbon.TISNotifySelectedKeyboardInputSourceChanged"),
+                                                    object: nil, queue: nil) { _ in
+    emit(["ev": "source", "id": "sys:" + ((TISGetInputSourceProperty(TISCopyCurrentKeyboardInputSource().takeRetainedValue(), kTISPropertyInputSourceID)
+        .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String }) ?? "")])
+}
 NotificationCenter.default.addObserver(forName: NSTextInputContext.keyboardSelectionDidChangeNotification, object: nil, queue: nil) { _ in
     emit(["ev": "source", "id": view.inputContext?.selectedKeyboardInputSource ?? ""])
 }
@@ -291,7 +302,15 @@ func send(_ code: Int, _ flags: CGEventFlags) {
 
 var i = 0
 func step() {
-    if tableMode { if args[1] == "guide" { runGuide(args[2]) } else { runTable(args[2]) }; exit(0) }
+    if tableMode {
+        // Run outside any main-queue block: the waits below spin the run loop, and work that the system
+        // queues on the main dispatch queue (the globe key's input source switcher) only runs then.
+        RunLoop.main.perform {
+            if args[1] == "guide" { runGuide(args[2]) } else { runTable(args[2]) }
+            exit(0)
+        }
+        return
+    }
     if i == keys.count {
         emit(["ev": "end", "text": view.text, "marked": view.marked.string])
         exit(0)
@@ -353,7 +372,21 @@ func snap() -> [String: Any] {
     ["text": view.text, "segs": segs(), "sel": [view.markedSel.location, view.markedSel.length],
      "source": (view.inputContext?.selectedKeyboardInputSource ?? "").split(separator: ".").last.map(String.init) ?? "",
      "panels": NSApp.windows.filter { $0 !== win && $0.isVisible }.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" },
-     "front": isFront(), "frontApp": NSWorkspace.shared.frontmostApplication?.localizedName ?? ""]
+     "front": isFront(), "frontApp": NSWorkspace.shared.frontmostApplication?.localizedName ?? "",
+     "caps": NSEvent.modifierFlags.contains(.capsLock),
+     "history": sourceHistory(),
+     "sysSource": (TISGetInputSourceProperty(TISCopyCurrentKeyboardInputSource().takeRetainedValue(), kTISPropertyInputSourceID)
+         .map { Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String } ?? "").split(separator: ".").last.map(String.init) ?? ""]
+}
+
+// macOS's "recently used input sources" (com.apple.HIToolbox AppleInputSourceHistory), newest first
+func sourceHistory() -> [String] {
+    CFPreferencesAppSynchronize("com.apple.HIToolbox" as CFString)
+    let h = CFPreferencesCopyAppValue("AppleInputSourceHistory" as CFString, "com.apple.HIToolbox" as CFString) as? [[String: Any]] ?? []
+    return h.map { d in
+        let id = (d["Input Mode"] as? String) ?? (d["KeyboardLayout Name"] as? String) ?? (d["Bundle ID"] as? String) ?? "?"
+        return id.split(separator: ".").last.map(String.init) ?? id
+    }
 }
 
 func compact(_ evs: [[String: Any]]) -> [String] {
@@ -412,7 +445,8 @@ func runTable(_ path: String) {
 }
 
 // ---- guide mode: a person presses the keys ------------------------------------------------
-// steps.json: [{"id": ..., "source": ..., "prep": "<keys>", "say": "<what to press>"}, ...]
+// steps.json: [{"id": ..., "source": ..., "prep": "<keys>", "say": "<what to press>", "post": "<keys typed after>",
+//              "only_if_caps": true (skip unless Caps Lock is on)}, ...]
 // Per step: set the state up (synthetic keys), show `say` in the window, and record everything
 // until 0.3 s after the key is released (1 s after the last real key event otherwise) (8 s for the first step and 4 s afterwards with none). If the first step gets no real key, stop. Real events come from a local event
 // monitor; it also sees the synthetic events given to NSApp.sendEvent, so those are skipped (injecting).
@@ -430,12 +464,24 @@ func runGuide(_ path: String) {
         return e
     }
     for (n, c) in steps.enumerated() {
+        if (c["only_if_caps"] as? Bool ?? false) && !NSEvent.modifierFlags.contains(.capsLock) { continue }
         recording = []
+        for pre in c["pre_sources"] as? [String] ?? [] { reset(pre); pause(0.6) }
+        if let pre = c["pre_source"] as? String { reset(pre); pause(0.6) }  // so that the "previous" input source is `pre`
         reset(c["source"] as! String)
         pause(0.2)
         press(c["prep"] as? String ?? "")
         pause(0.4)
         let before = snap()
+        view.passFlags = !(c["noflags"] as? Bool ?? false)
+        let useTV = c["textview"] as? Bool ?? false
+        if useTV {
+            altText.frame = NSRect(x: 0, y: 0, width: view.bounds.width, height: 50)
+            view.addSubview(altText)
+            win.makeFirstResponder(altText)
+            altText.inputContext?.selectedKeyboardInputSource = c["source"] as? String ?? ""
+            pause(0.4)
+        }
         view.banner = "[\(n + 1)/\(steps.count)] \(c["say"] as? String ?? "")"
         view.needsDisplay = true
         NSSound.beep()
@@ -449,28 +495,63 @@ func runGuide(_ path: String) {
                 if Date().timeIntervalSince(start) > (n == 0 ? 8 : 4) { break }
                 continue
             }
+            if let n = c["presses"] as? Int {
+                // a given number of globe (fn) presses: done 0.3 s after the n-th release
+                let releases = realEvents.filter { ($0["code"] as? Int) == 63 && ($0["type"] as? String) == "flags" &&
+                                                   ((($0["mods"] as? UInt) ?? 0) & 0x80_0000) == 0 }.count
+                if releases >= n && Date().timeIntervalSince(lastReal) > 0.3 { break }
+                if Date().timeIntervalSince(max(lastReal, start)) > 6 { break }
+                continue
+            }
+            if c["until_caps_off"] as? Bool ?? false {
+                // a sequence that ends with Caps Lock turned off again
+                let capsFlags = realEvents.filter { ($0["code"] as? Int) == 57 && ($0["type"] as? String) == "flags" }
+                let off = capsFlags.count >= 2 && ((capsFlags.last?["mods"] as? UInt ?? 0) & UInt(NSEvent.ModifierFlags.capsLock.rawValue)) == 0
+                if off && Date().timeIntervalSince(lastReal) > 0.3 { break }
+                if Date().timeIntervalSince(max(lastReal, start)) > 10 { break }
+                continue
+            }
             let last = max(lastReal, start)
             // done 0.3 s after every key is up again (a hold ends with its up), or 1 s after the last event
             let released = (realEvents.last?["type"] as? String == "up") ||
                 (realEvents.last?["type"] as? String == "flags" && (realEvents.last?["mods"] as? UInt ?? 1) & 0x00FF_0000 == 0)
             if Date().timeIntervalSince(last) > (released ? 0.3 : 1.0) { break }
         }
+        if let settle = c["settle"] as? Double { pause(settle) }
+        let tvSource = altText.inputContext?.selectedKeyboardInputSource ?? ""
         let evs = recording!
         recording = []
         let after = snap()
         let real = realEvents
         view.banner = "（記録中。キーに触らないでください）"
         view.needsDisplay = true
+        var postAfter: [String: Any]? = nil
+        var postEvents: [[String: Any]] = []
+        if let post = c["post"] as? String {
+            recording = []
+            press(post)
+            pause(0.4)
+            postEvents = recording!
+            postAfter = snap()
+        }
         press("{Esc} {Esc} {Esc}", chord: 0.12)
         pause(0.2)
         recording = nil
+        if useTV {
+            altText.removeFromSuperview()
+            altText.string = ""
+            win.makeFirstResponder(view)
+        }
+        view.passFlags = true
         var r = c
+        if useTV { r["tvSource"] = tvSource.split(separator: ".").last.map(String.init) ?? "" }
         r["before"] = before
         r["after"] = after
         r["events"] = compact(evs)
         r["raw"] = evs
         r["real"] = real
         r["kept"] = view.text + view.marked.string
+        if let pa = postAfter { r["post_after"] = pa; r["post_events"] = compact(postEvents) }
         emit(r)
         if n == 0 && real.isEmpty {
             view.banner = "キーが届きませんでした。中断します"
