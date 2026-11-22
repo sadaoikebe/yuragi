@@ -12,6 +12,8 @@ from typing import Iterable
 from yuragi.chord.keys import ALT, MODIFIER_VKS, VK_OEM_3, WIN, Chord, modifier_bits
 from .commands import COMMANDS, Command, INPUT
 
+PRESET_PATH = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime.json"
+
 PARENT = {
     "direct": "global",
     "empty": "global",
@@ -28,7 +30,9 @@ class Keymap:
         rows: dict[str, dict[int, Command]] = {phase: {} for phase in (*PARENT, "global")}
         for phase, name, command_id in bindings:
             chord = Chord.parse(name)
-            command = COMMANDS[command_id]
+            command = COMMANDS.get(command_id)
+            if command is None:
+                raise ValueError(f"unknown command: {command_id}")
             if (phase not in command.phases or (chord.alt_only and phase != "global")
                     or (chord.character and phase in ("global", "direct", "empty", "composing"))
                     or (chord.typing and phase in ("global", "direct"))):
@@ -75,10 +79,28 @@ class Keymap:
         return {"rev": sha256(canonical).hexdigest()[:12], **table}
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
 @cache
-def _default_bindings() -> tuple:
-    path = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime.json"
-    return tuple(map(tuple, json.loads(path.read_text(encoding="utf-8"))["bindings"]))
+def _default_bindings() -> tuple[tuple[str, str, str], ...]:
+    """Read the bundled preset's rows for compilation by Keymap."""
+    try:
+        preset = json.loads(PRESET_PATH.read_text(encoding="utf-8"),
+                            parse_constant=_reject_json_constant)
+    except RecursionError as exc:
+        raise ValueError("bundled preset is nested too deeply") from exc
+    if not isinstance(preset, dict) or not isinstance(preset.get("bindings"), list):
+        raise ValueError("expected an object with a bindings array")
+    rows = []
+    for row in preset["bindings"]:
+        if (not isinstance(row, list) or len(row) != 3
+                or not all(isinstance(field, str) for field in row)):
+            raise ValueError("expected a binding with three strings")
+        phase, chord, command = row
+        rows.append((phase, chord, command))
+    return tuple(rows)
 
 
 @cache

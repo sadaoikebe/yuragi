@@ -197,10 +197,8 @@ class Connection:
 
 class Engine:
     def __init__(self, channel: Channel, args: argparse.Namespace):
-        from yuragi.ime.keymap import default_keymap
-
         self.channel = channel
-        self.keymap = default_keymap()
+        self.keymap = None
         self.connections: dict[object, Connection] = {}
         self.loaded = None
         self.worker = None

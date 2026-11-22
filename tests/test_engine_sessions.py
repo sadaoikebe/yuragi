@@ -52,6 +52,7 @@ class EngineCase(unittest.TestCase):
         args = argument_parser().parse_args(["--data-dir", str(self.dir), *argv])
         engine = Engine(Channel(), args)
         engine.loaded = loaded or loaded_session()
+        engine.keymap = engine.loaded.keymap
         engine.worker = worker
         engine.settings = engine.read_settings(args, config, server)
         return engine
