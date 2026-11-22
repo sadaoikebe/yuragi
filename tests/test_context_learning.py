@@ -173,7 +173,8 @@ class ContextLearningTest(unittest.TestCase):
                 self.assert_head(result, expected)
                 if left:
                     # Cancel conversion but keep the connected position of this input.
-                    k.tap(ESC)
+                    while k.tap(ESC)["phase"] != "composing":  # closes the window first
+                        pass
                     self.assert_head(k.tap(SPACE), expected)
                     self.pick(k, k.tap(LEFT), "構成")
                 k.commit()
@@ -338,7 +339,8 @@ class ContextLearningTest(unittest.TestCase):
         self.learn("原稿の", "厚生")
         k.tap(LEFT)
         self.assert_hidden_head(k, k.tap(RIGHT), "私製校正")
-        k.tap(ESC)
+        while k.tap(ESC)["phase"] != "composing":  # closes the window first
+            pass
         k.tap(SPACE)
         self.assert_hidden_head(k, k.tap(RIGHT), "厚生")
 

@@ -207,6 +207,44 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual((selected["phase"], selected["cand_index"], selected["candidates"][0]),
                          ("selecting", 1, "私"))
 
+    def test_fixed_width_spaces_follow_the_phase(self):
+        k = self.typed("わたし")
+        k.s._table["keys"]["w"] = {"plain": "か"}
+        added = k.tap(VK_SPACE, ["ctrl"])
+        self.assertEqual((added["phase"], added["eat"], added["commit"]), ("composing", True, ""))
+        k.plain("w")
+        k.tap(VK_RETURN)
+        head, space, tail = k.committed.partition(" ")
+        self.assertEqual((bool(head), space, tail.count(" "), bool(tail)), (True, " ", 0, True))
+
+        empty = k.tap(VK_SPACE, ["ctrl", "shift"])
+        self.assertEqual((empty["phase"], empty["eat"], empty["commit"]), ("empty", True, "　"))
+
+        k = self.typed("わたし")
+        converted = k.convert()["composition"]
+        reply = k.tap(VK_SPACE, ["ctrl", "shift"])
+        self.assertEqual((reply["phase"], reply["commit"], reply["composition"]),
+                         ("composing", converted, "　"))
+
+    def test_closing_the_candidate_window_keeps_the_conversion(self):
+        for key, mods in ((0x08, []), (VK_ESC, []), (0x2E, []), (ord("G"), ["ctrl"]),
+                          (ord("H"), ["ctrl"])):
+            with self.subTest(key=key, mods=mods):
+                k = self.typed("わたしはがっこうにいく")
+                k.convert()
+                chosen = k.tap(VK_DOWN)
+                closed = k.tap(key, mods)
+                self.assertEqual((closed["phase"], closed["candidates"], closed["composition"],
+                                  closed["focus"]),
+                                 ("converting", [], chosen["composition"], 0))
+                self.assertEqual(k.tap(VK_ESC)["phase"], "composing")
+
+    def test_ctrl_f7_opens_the_word_register_only_without_input(self):
+        k = self.typed("")
+        self.assertEqual(k.tap(0x76, ["ctrl"]).get("global"), "open_word_register")
+        k = self.typed("わたし")
+        self.assertIsNone(k.tap(0x76, ["ctrl"]).get("global"))
+
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
         k = self.typed("わたしはがっこうにいく")
         reply = k.convert()

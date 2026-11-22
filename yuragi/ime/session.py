@@ -1096,6 +1096,17 @@ class ImeSession:
         self._note_commit(text)
         return text
 
+    def _add_space(self, text: str) -> str | None:
+        """Ctrl+Space / Ctrl+Shift+Space: a space of a fixed width.
+
+        With no input it goes to the document. Otherwise it is typed into the
+        input; after a conversion, _ingest commits first and the space starts
+        the next input (MS-IME).
+        """
+        if not self.tokens:
+            return self._insert_space(text)
+        return self._ingest([Literal(text)])
+
     def _convert(self) -> None:
         request = self.conversion_request() if self.lm_deferred else None
         if request is not None:

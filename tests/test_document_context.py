@@ -176,7 +176,8 @@ class DocumentContextTest(ContextCase):
         r = k.send("down", DOWN, mods=["ctrl"])
         self.assertEqual((r["commit"], r["composition"], r["candidates"]), ("語尾", "川", []))
         self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
-        k.tap(ESC)
+        while k.tap(ESC)["phase"] != "composing":  # closes the window first
+            pass
         k.tap(SPACE)
         self.assertEqual(self.reviewer.calls[-1], ("本文の語尾", "か", "川"))
         k.commit()

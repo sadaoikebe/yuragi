@@ -109,10 +109,10 @@
 |---|---|---|---|
 | `ime_toggle` / `ime_on` / `ime_off` | global（`ime_toggle` は predicting にも割り当て可） | ○ / ○ / ○ | 直接入力とかな入力の切り替え。入力があれば確定してから切り替える。TIP が実行 |
 | `mode_hiragana` / `mode_katakana` | global | ○ / ○ | ひらがな／カタカナの入力モードにする（直接入力ならオンにする）。TIP が実行 |
-| `open_settings` / `open_word_register` | global | ○ / ○ | 設定ウィンドウを開く（後者は単語登録のタブ）。TIP が実行 |
+| `open_settings` / `open_word_register` | global（`open_word_register` は empty にも割り当て可） | ○ / ○ | 設定ウィンドウを開く（後者は単語登録のタブ）。TIP が実行 |
 | `insert_space` | empty, composing | ○ | 空白を入れる（幅は入力モードに従う。ひらがなでは全角） |
-| `insert_alt_space` | empty | × | `insert_space` と別の幅の空白 |
-| `insert_full_space` / `insert_half_space` | empty 以降 | × | 幅を決めた空白。入力なしでは文書に入れ、入力中では入力中の文字に足す。変換中より先では、確定してから空白で次の入力を始める |
+| `insert_alt_space` | empty | ○ | `insert_space` と別の幅の空白 |
+| `insert_full_space` / `insert_half_space` | empty 以降 | ○ | 幅を決めた空白。入力なしでは文書に入れ、入力中では入力中の文字に足す。変換中より先では、確定してから空白で次の入力を始める |
 | `undo_commit` | empty | × | 直前の確定を取り消す |
 | `reconvert` | empty, direct | × | 選んだ文字を変換し直す |
 | `convert` | composing | ○ | 変換する |
@@ -127,6 +127,7 @@
 | `cancel` | composing | ○ | 入力を全部消す |
 | `cancel_conversion` | converting 以降、predicting | ○ | 変換をやめて、入力中に戻る |
 | `to_hiragana` / `to_katakana` / `to_half_katakana` / `to_full_alnum` / `to_half_alnum` | composing 以降 | ○ | 字種を変える（MS-IME の F6–F10） |
+| `close_candidates` | selecting | ○ | 候補窓を閉じて `converting` に戻る。変換はそのまま |
 | `next_candidate` / `prev_candidate` | converting 以降、predicting | ○ | 次／前の候補。`converting` では候補窓を開く |
 | `next_page` / `prev_page` | selecting 以降 | ○ | 次／前の 9 件 |
 | `select_candidate_1` … `select_candidate_9` | selecting 以降 | ○ | 番号の候補を選ぶ |
