@@ -305,6 +305,8 @@ class ImeSession:
     converted: bool = False
     resizing: bool = False
     editing: bool = False  # the focused clause is open for input within a conversion
+    _cursor: int | None = None  # token boundary; None is the end of the active input
+    _reading_edit: bool = False  # show the reading after moving within unconverted input
     _resize_origin: tuple[list[Segment], bool] | None = None
     candidates: list[str] = field(default_factory=list)
     cand_index: int = 0
@@ -343,16 +345,17 @@ class ImeSession:
     predict_index: ReadingIndex = field(default_factory=ReadingIndex)  # shared
     predicting: bool = False  # the focused candidates are predictions
     _word_starts: set[int] = field(default_factory=set)  # 1-best word boundaries
-    # 部分確定: the thumb direction a committed head gave
-    # the presses whose chords remain. Keyed by the remaining tokens' press
-    # number (presses are never renumbered or reused), cleared on reset.
+    # Thumb directions constrained before a partial commit or a press split.
+    # Keyed by the remaining tokens' press number, cleared on reset.
     _carry: dict[int, frozenset[str]] = field(default_factory=dict)
     keymap: Keymap = field(default_factory=default_keymap)
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
     key_global: str | None = field(default=None, init=False)
+    commit_caret_back: int = field(default=0, init=False)  # distance from the latest commit's end
     input_mode: str = "hiragana"
     _alnum_held: bool = False  # Shift+CapsLock: 英数の続き until the input ends
+    max_tokens: int | None = None
 
     @property
     def phase(self) -> str:
@@ -647,6 +650,8 @@ class ImeSession:
             except Exception as exc:
                 print(f"LM conversion failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         self.converted = True
+        self._cursor = None
+        self._reading_edit = False
         if picks is not None or self._display_key != request.key:
             self._refresh(picks=picks, request=request)
         self._clear_cands()  # the first conversion keeps the candidate window closed (MS-IME)
@@ -690,11 +695,14 @@ class ImeSession:
     def _cancel_conversion(self) -> None:
         self.converted = False
         self.editing = False
+        self._cursor = None
+        self._reading_edit = False
         self._clear_cands()
         self._refresh()
 
     def _segment_revert(self) -> None:
         if self.focus >= 0:
+            self._cursor = None
             self._show_edited_segment(self.focus, self.segments[self.focus].selected.reading)
 
     def _predict_key(self) -> None:
@@ -779,6 +787,7 @@ class ImeSession:
         if segment.literal:
             return
         self.editing = False
+        self._cursor = None
         self._prepare_cands(self.focus)
         stream = segment.choices
         assert stream is not None
@@ -866,19 +875,94 @@ class ImeSession:
         segment.mark_shown()
         self._open_cands()
 
-    def _delete_before(self) -> None:
-        if self.converted and self.segments:
+    def _delete_before(self) -> str | None:
+        if self.converted and not self.editing and self.segments:
             self._delete_converted_char()
-        elif self.tokens:
-            self.tokens.pop()
-            self._refresh()
-            if not self.tokens:
-                self._end_alnum_hold()
+            return None
+        return self._delete_at_cursor(before=True)
+
+    def _edit_bounds(self) -> tuple[int, int]:
+        if self.editing:
+            segment = self.segments[self.focus]
+            return segment.start, segment.end
+        return 0, len(self.tokens)
+
+    @property
+    def caret(self) -> int | None:
+        """Code-point offset in the composition, when it has an editable caret."""
+        if self.editing:
+            start, end = self._edit_bounds()
+            prefix = sum(len(segment.selected.surface) for segment in self.segments[:self.focus])
+            return prefix + (end if self._cursor is None else self._cursor) - start
+        if not self.converted and self._reading_edit:
+            return len(self.tokens) if self._cursor is None else self._cursor
+        return None
+
+    def _move_cursor(self, delta: int, *, pass_at_edge: bool = False) -> str | None:
+        start, end = self._edit_bounds()
+        cursor = end if self._cursor is None else self._cursor
+        target = cursor + delta
+        if start <= target <= end:
+            self._set_cursor(target, end)
+        elif self.editing:
+            if 0 <= self.focus + delta < len(self.segments):
+                self._move_segment(delta)
+            elif pass_at_edge:
+                return self._commit_and_pass_key()
+        return None
+
+    def _cursor_edge(self, *, end: bool) -> None:
+        start, stop = self._edit_bounds()
+        self._set_cursor(stop if end else start, stop)
+
+    def _set_cursor(self, position: int, end: int) -> None:
+        if self.predicting:  # cursor aliases inherited by the focused prediction list
+            return
+        self._cursor = None if position == end else position
+        if not self.editing and not self._reading_edit and self._cursor is not None:
+            self._reading_edit = True
+            self._show_input_reading()
+            self._update_composition()
+
+    def _delete_at_cursor(self, *, before: bool, pass_at_edge: bool = False) -> str | None:
+        start, end = self._edit_bounds()
+        cursor = end if self._cursor is None else self._cursor
+        index = cursor - 1 if before else cursor
+        if not start <= index < end:
+            if pass_at_edge and self.editing and self.focus == (0 if before else len(self.segments) - 1):
+                return self._commit_and_pass_key()
+            return None
+        self._cursor = index if index < end - 1 else None
+        if self.editing:
+            clause = self.focus
+            tokens = self.tokens[start:index] + self.tokens[index + 1:end]
+            self._replace_edited_tokens(clause, tokens)
+            if before and not tokens and clause == len(self.segments):
+                self._open_tail_for_editing()
+        else:
+            del self.tokens[index]
+            if self.tokens:
+                self._refresh()
+            else:
+                self._clear_input()
+        return None
+
+    def _commit_and_pass_key(self) -> str:
+        self.key_eat = False
+        return self._commit()
+
+    def _commit_at_cursor(self, *, only_inside: bool = False) -> str | None:
+        if self._cursor is None or (caret := self.caret) is None:
+            return None if only_inside else self._commit()
+        suffix = len(self.composition) - caret
+        text = self._commit()
+        self.commit_caret_back = suffix
+        return text
 
     def _delete_converted_char(self) -> None:
-        # With a live clause, edit it. Otherwise the deletion is at the end of
-        # the whole conversion, regardless of the focused candidate.
-        index = self.focus if self.editing else len(self.segments) - 1
+        # Delete the end of the whole conversion, regardless of the focused candidate.
+        self._cursor = None
+        index = len(self.segments) - 1
         segment = self.segments[index]
         selected = segment.selected
         text = selected.surface[:-1]
@@ -889,10 +973,14 @@ class ImeSession:
             # Keep the visible remainder as typed text, without stale readings.
             tokens = [Literal(char) for char in text]
         self._replace_edited_tokens(index, tokens, text)
-        if text or not self.segments or index < len(self.segments):
-            return
+        if not text:
+            self._open_tail_for_editing()
+
+    def _open_tail_for_editing(self) -> None:
         # The tail disappeared. Open the preceding clause at its displayed
         # spelling so another deletion can continue from there.
+        if not self.segments:
+            return
         segment = self.segments[-1]
         text = segment.selected.surface
         if text == segment.selected.reading:
@@ -917,6 +1005,7 @@ class ImeSession:
                 self._clear_input()
                 return
             self.editing = False
+            self._cursor = None
             self.focus = min(index, len(self.segments) - 1)
             self._clear_cands()
             self._update_composition()
@@ -959,6 +1048,7 @@ class ImeSession:
             self._convert_raw(index, lattice)
             self._apply_segment_learning(index)
         self.editing = False
+        self._cursor = None
         self._update_composition()
 
     def _pass_empty_key(self, chord: Chord) -> None:
@@ -978,6 +1068,7 @@ class ImeSession:
             focus = max(0, min(self.focus + delta, len(self.segments) - 1))
             if focus != self.focus:
                 self.editing = False
+                self._cursor = None
                 self.focus = focus
             self._clear_cands()
 
@@ -1222,6 +1313,10 @@ class ImeSession:
             mapped = to_lattice_token(tok, self._table)
             if mapped is None:
                 continue  # An empty face (] alone, Q right, ...): nothing is typed.
+            if self.converted and not self.editing:
+                insert += self._commit(reset_input=False)
+            if self.max_tokens is not None and len(self.tokens) >= self.max_tokens:
+                continue  # Keep both sides of the caret when the input is full.
             if isinstance(tok, AmbShift) and tok.press is not None:
                 if mapped["kind"] == "literal":
                     self._press_alias[tok.press] = self._next_alias
@@ -1230,17 +1325,50 @@ class ImeSession:
                     tok = AmbShift(tok.key, self._press_alias[tok.press], tok.turn)
             if mapped["kind"] == "literal" and not isinstance(tok, Literal):
                 tok = Literal(mapped["text"])
-            if self.editing:
-                segment = self.segments[self.focus]
-                self._replace_edited_tokens(self.focus, [*self.tokens[segment.start:segment.end], tok])
-                continue
-            if self.converted:
-                insert += self._commit(reset_input=False)
-            self.tokens.append(tok)
-            self.converted = False
+            self._insert_token(tok)
+        return insert or None
+
+    def _insert_token(self, token: Token | Literal) -> None:
+        start, end = self._edit_bounds()
+        index = end if self._cursor is None else self._cursor
+        if isinstance(token, (AmbShift, Literal)):
+            self._split_press_at(index)
+        self._cursor = index + 1 if index < end else None
+        if self.editing:
+            tokens = [*self.tokens[start:index], token, *self.tokens[index:end]]
+            self._replace_edited_tokens(self.focus, tokens)
+        else:
+            self.tokens.insert(index, token)
             self._clear_cands()
             self._refresh()
-        return insert or None
+
+    def _split_press_at(self, index: int) -> None:
+        # An inserted literal or a new Space press ends an old press. Give the
+        # right half a new id while keeping its original thumb-turn parity.
+        if index == 0 or index == len(self.tokens):
+            return
+        left = next((t for t in reversed(self.tokens[:index]) if not isinstance(t, Plain)), None)
+        if not isinstance(left, AmbShift) or left.press is None:
+            return
+        right = index
+        while right < len(self.tokens) and isinstance(self.tokens[right], Plain):
+            right += 1
+        if right == len(self.tokens):
+            return
+        first = self.tokens[right]
+        if not isinstance(first, AmbShift) or first.press != left.press:
+            return
+        alias = self._next_alias
+        self._next_alias -= 1
+        plan = Plan(self._lattice())
+        directions = frozenset(direction for _, direction in plan.branches[right]
+                               if direction is not None)
+        if len(directions) == 1:
+            self._carry[left.press] = self._carry[alias] = directions
+        for pos in range(right, len(self.tokens)):
+            token = self.tokens[pos]
+            if isinstance(token, AmbShift) and token.press == left.press:
+                self.tokens[pos] = replace(token, press=alias)
 
     def _insert_space(self, text: str) -> str:
         self._note_commit(text)
@@ -1308,16 +1436,27 @@ class ImeSession:
         if picks is None and self._lex is not None:
             picks = request.decode(self._lex)
         self.segments = display_segments(request.parts, picks)
+        if not self.converted:
+            self._show_input_reading()
         for segment in self.segments:
-            if not self.converted and self.input_mode == "katakana" and not segment.literal:
-                surface = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c
-                                  for c in segment.selected.surface)
-                segment.selected = replace(segment.selected, surface=surface)
-                self._display_key = None  # conversion must compute the regular candidates
             segment.mark_shown()
         self._word_starts = {start for run in picks or () for start in run.word_starts}
         self.focus = _first_stop(self.segments)
         self.composition = "".join(s.selected.surface for s in self.segments)
+
+    def _show_input_reading(self) -> None:
+        if not self._reading_edit and self.input_mode != "katakana":
+            return
+        for index, segment in enumerate(self.segments):
+            if segment.literal:
+                continue
+            if self._reading_edit:
+                self._make_raw(index, segment.selected.reading)
+            if self.input_mode == "katakana":
+                surface = "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c
+                                  for c in segment.selected.surface)
+                segment.selected = replace(segment.selected, surface=surface)
+        self._display_key = None  # conversion must compute the regular candidates
 
     def _sync_personal(self) -> None:
         if self.personal is not None and self._lex is not None:
@@ -1359,6 +1498,8 @@ class ImeSession:
         self.converted = False
         self.resizing = False
         self.editing = False
+        self._cursor = None
+        self._reading_edit = False
         self._resize_origin = None
         self.predicting = False
         self._clear_cands()
@@ -1388,11 +1529,15 @@ class ImeSession:
         kept = [i for i, t in enumerate(self.tokens)
                 if to_lattice_token(t, self._table) is not None]
         del self.tokens[:kept[end]]
+        if self._cursor is not None:
+            self._cursor = max(0, self._cursor - kept[end])
         remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
         for press, dirs in chosen.items():
             if press in remaining and dirs and dirs != SIDES:
                 self._carry[press] = dirs
         self.segments = self.segments[1:]
+        if self.editing:
+            self._cursor = None
         self.editing = False
         for segment in self.segments:
             segment.start -= end
@@ -1431,6 +1576,8 @@ class ImeSession:
         self._partial = True
         chosen = Plan(self._lattice()).directions(0, 1, head.selected.reading[0])
         del self.tokens[:kept[1]]
+        if self._cursor is not None:
+            self._cursor = max(0, self._cursor - kept[1])
         remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
         for press, dirs in chosen.items():
             if press in remaining and dirs and dirs != SIDES:
@@ -1442,6 +1589,7 @@ class ImeSession:
     def _note_commit(self, text: str, last: Segment | None = None, *,
                      standalone: bool = False) -> None:
         """Advance the current input and remember what this connection committed."""
+        self.commit_caret_back = 0
         right_id = BOS_ID
         if self._lex is not None and last is not None:
             if last.literal:

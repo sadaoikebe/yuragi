@@ -277,6 +277,73 @@ class PartialCommitTest(unittest.TestCase):
                           self.surfaces(converted), converted["candidates"]),
                          ("converting", 1, ["私は", "学校に", "行く"], []))
 
+    def test_cursor_edit_resolves_the_pending_key_at_the_old_position(self):
+        k = self.typed("がっこう")
+        k.s.max_tokens = 5
+        k.s._table["keys"].update(w={"plain": "っ"}, a={"plain": "が"})
+        self.assertEqual(k.s.composition, "学校")
+        moved = k.tap(VK_HOME)
+        self.assertEqual((moved["composition"], moved["caret"]), ("がっこう", 0))
+        k.tap(VK_RIGHT)
+        k.send("down", ord("W"))  # unresolved thumb chord at position 1
+        moved = k.tap(VK_LEFT, step=10)
+        self.assertEqual((moved["composition"], moved["caret"], moved["commit"]), ("がっっこう", 1, ""))
+        k.send("up", ord("W"))
+        full = k.plain("w")
+        self.assertEqual((full["composition"], full["caret"]), ("がっっこう", 1))
+        self.assertEqual(k.tap(0x2E)["composition"], "がっこう")
+        deleted = k.tap(0x08)
+        self.assertEqual((deleted["composition"], deleted["caret"]), ("っこう", 0))
+        typed = k.plain("a")
+        self.assertEqual((typed["composition"], typed["caret"]), ("がっこう", 1))
+        converted = k.convert()
+        self.assertEqual((converted["phase"], converted["composition"], converted.get("caret")),
+                         ("converting", "学校", None))
+
+    def test_inserting_a_thumb_press_inside_an_earlier_press_preserves_its_direction(self):
+        lex = MozcLex({"え": [Entry("絵", "え", 1, 1, -10000)]}, {"え"}, [0] * 4, 2)
+        k = Keys(ImeSession(_table=load_table(), _lex=lex))
+        k.chords("q", "w")  # q has only a left face, so w must be its right face (が)
+        moved = k.tap(VK_LEFT)
+        self.assertEqual((moved["composition"], moved["caret"]), ("ぁが", 1))
+        inserted = k.chords("q", "w")
+        self.assertEqual((inserted["composition"], inserted["caret"]), ("ぁぁがが", 3))
+
+    def test_word_deletion_passes_the_key_at_the_current_position(self):
+        for vk in (0x08, 0x2E):
+            with self.subTest(vk=vk):
+                k = self.typed("がっこう")
+                if vk == 0x2E:
+                    end = k.tap(vk, ["ctrl"])
+                    self.assertEqual((end["eat"], end["phase"], end["commit"]), (False, "composing", ""))
+                k.tap(VK_LEFT)
+                reply = k.tap(vk, ["ctrl"])
+                self.assertEqual((reply["eat"], reply["commit"], reply["commit_caret"]), (False, "がっこう", 3))
+
+    def test_mixed_input_moves_to_the_next_clause_and_passes_the_outer_arrow(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.s._table["keys"]["w"] = {"plain": "は"}
+        k.convert()
+        k.tap(VK_RIGHT)
+        k.tap(VK_ESC)
+        k.tap(VK_LEFT)
+        inserted = k.plain("w")
+        self.assertEqual((self.surfaces(inserted), inserted["caret"]),
+                         (["私は", "がっこうはに", "行く"], 7))
+        deleted = k.tap(0x2E)
+        self.assertEqual((self.surfaces(deleted), deleted["caret"]),
+                         (["私は", "がっこうは", "行く"], 7))
+        moved = k.tap(VK_RIGHT)
+        self.assertEqual((moved["phase"], moved["focus"], moved["eat"], moved["commit"]),
+                         ("converting", 2, True, ""))
+        tail = k.tap(VK_ESC)
+        self.assertEqual((tail["phase"], tail["caret"]), ("editing", 9))
+        clamped = k.tap(VK_RIGHT, ["shift"])
+        self.assertEqual((clamped["phase"], clamped["eat"], clamped["commit"]), ("editing", True, ""))
+        passed = k.tap(VK_RIGHT)
+        self.assertEqual((passed["phase"], passed["eat"], passed["commit"]),
+                         ("empty", False, "私はがっこうはいく"))
+
     def test_reconverting_a_trimmed_clause_preserves_the_displayed_kanji(self):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}

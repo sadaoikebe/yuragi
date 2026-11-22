@@ -23,8 +23,12 @@ def key_cases():
             for vk in range(1, 0x100):
                 session = ImeSession(_table=table, _lex=lex, direct=phase == "direct")
                 if phase not in ("empty", "direct"):
-                    count = 2 if phase in ("converting", "resizing", "editing") else 1
+                    count = 2 if phase in ("composing", "converting", "resizing", "editing") else 1
                     session._ingest([Plain("k")] * count)
+                if phase == "composing":
+                    # A phase-only TIP table must reserve Ctrl+Delete because a
+                    # caret inside the input requires a commit before replay.
+                    dispatch(session, {"op": "down", "vk": 0x25})
                 if phase in ("converting", "selecting", "resizing", "editing"):
                     dispatch(session, {"op": "down", "vk": 0x20, "mods": ["shift"]})
                     if phase == "selecting":  # the second press opens the window

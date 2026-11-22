@@ -87,8 +87,15 @@
   ほかの文節の変換を保つ。候補窓が開いているときの Esc・Backspace は、候補窓を閉じる。
 - 候補窓を閉じた変換中の Backspace・Ctrl+H は、表示全体の末尾を 1 字削る。複数文節なら末尾を注目文節として `editing` に入る。
   末尾の文節が消えたときは、その前の文節の表記を編集できる形にする。編集する文節だけが残ったときは `composing` になる。
-- `editing` では、文字を注目文節の末尾に足し、Backspace で末尾を削る。Space でその文節を変換する。Esc・Shift+Esc は全戻し。
-  文節内のカーソル移動と F2・再変換からの入り方は今後の作業。
+- `composing` では、カーソルを途中へ動かすと入力を読みで表示する。←・→ で 1 打ずつ、Home・End で入力の先頭・末尾へ移る。
+  途中にも入力でき、Backspace・Delete は前後の 1 打を削る。両端では止まる。Space はカーソルの位置にかかわらず入力全体を変換する。
+  Ctrl+Backspace・Ctrl+Delete は、カーソルの位置を保ってアプリに通す。確定してから通すが、Ctrl+Delete は末尾ならそのまま通す。
+- `editing` では、注目文節の中で移動、挿入、削除ができる。Space はその文節を変換する。Esc・Shift+Esc は全戻し。
+  Ctrl+←・Ctrl+→・Ctrl+A・Ctrl+F は文節の先頭・末尾へ移動し、Home・End は何もしない。
+  ←・→ で文節の端を越えると、隣の文節へ移って `converting` に戻る。入力全体の端を越えると確定してキーを通す。
+  Shift+←・Shift+→ と Ctrl+S/D/K/L は入力全体の端で止まる。
+  Backspace・Ctrl+H は入力全体の先頭で、Delete・Ctrl+G は末尾で、確定してキーを通す。
+  F2・再変換からの入り方は今後の作業。
 - 「英数の続き」は局面にしない。文字キーの打たれ方が変わるだけで、使えるコマンドは `composing` と同じ。
   Shift+CapsLock（`alnum_mode`）で入ったときは、変換中でも局面を変えない（CONVERSION「英数の続き」）。
 - 準備中・停止・対象外では、`global` の中の TIP が実行するコマンドだけが効く（§7.5）。
@@ -126,12 +133,15 @@
 | `convert` | composing | ○ | 変換する |
 | `predict` | composing | ○ | 予測候補に入る |
 | `commit` | composing 以降 | ○ | 全部確定する |
+| `commit_at_cursor_and_pass` / `commit_inside_and_pass` | composing | ○ | カーソルを保ったまま確定してキーを通す。後者は末尾なら確定せず通す |
 | `commit_first_segment` | composing 以降 | ○ | 先頭の文節だけ確定する |
 | `commit_one_char` | composing | ○ | 先頭の 1 打を、かなのまま確定する（CONVERSION「部分確定」） |
 | `commit_to_focus` | converting 以降 | × | 注目文節までを確定する |
-| `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力は最後の 1 打、変換済みは表示の末尾の 1 字を消す |
+| `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力はカーソルの前の 1 打、変換済みは表示の末尾の 1 字を消す |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
-| `delete_after` / `cursor_left` / `cursor_right` / `cursor_home` / `cursor_end` | composing | × | 入力中のカーソル移動と削除（カーソルの仕組みが要る）。作るまでは `noop`（行を落とすと、確定してアプリのカーソルが動く） |
+| `delete_after` | composing、editing | ○ | カーソルの後の 1 打を消す。文節内入力で入力全体の末尾なら確定して通す |
+| `cursor_left` / `cursor_right` / `cursor_home` / `cursor_end` | composing、editing | ○ | 左右へ 1 打、または入力・注目文節の先頭・末尾に移動する |
+| `cursor_left_or_pass` / `cursor_right_or_pass` / `delete_before_or_pass` | editing | ○ | 左右へ移動、または前字を削除する。入力全体の端でこれ以上動けなければ確定して通す |
 | `cancel` | composing | ○ | 入力を全部消す |
 | `cancel_conversion` | converting 以降、predicting | ○ | 変換をやめて、入力中に戻る |
 | `segment_revert` | converting、selecting | ○ | 注目文節を読みに戻す |

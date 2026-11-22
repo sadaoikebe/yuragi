@@ -161,20 +161,10 @@ class Connection:
         self.pipeline = engine.new_pipeline(self.sess)
 
     def handle(self, msg: dict) -> dict:
-        from yuragi.ime.server import process_request, snapshot
+        from yuragi.ime.server import process_request
         if self.pipeline is not None:
-            reply = self.pipeline.handle(msg)
-        else:
-            reply = process_request(self.sess, msg)
-        sess = self.sess
-        if len(sess.tokens) > MAX_TOKENS and not sess.converted and sess._await is None:
-            # DESIGN「入力の長さ」: the key is taken silently, the input stays as it was.
-            del sess.tokens[MAX_TOKENS:]
-            sess._refresh()
-            adjusted = snapshot(sess, msg.get("op"), eat=reply.get("eat"))
-            adjusted["commit"] = reply["commit"]
-            reply.update(adjusted)
-        return reply
+            return self.pipeline.handle(msg)
+        return process_request(self.sess, msg)
 
     def recover(self) -> dict:
         """DESIGN「要求 1 件ごとの防壁」: drop the session that raised; continue from a clean one."""
@@ -349,7 +339,8 @@ class Engine:
         return ImeSession(
             _table=loaded._table, _lex=loaded._lex, _symbols=loaded._symbols,
             _learning=loaded._learning, personal=loaded.personal,
-            prediction=loaded.prediction, predict_index=loaded.predict_index, keymap=self.keymap)
+            prediction=loaded.prediction, predict_index=loaded.predict_index, keymap=self.keymap,
+            max_tokens=MAX_TOKENS)
 
     def new_pipeline(self, sess):
         if self.worker is None:

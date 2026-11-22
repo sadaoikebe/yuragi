@@ -150,6 +150,18 @@ S1 の「English keyboard (101/102 key)」タブの表。S2 ではこのタブ�
 
 - 文節内入力で文字を打つと、その文節に入る。Space でその文節が変換され、候補窓は出ない。
 
+**入力中のカーソル**（現行 MS-IME、TSF の RichEdit）
+
+- ②の ←・→ は表示の 1 字ずつ移動する。ローマ字で入れた「きゃ」も「き」と「ゃ」の間に移動でき、Backspace・Delete はその前後の 1 字を消す。
+  Home・End は入力の先頭・末尾へ移動する。両端で外へ向けて ←・→ や前後の削除を押しても、入力は続く。
+  Space はカーソルが途中にあっても全体を変換し、Shift+↓ は入力の先頭を 1 単位確定する。
+  Ctrl+Backspace・Ctrl+Delete は、入力途中のキャレット位置から RichEdit に単語を削除させる。
+  Ctrl+Delete を末尾で押して後ろに削除する文字がないときは、キーは通って入力も続いた。
+- ⑥の ←・→ で注目文節の端を越えると隣の文節へ移動し、入力全体の端を越えると確定してキーを通す。
+  Shift+←・Shift+→ と Ctrl+S/D/K/L は入力全体の端で止まる。Ctrl+←・Ctrl+A は注目文節の先頭、Ctrl+→・Ctrl+F は末尾。Home・End は何もしない。
+- ⑥では Backspace・Ctrl+H は入力全体の先頭で、Delete・Ctrl+G は末尾で、確定してキーを通す。
+  Shift+Backspace・Ctrl+Backspace は入力全体の先頭で止まる。
+
 **旧 IME の表（§2）と働きが違うキー**（文字種の変換、Ctrl+K/L と Shift+←/→ の文節長、
 Shift+↓ の 1 文字確定・先頭確定、Ctrl+↓・Ctrl+N の文節確定、Ctrl+Space・Ctrl+Shift+Space の空白などは §2 の表と同じだった）
 

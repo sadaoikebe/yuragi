@@ -52,7 +52,10 @@ def dispatch(sess: ImeSession, msg: dict) -> dict:
 def set_reply_commit(sess: ImeSession, msg: dict, reply: dict, commit: str) -> None:
     reply["commit"] = commit
     if commit:
+        if sess.commit_caret_back:
+            reply["commit_caret"] = len(commit) - sess.commit_caret_back
         sess.bind_commit(msg.get("seq"))
+    sess.commit_caret_back = 0
 
 
 def apply_op(sess: ImeSession, msg: dict) -> str:
@@ -113,6 +116,8 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
         "predicting": sess.predicting,
         "pending": False,
     }
+    if (caret := sess.caret) is not None:
+        reply["caret"] = caret
     if op == "down" and eat is not None:
         reply["eat"] = eat
         if key_global is not None:

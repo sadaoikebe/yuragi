@@ -931,11 +931,13 @@ private:
         }
         ITfRange* caret = nullptr;
         HRESULT caret_hr = range->Clone(&caret);
+        int caret_position = commit ? reply.commit_caret : reply.caret;
+        if (caret_position < 0 && editing) caret_position = reply.segments[reply.focus].display_end;
         if (SUCCEEDED(caret_hr)) {
-            caret_hr = caret->Collapse(ec, editing ? TF_ANCHOR_START : TF_ANCHOR_END);
-            if (SUCCEEDED(caret_hr) && editing) {
+            caret_hr = caret->Collapse(ec, caret_position >= 0 ? TF_ANCHOR_START : TF_ANCHOR_END);
+            if (SUCCEEDED(caret_hr) && caret_position > 0) {
                 LONG moved = 0;
-                LONG offset = Utf16Offset(text, reply.segments[reply.focus].display_end);
+                LONG offset = Utf16Offset(text, caret_position);
                 caret_hr = caret->ShiftEnd(ec, offset, &moved, nullptr);
                 if (SUCCEEDED(caret_hr)) caret_hr = caret->Collapse(ec, TF_ANCHOR_END);
             }
@@ -950,7 +952,9 @@ private:
         if (commit || text.empty()) hr = End(ec, state_);
         if (FAILED(caret_hr)) {
             state_->BreakContinuity();
-        } else if (commit && SUCCEEDED(hr) && state_->active) {
+        } else if (commit && caret_position < 0 && SUCCEEDED(hr) && state_->active) {
+            // A commit in the middle keeps the document context disconnected:
+            // its caret is not the end of the text we committed.
             state_->disconnected = false;
             if (state_->track_commit) {
                 // The next preedit can be inserted at this position in this same edit.

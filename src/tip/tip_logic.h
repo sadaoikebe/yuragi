@@ -178,6 +178,7 @@ struct Message {
     bool predicting = false, error = false, has_next_page = false;
     bool fsm_idle = true;
     int n_tokens = 0, focus = -1, page = 0, cand_index = 0;
+    int caret = -1, commit_caret = -1;
     bool has_timer = false;
     uint64_t timer = 0;
     std::vector<std::string> candidates;
@@ -242,6 +243,8 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     if (fsm.kind == tip_json::Value::String) m.fsm_idle = fsm.text == "S1";
     ReadInt(v, "n_tokens", m.n_tokens);
     ReadInt(v, "focus", m.focus);
+    ReadInt(v, "caret", m.caret);
+    ReadInt(v, "commit_caret", m.commit_caret);
     ReadInt(v, "candidate_page", m.page);
     ReadInt(v, "cand_index", m.cand_index);
     long long timer;
