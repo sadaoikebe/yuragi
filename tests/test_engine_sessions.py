@@ -235,6 +235,7 @@ class LmPipelineTest(EngineCase):
         worker = ManualWorker(loaded._lex, PickyModel(), delay=lambda _index: 100)
         engine = self.engine(loaded, worker, argv=["--lm-grace-ms", "0"])
         self.open(engine, 1)
+        engine.connections[1].pipeline.clock = worker.clock
         self.type_a(engine, 1)
         self.request(engine, 1, {"op": "down", "vk": 32, "t": 100})
         self.assertTrue(self.request(engine, 1, {"op": "up", "vk": 32, "t": 130})["pending"])
