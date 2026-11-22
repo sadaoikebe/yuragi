@@ -304,6 +304,8 @@ class ImeSession:
     composition: str = ""
     converted: bool = False
     resizing: bool = False
+    editing: bool = False  # the focused clause is open for input within a conversion
+    _resize_origin: tuple[list[Segment], bool] | None = None
     candidates: list[str] = field(default_factory=list)
     cand_index: int = 0
     segments: list[Segment] = field(default_factory=list)
@@ -364,6 +366,8 @@ class ImeSession:
             return "composing"
         if self.resizing:
             return "resizing"
+        if self.editing:
+            return "editing"
         return "selecting" if self.candidates else "converting"
 
     def load(self) -> None:
@@ -528,7 +532,7 @@ class ImeSession:
 
         self.key_eat = True
         kind, key = classify(chord.vk)
-        if self._alnum_held and self.converted and chord.vk != SPACE.vk:
+        if self._alnum_held and self.converted and not self.editing and chord.vk != SPACE.vk:
             # MS-IME commits the conversion and drops the character: the IME is off.
             self._forget_fsm_down(chord.vk)
             return self._then(self._finish_pending(), self._commit)
@@ -549,7 +553,7 @@ class ImeSession:
 
         assert key is not None
         insert = ""
-        if chord.character and self.converted:
+        if chord.character and self.converted and not self.editing:
             # Preserve a pending Space chord while starting the next input.
             insert = self._commit(reset_input=False)
         self._fsm_down.add(chord.vk)
@@ -562,11 +566,15 @@ class ImeSession:
             self.fsm.pressed_at.pop(key, None)
 
     def _run_command(self, command: Command | None) -> str | None:
-        if command is not None and command.run is not None:
-            if not command.keeps_resizing:
-                self.resizing = False
+        if command is None or command.run is None:
+            return None
+        if command.keeps_resizing:
             return command.run(self)
-        return None
+        self.resizing = False
+        try:
+            return command.run(self)
+        finally:
+            self._resize_origin = None
 
     def _alnum_continues(self) -> bool:
         """英数の続き: Shift+CapsLock held it, or the input ends in a half-width ASCII literal.
@@ -576,9 +584,11 @@ class ImeSession:
         A conversion in progress (or awaited) is not part of it: a key there
         commits the conversion and starts a new input.
         """
-        return (not self.converted and self._await is None and bool(self.tokens)
-                and (self._alnum_held or (isinstance(self.tokens[-1], Literal)
-                                          and self.tokens[-1].alnum)))
+        if (self.converted and not self.editing) or self._await is not None or not self.tokens:
+            return False
+        end = self.segments[self.focus].end if self.editing else len(self.tokens)
+        tail = self.tokens[end - 1]
+        return self._alnum_held or (isinstance(tail, Literal) and tail.alnum)
 
     def _hold_alnum(self) -> None:
         """Shift+CapsLock with input (MS-IME's 英数 mode): the input and any
@@ -588,8 +598,11 @@ class ImeSession:
     def _end_alnum(self) -> None:
         """A mode change ends 英数の続き, held or not; the input stays."""
         self._alnum_held = False
-        if self.tokens and isinstance(self.tokens[-1], Literal) and self.tokens[-1].alnum:
-            self.tokens[-1] = replace(self.tokens[-1], alnum=False)
+        if self.tokens:
+            end = self.segments[self.focus].end if self.editing else len(self.tokens)
+            tail = self.tokens[end - 1]
+            if isinstance(tail, Literal) and tail.alnum:
+                self.tokens[end - 1] = replace(tail, alnum=False)
 
     def _end_alnum_hold(self) -> None:
         """The input ended while held: MS-IME is left off, so the reply to an
@@ -676,8 +689,13 @@ class ImeSession:
 
     def _cancel_conversion(self) -> None:
         self.converted = False
+        self.editing = False
         self._clear_cands()
         self._refresh()
+
+    def _segment_revert(self) -> None:
+        if self.focus >= 0:
+            self._show_edited_segment(self.focus, self.segments[self.focus].selected.reading)
 
     def _predict_key(self) -> None:
         """Open the predictions for the trailing reading, if there are any."""
@@ -760,6 +778,7 @@ class ImeSession:
         segment = self.segments[self.focus]
         if segment.literal:
             return
+        self.editing = False
         self._prepare_cands(self.focus)
         stream = segment.choices
         assert stream is not None
@@ -848,11 +867,99 @@ class ImeSession:
         self._open_cands()
 
     def _delete_before(self) -> None:
-        if self.tokens:
+        if self.converted and self.segments:
+            self._delete_converted_char()
+        elif self.tokens:
             self.tokens.pop()
             self._refresh()
             if not self.tokens:
                 self._end_alnum_hold()
+
+    def _delete_converted_char(self) -> None:
+        # With a live clause, edit it. Otherwise the deletion is at the end of
+        # the whole conversion, regardless of the focused candidate.
+        index = self.focus if self.editing else len(self.segments) - 1
+        segment = self.segments[index]
+        selected = segment.selected
+        text = selected.surface[:-1]
+        if selected.surface == selected.reading:
+            tokens = self.tokens[segment.start:segment.end - 1]
+        else:
+            # There is no character-to-keystroke map for a converted spelling.
+            # Keep the visible remainder as typed text, without stale readings.
+            tokens = [Literal(char) for char in text]
+        self._replace_edited_tokens(index, tokens, text)
+        if text or not self.segments or index < len(self.segments):
+            return
+        # The tail disappeared. Open the preceding clause at its displayed
+        # spelling so another deletion can continue from there.
+        segment = self.segments[-1]
+        text = segment.selected.surface
+        if text == segment.selected.reading:
+            self._show_edited_segment(len(self.segments) - 1, text)
+        else:
+            self._replace_edited_tokens(len(self.segments) - 1, [Literal(c) for c in text], text)
+
+    def _replace_edited_tokens(self, index: int, tokens: list[Token | Literal],
+                               text: str | None = None) -> None:
+        segment = self.segments[index]
+        delta = len(tokens) - (segment.end - segment.start)
+        self.tokens[segment.start:segment.end] = tokens
+        segment.end += delta
+        for following in self.segments[index + 1:]:
+            following.start += delta
+            following.end += delta
+        self._display_key = None
+        self._word_starts.clear()
+        if not tokens:
+            del self.segments[index]
+            if not self.segments:
+                self._clear_input()
+                return
+            self.editing = False
+            self.focus = min(index, len(self.segments) - 1)
+            self._clear_cands()
+            self._update_composition()
+            return
+        segment.literal = any(isinstance(token, Literal) for token in tokens)
+        if text is None:
+            segments = self._decode_edited_segment(index, self._lattice())
+            text = "".join(s.selected.reading for s in segments)
+        self._show_edited_segment(index, text)
+
+    def _show_edited_segment(self, index: int, reading: str) -> None:
+        self._make_raw(index, reading)
+        self.focus = index
+        self.converted = self.editing = len(self.segments) > 1
+        self._display_key = None
+        self._clear_cands()
+        self._update_composition()
+
+    def _decode_edited_segment(self, index: int, lattice: list[dict]) -> list[Segment]:
+        segment = self.segments[index]
+        pins, left, _ = candidate_inputs(lattice, self.segments, index, self._left_id, self._lex)
+        parts = self._parts(restrict(lattice, segment.start, segment.end, pins))
+        prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
+        picks = conversion_picks(parts, self._lex, self._learning_view, "", None,
+                                 left_id=left, prev=prev)
+        return display_segments(parts, picks)
+
+    def _convert_edited_segment(self) -> None:
+        index = self.focus
+        segment = self.segments[index]
+        lattice = self._lattice()
+        if segment.literal:
+            parts = self._decode_edited_segment(index, lattice)
+            for part in parts:
+                part.start += segment.start
+                part.end += segment.start
+                part.mark_shown()
+            self.segments[index:index + 1] = parts
+        else:
+            self._convert_raw(index, lattice)
+            self._apply_segment_learning(index)
+        self.editing = False
+        self._update_composition()
 
     def _pass_empty_key(self, chord: Chord) -> None:
         if chord.mods in (0, SHIFT):
@@ -868,7 +975,10 @@ class ImeSession:
     def _move_segment(self, delta: int) -> None:
         # Every segment is a stop: a symbol or a run of digits has its own rows.
         if self.focus >= 0:
-            self.focus = max(0, min(self.focus + delta, len(self.segments) - 1))
+            focus = max(0, min(self.focus + delta, len(self.segments) - 1))
+            if focus != self.focus:
+                self.editing = False
+                self.focus = focus
             self._clear_cands()
 
     def _select_row(self, row: int) -> None:
@@ -954,11 +1064,17 @@ class ImeSession:
             return  # a digit run keeps its interval; predictions span the input
         self._clear_cands()
         following = self.focus + 1
+        neighbor = self.segments[following] if following < len(self.segments) else None
+        if delta > 0 and (neighbor is None or neighbor.literal):
+            return
+        if delta < 0 and segment.end - segment.start == 1:
+            return
+        if not self.resizing:
+            self._resize_origin = ([replace(s) for s in self.segments], self.editing)
+        self.editing = False
         reading = segment.selected.reading
         if delta > 0:
-            if following == len(self.segments) or self.segments[following].literal:
-                return
-            neighbor = self.segments[following]
+            assert neighbor is not None
             neighbor_reading = neighbor.selected.reading
             segment.end += 1
             neighbor.start += 1
@@ -968,8 +1084,6 @@ class ImeSession:
             else:
                 self._make_raw(following, neighbor_reading[1:])
         else:
-            if segment.end - segment.start == 1:
-                return
             segment.end -= 1
             self.segments.insert(following, Segment(segment.end, segment.end + 1, segment.selected))
             self._make_raw(following, reading[-1])
@@ -977,6 +1091,11 @@ class ImeSession:
         self._make_raw(self.focus, reading)
         self._update_composition()
         self.resizing = True
+
+    def _cancel_resize(self) -> None:
+        if self._resize_origin is not None:
+            self.segments, self.editing = self._resize_origin
+            self._update_composition()
 
     def _make_raw(self, index: int, reading: str) -> None:
         segment = self.segments[index]
@@ -996,7 +1115,7 @@ class ImeSession:
         segment.source = segment.selected
         segment.raw = False
 
-    def _apply_resize_learning(self, index: int) -> None:
+    def _apply_segment_learning(self, index: int) -> None:
         segment = self.segments[index]
         repeat = self._repeat and not self._partial and len(self.segments) == 1
         prev = previous_bunsetsu(self.segments, index, self._left_bunsetsu, self._lex)
@@ -1007,12 +1126,12 @@ class ImeSession:
     def _end_resize(self) -> None:
         # The base conversion uses the right POS. Learning uses the left
         # selection, which can itself be a learned spelling.
-        raw = [i for i, segment in enumerate(self.segments) if segment.raw]
+        raw = [i for i, segment in enumerate(self.segments) if segment.raw and not segment.literal]
         lattice = self._lattice()
         for i in reversed(raw):
             self._convert_raw(i, lattice)
         for i in raw:
-            self._apply_resize_learning(i)
+            self._apply_segment_learning(i)
         self._update_composition()
 
     def _clear_cands(self) -> None:
@@ -1056,10 +1175,9 @@ class ImeSession:
     def _cycle(self, delta: int) -> None:
         if self.focus < 0:
             return
+        if self.segments[self.focus].raw:
+            self._convert_edited_segment()
         segment = self.segments[self.focus]
-        if segment.raw:
-            self._convert_raw(self.focus, self._lattice())
-            self._apply_resize_learning(self.focus)
         if not self.candidates or segment.choices is None:
             self._prepare_cands(self.focus)
         stream = segment.choices
@@ -1110,10 +1228,14 @@ class ImeSession:
                     self._next_alias -= 1
                 elif tok.press in self._press_alias:
                     tok = AmbShift(tok.key, self._press_alias[tok.press], tok.turn)
-            if self.converted:
-                insert += self._commit(reset_input=False)
             if mapped["kind"] == "literal" and not isinstance(tok, Literal):
                 tok = Literal(mapped["text"])
+            if self.editing:
+                segment = self.segments[self.focus]
+                self._replace_edited_tokens(self.focus, [*self.tokens[segment.start:segment.end], tok])
+                continue
+            if self.converted:
+                insert += self._commit(reset_input=False)
             self.tokens.append(tok)
             self.converted = False
             self._clear_cands()
@@ -1128,8 +1250,8 @@ class ImeSession:
         """Ctrl+Space / Ctrl+Shift+Space: a space of a fixed width.
 
         With no input it goes to the document. Otherwise it is typed into the
-        input; after a conversion, _ingest commits first and the space starts
-        the next input (MS-IME).
+        input or the clause being edited. After a conversion, _ingest commits
+        first and the space starts the next input (MS-IME).
         """
         if not self.tokens:
             return self._insert_space(text)
@@ -1236,6 +1358,8 @@ class ImeSession:
         self.composition = ""
         self.converted = False
         self.resizing = False
+        self.editing = False
+        self._resize_origin = None
         self.predicting = False
         self._clear_cands()
 
@@ -1269,6 +1393,7 @@ class ImeSession:
             if press in remaining and dirs and dirs != SIDES:
                 self._carry[press] = dirs
         self.segments = self.segments[1:]
+        self.editing = False
         for segment in self.segments:
             segment.start -= end
             segment.end -= end

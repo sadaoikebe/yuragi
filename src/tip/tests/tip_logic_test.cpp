@@ -88,6 +88,14 @@ static void StatesAndWhatTheUserSees() {
 
 static void EatingKeys() {
     const auto table = DefaultKeyTable();
+    // An earlier engine still supplies a usable key table without the editing row.
+    tip_json::Value older;
+    const std::string encoded(kDefaultKeyTable);
+    assert(tip_json::Parser(encoded).Parse(older));
+    assert(older.object.at("phases").object.erase("editing") == 1);
+    auto old_table = ParseKeyTable(older);
+    assert(old_table && old_table->rev == table.rev);
+
     auto take = [&](uint32_t vk, Mods mods, Phase phase, bool unsettled = false) {
         return WantKey(NormalizeKey(vk, mods), {phase, unsettled}, table);
     };

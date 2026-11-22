@@ -164,7 +164,7 @@ class PartialCommitTest(unittest.TestCase):
     def test_resize_exits_on_script_conversion_cancel_or_new_input(self):
         for key, phase, text, commit in (
                 (VK_F7, "converting", "ワタシは学校に行く", ""),
-                (VK_ESC, "composing", "私は学校に行く", ""),
+                (VK_ESC, "converting", "私は学校に行く", ""),
                 (ord("W"), "composing", "か", "わたしは学校に行く")):
             with self.subTest(key=key):
                 k = self.typed("わたしはがっこうにいく")
@@ -241,7 +241,79 @@ class PartialCommitTest(unittest.TestCase):
                 self.assertEqual((closed["phase"], closed["candidates"], closed["composition"],
                                   closed["focus"]),
                                  ("converting", [], chosen["composition"], 0))
-                self.assertEqual(k.tap(VK_ESC)["phase"], "composing")
+                reverted = k.tap(VK_ESC)
+                self.assertEqual((reverted["phase"], reverted["focus"],
+                                  self.surfaces(reverted)[1:]),
+                                 ("editing", 0, self.surfaces(chosen)[1:]))
+
+    def test_backspace_deletes_the_display_tail_then_edits_the_previous_clause(self):
+        k = self.typed("わたしはがっこうにいく", learning=True)
+        k.convert()
+        deleted = k.tap(0x08)
+        self.assertEqual((deleted["phase"], deleted["focus"], self.surfaces(deleted)),
+                         ("editing", 2, ["私は", "学校に", "行"]))
+        self.assertEqual(deleted["commit"], "")
+        again = k.tap(ord("H"), ["ctrl"])
+        self.assertEqual((again["phase"], again["focus"], self.surfaces(again)),
+                         ("editing", 1, ["私は", "学校に"]))
+        self.assertEqual(k.tap(VK_RETURN)["commit"], "私は学校に")
+        self.assertEqual(self.rows(), [])
+
+    def test_reverted_middle_clause_accepts_input_without_changing_its_neighbors(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.s._table["keys"]["w"] = {"plain": "は"}
+        k.convert()
+        k.tap(VK_RIGHT)
+        reverted = k.tap(VK_ESC)
+        self.assertEqual((reverted["phase"], reverted["focus"], self.surfaces(reverted)),
+                         ("editing", 1, ["私は", "がっこうに", "行く"]))
+        typed = k.plain("w")
+        self.assertEqual((typed["commit"], self.surfaces(typed)),
+                         ("", ["私は", "がっこうには", "行く"]))
+        self.assertEqual(typed["segments"][2]["start"], reverted["segments"][2]["start"] + 1)
+        self.assertEqual(self.surfaces(k.tap(0x08)), self.surfaces(reverted))
+        converted = k.convert()
+        self.assertEqual((converted["phase"], converted["focus"],
+                          self.surfaces(converted), converted["candidates"]),
+                         ("converting", 1, ["私は", "学校に", "行く"], []))
+
+    def test_reconverting_a_trimmed_clause_preserves_the_displayed_kanji(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.s._table["keys"]["w"] = {"plain": "は"}
+        k.convert()
+        k.tap(0x08)  # 行く → 行
+        self.assertEqual(k.plain("w")["composition"], "私は学校に行は")
+        converted = k.convert()
+        self.assertEqual((converted["phase"], converted["composition"], converted["commit"]),
+                         ("converting", "私は学校に行は", ""))
+        self.assertEqual(k.tap(VK_RETURN)["commit"], "私は学校に行は")
+
+    def test_selected_clause_revert_and_all_revert_are_distinct(self):
+        k = self.typed("わたしはがっこうにいく")
+        initial = k.convert()
+        k.tap(VK_RIGHT)
+        self.assertEqual(k.convert()["phase"], "selecting")
+        reverted = k.tap(ord("Z"), ["ctrl"])
+        self.assertEqual((reverted["phase"], reverted["focus"], reverted["candidates"],
+                          self.surfaces(reverted)),
+                         ("editing", 1, [], ["私は", "がっこうに", "行く"]))
+        all_reverted = k.tap(VK_ESC, ["shift"])
+        self.assertEqual((all_reverted["phase"], all_reverted["composition"]),
+                         ("composing", initial["composition"]))
+        self.assertEqual(k.tap(VK_ESC)["phase"], "empty")
+
+    def test_cancel_resize_restores_boundaries_and_selected_spelling(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        k.tap(VK_RIGHT)
+        selected = k.convert()
+        self.assertEqual(selected["phase"], "selecting")
+        k.tap(VK_LEFT, ["shift"])
+        self.assertEqual(k.tap(VK_LEFT, ["shift"])["phase"], "resizing")
+        restored = k.tap(ord("Z"), ["ctrl"])
+        self.assertEqual((restored["phase"], restored["focus"], restored["candidates"],
+                          restored["segments"]),
+                         ("converting", selected["focus"], [], selected["segments"]))
 
     def test_ctrl_f7_opens_the_word_register_only_without_input(self):
         k = self.typed("")

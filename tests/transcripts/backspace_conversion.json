@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Backspace は、候補窓が開いていれば閉じ、変換中なら変換の取り消し、入力中なら最後の1打を消す。リテラルも1文字。",
+  "description": "候補窓を Backspace で閉じ、さらに Backspace で末尾の数字を削る。残った選択済みの表示をもう1字削って確定する。",
   "lexicon": [
     {"reading": "きどく", "surface": "既読", "cost": 100},
     {"reading": "きおく", "surface": "記憶", "cost": 200}
@@ -26,11 +26,9 @@
     {"event": {"op": "up", "t": 1240, "vk": 8}},
     {"event": {"op": "down", "t": 1340, "vk": 8}},
     {"event": {"op": "up", "t": 1370, "vk": 8}},
-    {"event": {"op": "down", "t": 1470, "vk": 8}},
-    {"event": {"op": "up", "t": 1500, "vk": 8}},
     {"event": {"op": "down", "t": 1600, "vk": 13}},
     {"event": {"op": "up", "t": 1630, "vk": 13}}
   ],
-  "committed": "きど",
+  "committed": "記",
   "composition": ""
 }

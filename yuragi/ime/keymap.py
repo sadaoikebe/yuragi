@@ -22,6 +22,7 @@ PARENT = {
     "selecting": "converting",
     "resizing": "converting",
     "predicting": "composing",
+    "editing": "converting",
 }
 
 

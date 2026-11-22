@@ -128,14 +128,14 @@ TIP → ブローカー（プロトコル 1）:
 | 項目 | 中身 |
 |---|---|
 | `composition` / `commit` | 変換中の表示 / この要求で確定した文字 |
-| `converted` | 候補を開いた変換中か |
+| `converted` | 変換中か。文節内入力も含む |
 | `direct` / `input_mode` / `pass_through` | 直接入力か / かなの入力モード / この down・up をアプリに渡すか |
-| `phase` | キー表の局面（`empty` `composing` `converting` `selecting` `resizing` `predicting` `direct`） |
+| `phase` | キー表の局面（`empty` `composing` `converting` `selecting` `resizing` `editing` `predicting` `direct`） |
 | `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前。Shift+CapsLock の英数の続きが入力ごと終わったときの `ime_off` も（[KEYBIND.md](KEYBIND.md) §6.5） |
 | `eat_pending` / `resolved_keys` | LM 待ちで打鍵を保留した / 保留していた打鍵の元の `seq` と最終の `eat`。コマンドだったときは `global` も（[KEYBIND.md](KEYBIND.md) §8.1） |
 | `fsm` / `n_tokens` / `timer` | 同時打鍵の判定の状態 / トークン数 / 次に `timeout` を送る時刻（無ければ null） |
 | `segments` | 各文節・リテラルの `start/end`（トークン位置）、`surface/reading`、`literal/fixed`、`display_start/display_end`（表示のコードポイント位置。TIP が UTF-16 の位置に直す）。半開区間 |
-| `focus` | 注目文節の `segments` 内の位置。無ければ -1 |
+| `focus` | 注目文節の `segments` 内の位置。無ければ -1。`editing` ではその文節に入力中の下線を引き、キャレットを末尾に置く |
 | `candidates` / `cand_index` / `candidate_kinds` | 注目文節の現在のページ（最大 9 件）/ ページ内の選択位置（無ければ -1）/ 各候補の `dictionary`・`kana`・`literal` など |
 | `candidate_page` / `has_next_page` | 0 始まりのページ / 次のページの有無 |
 | `predicting` | 候補窓が推測変換の候補か |

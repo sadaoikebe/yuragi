@@ -903,6 +903,8 @@ private:
             if (range) range->Release();
             return commit && SUCCEEDED(hr) ? E_FAIL : hr;
         }
+        const bool editing = !commit && reply.phase == tip_logic::Phase::Editing &&
+                             reply.focus >= 0 && (size_t)reply.focus < reply.segments.size();
         ITfProperty* prop = nullptr;
         if (SUCCEEDED(ctx->GetProperty(GUID_PROP_ATTRIBUTE, &prop))) {
             prop->Clear(ec, range);
@@ -918,7 +920,9 @@ private:
                         part->Collapse(ec, TF_ANCHOR_START);
                         part->ShiftEnd(ec, end, &moved, nullptr);
                         part->ShiftStart(ec, start, &moved, nullptr);
-                        Attribute(ec, prop, part, atoms_[reply.converted ? ((int)i == reply.focus ? 2 : 1) : 0]);
+                        const bool focused = (int)i == reply.focus;
+                        int attribute = reply.converted && !(focused && editing) ? (focused ? 2 : 1) : 0;
+                        Attribute(ec, prop, part, atoms_[attribute]);
                         part->Release();
                     }
                 }
@@ -927,7 +931,15 @@ private:
         }
         ITfRange* caret = nullptr;
         HRESULT caret_hr = range->Clone(&caret);
-        if (SUCCEEDED(caret_hr)) caret_hr = caret->Collapse(ec, TF_ANCHOR_END);
+        if (SUCCEEDED(caret_hr)) {
+            caret_hr = caret->Collapse(ec, editing ? TF_ANCHOR_START : TF_ANCHOR_END);
+            if (SUCCEEDED(caret_hr) && editing) {
+                LONG moved = 0;
+                LONG offset = Utf16Offset(text, reply.segments[reply.focus].display_end);
+                caret_hr = caret->ShiftEnd(ec, offset, &moved, nullptr);
+                if (SUCCEEDED(caret_hr)) caret_hr = caret->Collapse(ec, TF_ANCHOR_END);
+            }
+        }
         if (SUCCEEDED(caret_hr)) {
             TF_SELECTION selection{};
             selection.range = caret; selection.style.ase = TF_AE_NONE;

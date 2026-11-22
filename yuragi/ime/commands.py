@@ -14,7 +14,8 @@ GLOBAL = frozenset({"global"})
 EMPTY = frozenset({"empty"})
 COMPOSING = frozenset({"composing"})
 RESIZING = frozenset({"resizing"})
-CONVERTED = frozenset({"converting", "selecting"}) | RESIZING
+EDITING = frozenset({"editing"})
+CONVERTED = frozenset({"converting", "selecting"}) | RESIZING | EDITING
 SELECTING = frozenset({"selecting", "predicting"})
 INPUT = COMPOSING | CONVERTED | SELECTING
 KANA = EMPTY | INPUT
@@ -49,12 +50,14 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("reconvert", "再変換", EMPTY | {"direct"}),
     Command("convert", "変換", COMPOSING, run=lambda s: s._convert()),
     Command("convert_segment", "文節を変換", RESIZING, run=lambda s: s._end_resize()),
+    Command("convert_edited_segment", "入力中の文節を変換", EDITING,
+            run=lambda s: s._convert_edited_segment()),
     Command("predict", "予測候補", COMPOSING, run=lambda s: s._predict_key()),
     Command("commit", "全確定", INPUT, run=lambda s: s._commit()),
     Command("commit_first_segment", "先頭の文節を確定", INPUT, run=lambda s: s._commit_prefix()),
     Command("commit_one_char", "先頭の一字を確定", COMPOSING, run=lambda s: s._commit_one_char()),
     Command("commit_to_focus", "注目文節まで確定", CONVERTED),
-    Command("delete_before", "前字削除", COMPOSING, run=lambda s: s._delete_before()),
+    Command("delete_before", "前字削除", COMPOSING | CONVERTED, run=lambda s: s._delete_before()),
     Command("alnum_mode", "英数の続き", INPUT, run=lambda s: s._hold_alnum(), keeps_resizing=True),
     Command("delete_after", "後字削除", COMPOSING, until="noop"),
     Command("cursor_left", "カーソルを左へ", COMPOSING, until="noop"),
@@ -64,6 +67,10 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("cancel", "全消去", COMPOSING, run=lambda s: s._cancel()),
     Command("cancel_conversion", "変換を取り消す", CONVERTED | {"predicting"},
             run=lambda s: s._cancel_conversion()),
+    Command("segment_revert", "文節戻し", {"converting", "selecting"},
+            run=lambda s: s._segment_revert()),
+    Command("cancel_resize", "文節長変更を取り消す", RESIZING,
+            run=lambda s: s._cancel_resize()),
     Command("to_hiragana", "ひらがなに変換", INPUT, run=lambda s: s._to_script("hiragana")),
     Command("to_katakana", "カタカナに変換", INPUT, run=lambda s: s._to_script("katakana")),
     Command("to_half_katakana", "半角カタカナに変換", INPUT,

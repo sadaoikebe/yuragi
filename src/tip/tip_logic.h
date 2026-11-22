@@ -57,9 +57,9 @@ struct Segment {
     int display_start = 0, display_end = 0;
 };
 
-enum class Phase { Empty, Composing, Converting, Selecting, Resizing, Predicting, Direct };
-inline constexpr std::array<const char*, 7> kPhaseNames = {
-    "empty", "composing", "converting", "selecting", "resizing", "predicting", "direct"
+enum class Phase { Empty, Composing, Converting, Selecting, Resizing, Predicting, Editing, Direct };
+inline constexpr std::array<const char*, 8> kPhaseNames = {
+    "empty", "composing", "converting", "selecting", "resizing", "predicting", "editing", "direct"
 };
 
 enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, Settings, Words };
@@ -83,7 +83,7 @@ struct KeyTable {
         }
     };
     std::string rev;
-    std::array<Row, 6> phases;
+    std::array<Row, (size_t)Phase::Direct> phases;
     std::map<unsigned, GlobalCommand> global;
 
     bool Overrides(Phase phase, unsigned code) const {
@@ -112,6 +112,10 @@ inline std::optional<KeyTable> ParseKeyTable(const tip_json::Value& json) {
     for (size_t i = 0; i < table.phases.size(); ++i) {
         const auto& from = phases.Get(kPhaseNames[i]);
         auto& row = table.phases[i];
+        if (i == (size_t)Phase::Editing && from.kind == tip_json::Value::Null) {
+            row = table.phases[(size_t)Phase::Converting];  // earlier engines omit this phase
+            continue;
+        }
         const auto& eat = from.Get("eat");
         const auto& pass = from.Get("pass");
         if (eat.kind != tip_json::Value::Array || pass.kind != tip_json::Value::Array) return {};
@@ -470,7 +474,7 @@ inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
     if (sends(local.phase)) return Take::Send;
     if (local.unsettled) {
         for (Phase phase : {Phase::Composing, Phase::Converting, Phase::Selecting,
-                            Phase::Resizing, Phase::Predicting}) {
+                            Phase::Resizing, Phase::Predicting, Phase::Editing}) {
             if (sends(phase)) return Take::Send;
         }
     }

@@ -59,7 +59,7 @@
 
 ### 3.1 局面
 
-局面は MS-IME の状態（[ms-ime.md](keybind/ms-ime.md) §2 の ①〜⑤、§1.5 の予測）に合わせる。
+局面は MS-IME の状態（[ms-ime.md](keybind/ms-ime.md) §2 の ①〜⑥、§1.5 の予測）に合わせる。
 
 | 局面 | ID | 条件 | 親 | MS-IME の状態 |
 |---|---|---|---|---|
@@ -70,6 +70,7 @@
 | 変換中 | `converting` | 変換済みで、候補窓は閉じている | `global` | ③ |
 | 候補選択中 | `selecting` | 変換済みで、候補窓が開いている | `converting` | ④ |
 | 文節長変更中 | `resizing` | 文節を伸ばすか縮めた直後。変換し直すか、ほかの操作をすると `converting` に戻る | `converting` | ⑤ |
+| 文節内入力 | `editing` | 複数文節の変換の一部を文節戻しや前字削除で入力し直している。候補窓は閉じている | `converting` | ⑥ |
 | 予測の候補 | `predicting` | 予測候補にフォーカスがある | `composing` | 予測 |
 
 - 表を引くときは、今の局面に無ければ親をたどり、最後に `global` を見る。子の局面には、親と違う行だけを書けばよい。
@@ -81,7 +82,13 @@
   `resizing` の間は、伸縮のコマンドと、何も起こさないコマンド（`noop`・`pass_through`）では局面が変わらない。ほかのコマンドを実行すると `resizing` を終える。
   Space（`convert_segment`）は、読みにした文節を変換して `converting` に戻る。ほかのコマンドで終えたときは、読みの文節は読みのまま残る（確定すると読みのまま確定する。
   その文節で `next_candidate` を使うと、候補窓を開いて次の候補へ進む）。
-- MS-IME の ⑥（変換済み文節内入力）は、F2 の文字編集と再変換を作るときに、局面 `editing` として足す。
+- 文節長変更中の Esc・Ctrl+Z は、一連の伸縮を取り消し、伸縮前の文節の境界と選んでいた候補を戻す。候補窓は閉じたまま。
+- 文節戻しでは、注目文節を選んでいた候補の読みに戻す。複数文節なら、その文節に注目したまま `editing` に入り、
+  ほかの文節の変換を保つ。候補窓が開いているときの Esc・Backspace は、候補窓を閉じる。
+- 候補窓を閉じた変換中の Backspace・Ctrl+H は、表示全体の末尾を 1 字削る。複数文節なら末尾を注目文節として `editing` に入る。
+  末尾の文節が消えたときは、その前の文節の表記を編集できる形にする。編集する文節だけが残ったときは `composing` になる。
+- `editing` では、文字を注目文節の末尾に足し、Backspace で末尾を削る。Space でその文節を変換する。Esc・Shift+Esc は全戻し。
+  文節内のカーソル移動と F2・再変換からの入り方は今後の作業。
 - 「英数の続き」は局面にしない。文字キーの打たれ方が変わるだけで、使えるコマンドは `composing` と同じ。
   Shift+CapsLock（`alnum_mode`）で入ったときは、変換中でも局面を変えない（CONVERSION「英数の続き」）。
 - 準備中・停止・対象外では、`global` の中の TIP が実行するコマンドだけが効く（§7.5）。
@@ -103,7 +110,7 @@
 
 コマンドの一覧。「作った」が × のものは、名前だけ決めてある（プリセットの行に書ける。その行は、読み込みで「作るまでの代わり」に置き換えるか、無視する。§5.4）。
 プリセットには、そのキーの本来の働きのコマンドを書く。作るまでのあいだ食べておきたいキーも、`noop` とは書かず、コマンドの `until` で決める。
-局面の列の「composing 以降」は入力がある局面の全部、「converting 以降」は `converting`・`selecting`・`resizing`、「selecting 以降」は `selecting`・`predicting`。
+局面の列の「composing 以降」は入力がある局面の全部、「converting 以降」は `converting`・`selecting`・`resizing`・`editing`、「selecting 以降」は `selecting`・`predicting`。
 
 | コマンド | 局面 | 作った | 中身 |
 |---|---|---|---|
@@ -121,11 +128,13 @@
 | `commit_first_segment` | composing 以降 | ○ | 先頭の文節だけ確定する |
 | `commit_one_char` | composing | ○ | 先頭の 1 打を、かなのまま確定する（CONVERSION「部分確定」） |
 | `commit_to_focus` | converting 以降 | × | 注目文節までを確定する |
-| `delete_before` | composing | ○ | 最後の 1 打を消す |
+| `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力は最後の 1 打、変換済みは表示の末尾の 1 字を消す |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
 | `delete_after` / `cursor_left` / `cursor_right` / `cursor_home` / `cursor_end` | composing | × | 入力中のカーソル移動と削除（カーソルの仕組みが要る）。作るまでは `noop`（行を落とすと、確定してアプリのカーソルが動く） |
 | `cancel` | composing | ○ | 入力を全部消す |
 | `cancel_conversion` | converting 以降、predicting | ○ | 変換をやめて、入力中に戻る |
+| `segment_revert` | converting、selecting | ○ | 注目文節を読みに戻す |
+| `cancel_resize` | resizing | ○ | 文節長変更前の境界と表記を戻す |
 | `to_hiragana` / `to_katakana` / `to_half_katakana` / `to_full_alnum` / `to_half_alnum` | composing 以降 | ○ | 字種を変える（MS-IME の F6–F10） |
 | `close_candidates` | selecting | ○ | 候補窓を閉じて `converting` に戻る。変換はそのまま |
 | `next_candidate` / `prev_candidate` | converting 以降、predicting | ○ | 次／前の候補。`converting` では候補窓を開く |
@@ -136,6 +145,7 @@
 | `segment_first` / `segment_last` | converting 以降 | ○ | 先頭／末尾の文節へ |
 | `segment_shrink` / `segment_expand` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動くと `resizing` になる（§3.1） |
 | `convert_segment` | resizing | ○ | 伸縮で読みにした文節を変換し、`converting` に戻る（MS-IME の「文節変換」。候補窓は開かない） |
+| `convert_edited_segment` | editing | ○ | 注目文節の入力を変換し、候補窓を閉じた変換中に戻る |
 | `forget_candidate` | selecting 以降 | ○ | 今の候補の学習を忘れる |
 | `noop` | global 以外の全部 | — | 食べて何もしない。MS-IME が食べて何もしないキー、ゆらぎに作らない機能のキー、親の局面の割り当てを止める行に書く |
 | `pass_through` | global 以外の全部 | — | 何もせずアプリに通す |
@@ -358,8 +368,8 @@ COMMANDS = {c.id: c for c in (
 
 ### 6.3 局面
 
-局面は `ImeSession` のフィールドから求めるプロパティ。局面のためだけに持つ状態は、文節長変更中かどうか（`resizing`。文節を伸縮すると立ち、ほかの操作で倒れる）と、
-文節ごとの「読みのまま」（伸縮で立ち、その文節を変換すると倒れる。§3.1）の 2 つ。
+局面は `ImeSession` のフィールドから求めるプロパティ。`resizing` は文節を伸縮したときに立ち、
+`editing` は複数文節の変換の一部を入力し直すときに立つ。文節ごとの `raw` は、変換前の読みや編集中の文字を表示している間に立つ（§3.1）。
 
 ```python
 @property
@@ -369,6 +379,7 @@ def phase(self) -> str:
     if self.predicting:  return "predicting"
     if not self.converted: return "composing"
     if self.resizing:    return "resizing"
+    if self.editing:     return "editing"
     return "selecting" if self.candidates else "converting"
 ```
 
@@ -439,7 +450,8 @@ TIP が持つのは、エンジンが作った次の形の表だけ。親の局�
    "converting": {"eat": [...], "pass": [...], "rest": "eat"},
    "selecting":  {"eat": [...], "pass": [...], "rest": "eat"},
    "resizing":   {"eat": [...], "pass": [...], "rest": "eat"},
-   "predicting": {"eat": [...], "pass": [...], "rest": "eat"}},
+   "predicting": {"eat": [...], "pass": [...], "rest": "eat"},
+   "editing":    {"eat": [...], "pass": [...], "rest": "eat"}},
  "global": [{"code": 1216, "command": "ime_toggle"}]}
 ```
 
