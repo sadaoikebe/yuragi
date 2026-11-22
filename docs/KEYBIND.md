@@ -184,7 +184,7 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
 
 - 修飾の順は Ctrl、Alt、Shift に決める。読み込みでは順不同・大文字小文字の違いを受け付け、書き出しではこの順にそろえる。
 - キー名: `A`–`Z`、`0`–`9`、記号は US 配列の刻印（`` ` `` `-` `=` `[` `]` `\` `;` `'` `,` `.` `/`）、
-  `Space` `Enter` `Backspace` `Tab` `Convert` `NonConvert` `Esc` `Delete` `Insert` `Home` `End` `PageUp` `PageDown` `Left` `Right` `Up` `Down`
+  `Space` `Enter` `Backspace` `Tab` `ImeOn` `ImeOff` `Convert` `NonConvert` `Esc` `Delete` `Insert` `Home` `End` `PageUp` `PageDown` `Left` `Right` `Up` `Down`
   `F1`–`F24` `CapsLock` `Numpad0`–`Numpad9` `NumpadAdd` `NumpadSubtract` `NumpadMultiply` `NumpadDivide` `NumpadDecimal`。
 - キー名は US 配列の刻印で、**利用者が押した形**を表す。内部では和音を整数 1 つで持つ:
   `code = US 配列の仮想キーコード | 修飾 << 8`（修飾は Shift=1、Ctrl=2、Alt=4。TIP が `tip.json` の `toggle_mods`（`["alt"]` などの名前の並び）から作る値と同じ）。
@@ -261,6 +261,7 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
 MS-IME のプリセットは、新 MS-IME を実機で見た動き（[keybind/ms-ime.md](keybind/ms-ime.md) §1.5。食べるか、確定して通すか、そのまま通すか）のとおりにする。
 働きの名前と、実機で見ていないキーは、旧 MS-IME のテンプレート「Microsoft IME」のキー設定の表（ms-ime.md §2）による。
 オン/オフの Alt+`` ` `` と、入力モードの Ctrl/Shift/Alt+CapsLock は新 MS-IME の US 配列と同じ。
+`VK_IME_ON` が届いたらひらがなに、`VK_IME_OFF` が届いたら半角英数に切り替える。
 変換・無変換は `Convert`／`NonConvert` の仮想キーコードが届いたときに使える。
 `kbd101` が INT4 を 0xFF、INT5 を `VK_OEM_PA1` として届けたときは、未確定文字を保ってそのままアプリに通す。
 変換キーによる再変換と、他の JIS 専用キーの割り当ては別途扱う。実機での違いは [keybind/ms-ime.md](keybind/ms-ime.md) に記す。

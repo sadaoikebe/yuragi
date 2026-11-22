@@ -5,6 +5,8 @@
   "bindings": [
     ["global", "Alt+`", "ime_toggle"],
     ["global", "Shift+CapsLock", "ime_toggle"],
+    ["global", "ImeOn", "mode_hiragana"],
+    ["global", "ImeOff", "ime_off"],
     ["global", "Ctrl+CapsLock", "mode_hiragana"],
     ["global", "Alt+CapsLock", "mode_katakana"],
     ["global", "Shift+NonConvert", "mode_full_alnum"],

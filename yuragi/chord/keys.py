@@ -9,6 +9,8 @@ VK_SPACE = 0x20
 VK_BACK = 0x08
 VK_RETURN = 0x0D
 VK_ESCAPE = 0x1B
+VK_IME_ON = 0x16
+VK_IME_OFF = 0x1A
 VK_CONVERT = 0x1C
 VK_NONCONVERT = 0x1D
 VK_SHIFT = 0x10
@@ -106,6 +108,7 @@ NUMPAD.update({0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"})
 _NAMES = {
     **{vk: name.upper() for vk, name in VK_TO_M.items()},
     VK_SPACE: "Space", VK_RETURN: "Enter", VK_BACK: "Backspace", 0x09: "Tab",
+    VK_IME_ON: "ImeOn", VK_IME_OFF: "ImeOff",
     VK_CONVERT: "Convert", VK_NONCONVERT: "NonConvert",
     VK_ESCAPE: "Esc", 0x2E: "Delete", 0x2D: "Insert", 0x24: "Home", 0x23: "End",
     0x21: "PageUp", 0x22: "PageDown", 0x25: "Left", 0x27: "Right", 0x26: "Up",
