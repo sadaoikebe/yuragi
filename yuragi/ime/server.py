@@ -116,6 +116,8 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
         "predicting": sess.predicting,
         "pending": False,
     }
+    if any(sess.candidate_notes):
+        reply["candidate_notes"] = sess.candidate_notes
     if (caret := sess.caret) is not None:
         reply["caret"] = caret
     if op == "down" and eat is not None:

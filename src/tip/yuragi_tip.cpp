@@ -37,6 +37,7 @@
 #include "resource.h"
 #include "tip_json.h"
 #include "tip_logic.h"
+#include "tip_popup.h"
 
 #ifndef YURAGI_TAG
 #define YURAGI_TAG "dev"
@@ -723,42 +724,26 @@ static LONG Utf16Offset(const std::wstring& text, int codepoints) {
     return (LONG)i;
 }
 
-// Our popups are drawn in the host's DPI mode: in a per-monitor aware application
-// (Notepad, most of Windows 11) nothing scales them, so every size is given at 96 dpi
-// and scaled to the window's monitor here.
-static int Px(HWND h, int pixels_at_96) {
-    return MulDiv(pixels_at_96, (int)GetDpiForWindow(h), 96);
-}
-
-// Below the caret, or above if it would cross the work area's bottom.
-// Screen coordinates; hidden when the text is not laid out.
-static void PlaceCandidates(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, HWND window,
-                            bool log_candidates = false) {
-    if (!window) return;
+// Read the caret under an edit cookie; hide the popup when the text is not laid out.
+static void PlacePopup(TfEditCookie ec, ITfContext* ctx, ITfRange* caret, TipPopup& popup,
+                       bool log_candidates = false) {
+    if (!popup.HasRows()) return;
     ITfContextView* view = nullptr;
     bool positioned = false;
     if (SUCCEEDED(ctx->GetActiveView(&view))) {
         RECT rect{};
         BOOL clipped = FALSE;
-        // S_OK with no height means the text is not visible. The caret range is
-        // collapsed, so a visible caret may come back zero wide (Notepad does):
-        // IsRectEmpty would call that empty.
+        // S_OK with no height means the text is not visible. A collapsed caret
+        // in Notepad can have zero width even when it is visible.
         if (SUCCEEDED(view->GetTextExt(ec, caret, &rect, &clipped)) && rect.bottom > rect.top) {
-            RECT bounds{};
-            GetWindowRect(window, &bounds);
-            MONITORINFO monitor{sizeof(MONITORINFO)};
-            GetMonitorInfoW(MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST), &monitor);
-            int y = tip_logic::CandidateTop(rect.top, rect.bottom, bounds.bottom - bounds.top,
-                                            Px(window, 4), monitor.rcWork.bottom);
-            bool first_show = log_candidates && !IsWindowVisible(window);
-            positioned = SetWindowPos(window, HWND_TOPMOST, rect.left, y, 0, 0,
-                                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+            bool first_show = log_candidates && !IsWindowVisible(popup.Window());
+            positioned = popup.Place(rect, g_hinst);
             if (positioned && first_show)
-                Log(L"candidate shown window=%p t=%llu", static_cast<void*>(window), NowMs());
+                Log(L"candidate shown window=%p t=%llu", static_cast<void*>(popup.Window()), NowMs());
         }
         view->Release();
     }
-    if (!positioned) ShowWindow(window, SW_HIDE);
+    if (!positioned) popup.Hide();
 }
 
 using RetiredStates = std::vector<std::shared_ptr<CompositionState>>;
@@ -768,7 +753,7 @@ class EditSession final : public ITfEditSession {
 public:
     enum Kind { Apply, Finalize, Position };
     EditSession(Kind kind, std::shared_ptr<CompositionState> state, ITfCompositionSink* sink,
-                const TfGuidAtom* atoms, HWND* candidate, RetiredStates* retired, HWND keys)
+                const TfGuidAtom* atoms, TipPopup& candidate, RetiredStates* retired, HWND keys)
         : kind_(kind), state_(std::move(state)), sink_(sink), candidate_(candidate), retired_(retired),
           keys_(keys) {
         sink_->AddRef();
@@ -793,11 +778,11 @@ public:
         if (kind_ == Position) {
             state_->position_pending = false;
             if (!state_->active || !state_->composition || !state_->show_candidates ||
-                !candidate_ || !*candidate_) return S_OK;
+                !candidate_.HasRows()) return S_OK;
             ITfRange* caret = nullptr;
             if (SUCCEEDED(state_->composition->GetRange(&caret))) {
                 caret->Collapse(ec, TF_ANCHOR_END);
-                PlaceCandidates(ec, state_->ctx, caret, *candidate_, g_log);
+                PlacePopup(ec, state_->ctx, caret, candidate_, g_log);
                 caret->Release();
             }
             return S_OK;
@@ -946,8 +931,8 @@ private:
             TF_SELECTION selection{};
             selection.range = caret; selection.style.ase = TF_AE_NONE;
             caret_hr = ctx->SetSelection(ec, 1, &selection);
-            if (candidate_ && *candidate_ && !commit && reply.converted && !reply.candidates.empty())
-                PlaceCandidates(ec, ctx, caret, *candidate_, g_log);
+            if (!commit && reply.converted && !reply.candidates.empty())
+                PlacePopup(ec, ctx, caret, candidate_, g_log);
         }
         if (commit || text.empty()) hr = End(ec, state_);
         if (FAILED(caret_hr)) {
@@ -977,7 +962,7 @@ private:
     std::shared_ptr<CompositionState> state_;
     ITfCompositionSink* sink_;
     TfGuidAtom atoms_[3];
-    HWND* candidate_;
+    TipPopup& candidate_;
     RetiredStates* retired_;
     HWND keys_;
 };
@@ -1067,20 +1052,6 @@ static const wchar_t* NoticeText(Notice n) {
         case Notice::None: break;
     }
     return L"";
-}
-
-// Neither the notice nor the candidate list takes focus or clicks.
-static LRESULT CALLBACK PopupProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (m == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
-    if (m == WM_NCHITTEST) return HTTRANSPARENT;
-    if (m == WM_DPICHANGED) {  // moved to a monitor with another scale: Windows' size for it
-        const RECT* r = (const RECT*)l;
-        SetWindowPos(h, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
-                     SWP_NOZORDER | SWP_NOACTIVATE);
-        InvalidateRect(h, nullptr, TRUE);
-        return 0;
-    }
-    return DefWindowProcW(h, m, w, l);
 }
 
 class ReadSession;
@@ -1221,10 +1192,10 @@ public:
         UnadviseTextEdit();
         ++focus_generation_;
         KillTimer(hwnd_, kTimerNotice);
-        for (HWND* w : {&cand_hwnd_, &notice_hwnd_, &hwnd_}) {
-            if (*w) DestroyWindow(*w);
-            *w = nullptr;
-        }
+        candidate_.Destroy();
+        notice_popup_.Destroy();
+        if (hwnd_) DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
         if (scope_ctx_) {
             scope_ctx_->Release();
             scope_ctx_ = nullptr;
@@ -1553,7 +1524,7 @@ public:
         if (carry_.Active()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
     }
     void PlaceNotice(TfEditCookie ec, ITfContext* ctx, ITfRange* caret) {
-        if (notice_ != Notice::None) PlaceCandidates(ec, ctx, caret, notice_hwnd_);
+        if (notice_ != Notice::None) PlacePopup(ec, ctx, caret, notice_popup_);
     }
     std::shared_ptr<CompositionState> State() { return state_; }
 
@@ -1843,15 +1814,24 @@ private:
         fsm_idle_ = r.fsm_idle;
         composing_ = phase_ != tip_logic::Phase::Empty && phase_ != tip_logic::Phase::Direct;
         timer_pending_ = r.has_timer && !r.direct;
-        cands_.clear();
-        for (const auto& c : r.candidates) cands_.push_back(Utf8ToWide(c));
-        cand_index_ = r.cand_index;
-        if (!r.direct && r.converted && !r.candidates.empty()) ShowCands();
-        else HideCands();
+        if (!r.direct && r.converted && !r.candidates.empty()) {
+            std::vector<TipPopup::Row> rows;
+            rows.reserve(r.candidates.size());
+            for (size_t i = 0; i < r.candidates.size(); ++i) {
+                rows.push_back({Utf8ToWide(r.candidates[i]), i < r.candidate_notes.size()
+                                ? Utf8ToWide(r.candidate_notes[i]) : std::wstring()});
+            }
+            std::wstring footer;
+            if (r.page > 0 || r.has_next_page) {
+                footer = std::to_wstring((long long)std::max(0, r.page) + 1) + L" ページ";
+                if (r.has_next_page) footer += L"  ▾";
+            }
+            candidate_.SetRows(std::move(rows), r.cand_index, std::move(footer));
+            Log(L"candidate reply client=%p seq=%lld", static_cast<void*>(this), r.seq);
+        } else {
+            HideCands();
+        }
         CancelReplyTimer();
-        if (r.converted && cand_hwnd_ && !r.candidates.empty())
-            Log(L"candidate reply client=%p seq=%lld window=%p",
-                static_cast<void*>(this), r.seq, static_cast<void*>(cand_hwnd_));
         if (timer_pending_) {
             // A queued WM_TIMER survives KillTimer. A fresh ID prevents an old
             // notification from polling a conversion in the new input context.
@@ -1886,7 +1866,7 @@ private:
     }
 
     void RequestEdit(EditSession::Kind kind, std::shared_ptr<CompositionState> state, bool sync) {
-        auto* es = new EditSession(kind, state, this, atoms_, &cand_hwnd_, &retired_, hwnd_);
+        auto* es = new EditSession(kind, state, this, atoms_, candidate_, &retired_, hwnd_);
         HRESULT result = S_OK;
         DWORD flags = (kind == EditSession::Position ? TF_ES_READ : TF_ES_READWRITE) |
                       (sync ? TF_ES_SYNC : TF_ES_ASYNCDONTCARE);
@@ -2354,103 +2334,11 @@ private:
     }
 
     // -- the candidate list and the notice --------------------------------------------------------
-    static LRESULT CALLBACK CandProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-        if (m == WM_PAINT) {
-            auto* self = (Tip*)GetWindowLongPtrW(h, GWLP_USERDATA);
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(h, &ps);
-            RECT rc;
-            GetClientRect(h, &rc);
-            FillRect(hdc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
-            if (self) {
-                HFONT font = CreateFontW(Px(h, 18), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                         SHIFTJIS_CHARSET, 0, 0, 0, 0, L"Yu Gothic UI");
-                HGDIOBJ old = SelectObject(hdc, font);
-                const int row = Px(h, 22);
-                int y = Px(h, 2);
-                for (size_t i = 0; i < self->cands_.size(); ++i) {
-                    RECT line = {Px(h, 4), y, rc.right - Px(h, 4), y + row};
-                    wchar_t buf[256];
-                    swprintf_s(buf, L"%d. %s", (int)i + 1, self->cands_[i].c_str());
-                    if ((int)i == self->cand_index_) {
-                        SetBkColor(hdc, RGB(0x20, 0x60, 0xC0));
-                        SetTextColor(hdc, RGB(255, 255, 255));
-                    } else {
-                        SetBkColor(hdc, RGB(255, 255, 255));
-                        SetTextColor(hdc, RGB(0, 0, 0));
-                    }
-                    ExtTextOutW(hdc, Px(h, 6), y + Px(h, 2), ETO_OPAQUE, &line, buf,
-                                (UINT)wcslen(buf), nullptr);
-                    y += row;
-                }
-                SelectObject(hdc, old);
-                DeleteObject(font);
-            }
-            EndPaint(h, &ps);
-            return 0;
-        }
-        return PopupProc(h, m, w, l);
-    }
-    static LRESULT CALLBACK NoticeProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-        if (m == WM_PAINT) {
-            auto* self = (Tip*)GetWindowLongPtrW(h, GWLP_USERDATA);
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(h, &ps);
-            RECT rc;
-            GetClientRect(h, &rc);
-            FillRect(hdc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
-            if (self) {
-                HFONT font = CreateFontW(Px(h, 16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                                         SHIFTJIS_CHARSET, 0, 0, 0, 0, L"Yu Gothic UI");
-                HGDIOBJ old = SelectObject(hdc, font);
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(0x30, 0x30, 0x30));
-                RECT text = {Px(h, 6), Px(h, 2), rc.right - Px(h, 6), rc.bottom - Px(h, 2)};
-                DrawTextW(hdc, NoticeText(self->notice_), -1, &text,
-                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                SelectObject(hdc, old);
-                DeleteObject(font);
-            }
-            EndPaint(h, &ps);
-            return 0;
-        }
-        return PopupProc(h, m, w, l);
-    }
-    HWND Popup(const wchar_t* cls, WNDPROC proc) {
-        WNDCLASSW wc{};
-        wc.lpfnWndProc = proc;
-        wc.hInstance = g_hinst;
-        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-        wc.lpszClassName = cls;
-        RegisterClassW(&wc);
-        HWND h = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
-                                 cls, L"", WS_POPUP | WS_BORDER, 0, 0, 280, 24, nullptr, nullptr,
-                                 g_hinst, nullptr);
-        SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)this);
-        return h;
-    }
-    void HideCands() {
-        if (cand_hwnd_) ShowWindow(cand_hwnd_, SW_HIDE);
-        cands_.clear();
-        cand_index_ = 0;
-    }
-    void ShowCands() {
-        if (cands_.empty()) {
-            HideCands();
-            return;
-        }
-        if (!cand_hwnd_) cand_hwnd_ = Popup(L"YuragiCand", CandProc);
-        int rows = (int)cands_.size();
-        // Placement and showing happen under an edit cookie (GetTextExt).
-        SetWindowPos(cand_hwnd_, nullptr, 0, 0, Px(cand_hwnd_, 280),
-                     Px(cand_hwnd_, 6 + rows * 22),
-                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        InvalidateRect(cand_hwnd_, nullptr, TRUE);
-    }
+    void HideCands() { candidate_.Clear(); }
     void ShowNotice(Notice n);
     void HideNotice() {
         notice_ = Notice::None;
-        if (notice_hwnd_) ShowWindow(notice_hwnd_, SW_HIDE);
+        notice_popup_.Clear();
         if (hwnd_) KillTimer(hwnd_, kTimerNotice);
     }
 
@@ -2530,7 +2418,8 @@ private:
     long long stale_upto_ = 0;  // last sequence issued before local composition was retired
     UINT_PTR reply_timer_ = 0, next_reply_timer_ = kTimerCarry;
     tip_logic::ConnectGate connect_gate_;
-    HWND hwnd_ = nullptr, cand_hwnd_ = nullptr, notice_hwnd_ = nullptr;
+    HWND hwnd_ = nullptr;
+    TipPopup candidate_, notice_popup_{true};
     Scope scope_ = Scope::Unknown;
     ITfContext* scope_ctx_ = nullptr;
     uint64_t focus_generation_ = 0;
@@ -2542,8 +2431,6 @@ private:
     bool direct_ = false, katakana_ = false;
     bool composing_ = false, pending_ = false, timer_pending_ = false;
     bool fsm_idle_ = true;
-    std::vector<std::wstring> cands_;
-    int cand_index_ = 0;
     tip_logic::KeyTable keymap_ = tip_logic::DefaultKeyTable();
     tip_logic::Phase phase_ = tip_logic::Phase::Empty;
     std::optional<TestedKey> tested_;
@@ -2729,21 +2616,7 @@ tip_logic::KeyContext Tip::ReadContext(ITfContext* ctx) {
 void Tip::ShowNotice(Notice n) {
     if (!hwnd_) return;
     notice_ = n;
-    if (!notice_hwnd_) notice_hwnd_ = Popup(L"YuragiNotice", NoticeProc);
-    HDC dc = GetDC(notice_hwnd_);
-    HFONT font = CreateFontW(Px(notice_hwnd_, 16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                             SHIFTJIS_CHARSET, 0, 0, 0, 0, L"Yu Gothic UI");
-    HGDIOBJ old = SelectObject(dc, font);
-    SIZE size{};
-    const wchar_t* text = NoticeText(n);
-    GetTextExtentPoint32W(dc, text, (int)wcslen(text), &size);
-    SelectObject(dc, old);
-    DeleteObject(font);
-    ReleaseDC(notice_hwnd_, dc);
-    SetWindowPos(notice_hwnd_, nullptr, 0, 0, size.cx + Px(notice_hwnd_, 14),
-                 size.cy + Px(notice_hwnd_, 6),
-                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    InvalidateRect(notice_hwnd_, nullptr, TRUE);
+    notice_popup_.SetRows({{NoticeText(n), {}}});
     KillTimer(hwnd_, kTimerNotice);
     if (n == Notice::Stopped) ArmTimer(kTimerNotice, NowMs() + tip_logic::NOTICE_SHOW_MS);
     // Placed under the caret by a read-only session.

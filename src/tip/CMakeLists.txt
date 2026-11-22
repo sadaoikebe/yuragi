@@ -24,6 +24,7 @@ if(WIN32)
     yuragi_tip.cpp
     tip_json.h
     tip_logic.h
+    tip_popup.h
     resource.h
     yuragi_tip.def
     yuragi_tip.rc
@@ -38,7 +39,7 @@ if(WIN32)
   if(MSVC)
     target_compile_options(yuragi_tip PRIVATE /utf-8)
   endif()
-  target_link_libraries(yuragi_tip PRIVATE ole32 oleaut32 uuid advapi32 user32 gdi32 userenv)
+  target_link_libraries(yuragi_tip PRIVATE ole32 oleaut32 uuid advapi32 user32 gdi32 userenv dwmapi)
   # 32-bit applications load the 32-bit build (DESIGN「32 ビットのアプリ」): beside the
   # 64-bit one in the same folder, so both find the broker next to them.
   if(CMAKE_SIZEOF_VOID_P EQUAL 4)

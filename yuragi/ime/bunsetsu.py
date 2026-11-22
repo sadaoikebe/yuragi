@@ -54,6 +54,17 @@ class Candidate:
     words: tuple[Piece, ...] = ()  # the dictionary path, in reading order
 
 
+def candidate_note(candidate: Candidate) -> str:
+    """A spelling hint for generated rows in the candidate window."""
+    if candidate.kind == "kana":
+        return "ひらがな" if candidate.surface == candidate.reading else "カタカナ"
+    if candidate.kind == "symbol":
+        return "記号"
+    if candidate.kind in ("number", "literal", "alnum") and candidate.surface.isascii():
+        return "半角"
+    return ""
+
+
 @dataclass(frozen=True)
 class Bunsetsu:
     reading: str

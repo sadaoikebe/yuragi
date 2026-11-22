@@ -27,7 +27,7 @@ from yuragi.lattice.expand import is_literal_face, literal_text
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateOrder, CandidateStream,
-                       Segment, arranged_candidates, candidates, dictionary_candidates,
+                       Segment, arranged_candidates, candidate_note, candidates, dictionary_candidates,
                        normal_bunsetsu, without_heads, word_piece)
 from .commands import CONVERTED, KANA, Command
 from .keymap import Keymap, default_keymap
@@ -314,6 +314,7 @@ class ImeSession:
     focus: int = -1
     candidate_page: int = 0
     candidate_kinds: list[str] = field(default_factory=list)
+    candidate_notes: list[str] = field(default_factory=list)
     has_next_page: bool = False
     _learning: LearningStore | None = None
     _learning_view: LearningView | None = None
@@ -1228,6 +1229,7 @@ class ImeSession:
     def _clear_cands(self) -> None:
         self.candidates = []
         self.candidate_kinds = []
+        self.candidate_notes = []
         self.candidate_page = 0
         self.has_next_page = False
         self.cand_index = 0
@@ -1242,6 +1244,7 @@ class ImeSession:
         page = stream.cache[start:start + PAGE_SIZE]
         self.candidates = [c.surface for c in page]
         self.candidate_kinds = [c.kind for c in page]
+        self.candidate_notes = [candidate_note(c) for c in page]
         self.cand_index = segment.index - start
 
     def _select(self, index: int, *, show: bool = True) -> None:

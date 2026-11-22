@@ -181,7 +181,7 @@ struct Message {
     int caret = -1, commit_caret = -1;
     bool has_timer = false;
     uint64_t timer = 0;
-    std::vector<std::string> candidates;
+    std::vector<std::string> candidates, candidate_notes;
     std::vector<Segment> segments;
 };
 
@@ -252,8 +252,16 @@ inline bool ParseMessage(const std::string& line, Message& m) {
         m.has_timer = true;
         m.timer = (uint64_t)timer;
     }
-    for (const auto& c : v.Get("candidates").array)
-        if (c.kind == tip_json::Value::String) m.candidates.push_back(c.text);
+    const auto& candidates = v.Get("candidates").array;
+    const auto& notes = v.Get("candidate_notes").array;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (candidates[i].kind != tip_json::Value::String) continue;
+        m.candidates.push_back(candidates[i].text);
+        if (!notes.empty()) {
+            m.candidate_notes.push_back(i < notes.size() && notes[i].kind == tip_json::Value::String
+                                        ? notes[i].text : std::string());
+        }
+    }
     for (const auto& s : v.Get("segments").array) {
         Segment seg;
         if (!ReadInt(s, "display_start", seg.display_start) ||
@@ -554,6 +562,62 @@ inline bool MaySpawn(const SpawnFacts& f) {
 inline int CandidateTop(int caret_top, int caret_bottom, int height, int gap, int work_bottom) {
     int below = caret_bottom + gap;
     return below + height > work_bottom ? caret_top - gap - height : below;
+}
+
+// Popup colors use the GDI byte order so the painter can pass them through.
+constexpr uint32_t PopupRgb(int r, int g, int b) { return r | (g << 8) | (b << 16); }
+
+struct PopupColors {
+    uint32_t surface, text, secondary, border, selected, selected_text, mark;
+};
+
+inline PopupColors PopupPalette(bool dark, uint32_t accent,
+                                std::optional<PopupColors> high_contrast) {
+    if (high_contrast) return *high_contrast;
+    if (dark) return {PopupRgb(38, 39, 42), PopupRgb(246, 246, 247), PopupRgb(180, 183, 190),
+                      PopupRgb(82, 83, 88), PopupRgb(57, 59, 64), PopupRgb(246, 246, 247), accent};
+    return {PopupRgb(252, 252, 253), PopupRgb(28, 29, 32), PopupRgb(87, 89, 96),
+            PopupRgb(211, 212, 216), PopupRgb(235, 237, 241), PopupRgb(28, 29, 32), accent};
+}
+
+struct PopupMetrics {
+    int inset, padding, row, number_column, note_gap, note_max;
+    int min_width, max_width, footer, rounding, mark_width, mark_height, gap;
+    int text_font, small_font;
+};
+
+inline PopupMetrics ScalePopup(int dpi) {
+    auto px = [dpi](int dip) { return (dip * dpi + 48) / 96; };
+    return {px(5), px(12), px(32), px(22), px(16), px(72), px(148), px(520),
+            px(26), px(8), px(3), px(16), px(4), px(18), px(14)};
+}
+
+struct PopupRect { int left, top, right, bottom; };
+
+struct PopupLayout {
+    int width, height, text_left, text_right, note_left;
+    int rows, selected, footer_top;
+
+    PopupRect Row(const PopupMetrics& m, int index) const {
+        const int y = m.inset + index * m.row;
+        return {m.inset, y, width - m.inset, y + m.row};
+    }
+};
+
+inline PopupLayout MeasurePopup(const PopupMetrics& m, int work_width, int rows, int selected,
+                                int text, int notes, int footer, bool notice) {
+    const int left = m.inset + m.padding + (notice ? 0 : m.number_column);
+    const int right_padding = m.inset + m.padding;
+    const int limit = std::min(m.max_width, work_width);
+    const int note_width = std::min({notes, m.note_max,
+                                     std::max(0, limit - left - right_padding - m.note_gap) / 2});
+    const int note_column = note_width > 0 ? m.note_gap + note_width : 0;
+    const int width = std::min(limit, std::max({notice ? 0 : m.min_width,
+        left + text + note_column + right_padding, footer + 2 * right_padding}));
+    const int bottom = 2 * m.inset + rows * m.row;
+    return {width, bottom + (footer > 0 ? m.footer : 0), left,
+            width - right_padding - note_column, width - right_padding - note_width,
+            rows, selected >= 0 && selected < rows ? selected : -1, bottom};
 }
 
 // Requests (the TIP -> broker messages, DESIGN「通信」).

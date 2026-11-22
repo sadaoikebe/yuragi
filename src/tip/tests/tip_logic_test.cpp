@@ -26,7 +26,12 @@ static void ReadingReplies() {
     assert(r.composition == "\xE3\x81\x8B" && r.converted && r.pending);
     assert(r.has_timer && r.timer == 1234 && r.n_tokens == 1 && r.page == 2);
     assert(r.candidates.size() == 2 && r.cand_index == 1 && r.has_next_page);
+    assert(r.candidate_notes.empty());  // older engines still show their candidates
     assert(r.segments.size() == 1 && r.segments[0].display_end == 1);
+
+    Message annotated = Parse(R"({"candidates":["花",false,"ハナ","はな"],
+        "candidate_notes":[null,"記号","カタカナ"]})");
+    assert((annotated.candidate_notes == std::vector<std::string>{"", "カタカナ", ""}));
 
     // DESIGN「互換の規則」: missing fields default, unknown ones are ignored.
     Message sparse = Parse(R"({"seq":3,"new_field":{"x":[1]}})");
@@ -274,6 +279,27 @@ static void CandidatePlacement() {
     assert(CandidateTop(1180, 1210, 264, 6, 1440) == 910);  // scaled height and gap
 }
 
+static void CandidatePopupLayout() {
+    const auto m = ScalePopup(144);
+    const auto compact = MeasurePopup(m, 1920, 1, -1, m.text_font, 0, 0, false);
+    const auto paged = MeasurePopup(m, 1920, 9, 8, 2000, 60, 100, false);
+    assert(compact.width < paged.width && compact.selected == -1);
+    assert(compact.footer_top == compact.height);
+    assert(paged.width == m.max_width && paged.text_right - paged.text_left < 2000);
+    assert(paged.text_right < paged.note_left);
+    assert(paged.Row(m, paged.selected).bottom < paged.footer_top && paged.footer_top < paged.height);
+    const auto narrow = MeasurePopup(m, 320, 1, 8, 2000, 60, 0, false);
+    assert(narrow.width <= 320 && narrow.selected == -1);
+    assert(narrow.text_left < narrow.text_right && narrow.text_right < narrow.note_left);
+
+    const PopupColors windows{1, 2, 3, 4, 5, 6, 7};
+    const auto contrast = PopupPalette(true, 9, windows);
+    assert(contrast.surface == windows.surface && contrast.text == windows.text &&
+           contrast.secondary == windows.secondary && contrast.border == windows.border &&
+           contrast.selected == windows.selected && contrast.selected_text == windows.selected_text &&
+           contrast.mark == windows.mark);
+}
+
 static void Requests() {
     Mods m;
     m.shift = m.alt = true;
@@ -353,6 +379,7 @@ int main(int argc, char** argv) {
     HeldKeysDrainInOrderAfterTab();
     ConnectingAndSpawning();
     CandidatePlacement();
+    CandidatePopupLayout();
     Requests();
     LeftContextTail();
     std::puts("tip_logic_test: all passed");

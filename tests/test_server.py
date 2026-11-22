@@ -71,6 +71,29 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((committed["eat"], committed["phase"], committed["commit"]),
                          (False, "empty", "1き"))
 
+    def test_candidate_notes_follow_the_visible_rows_and_clear_on_commit(self):
+        self.session._lex = MozcLex({"き": [Entry("木", "き", 1, 1, 100)]},
+                                   {"き"}, [0] * 4, 2)
+        self.session._symbols = {"き": ("♩",)}
+        self.send("down", vk=ord("K"), t=0)
+        self.send("up", vk=ord("K"), t=30)
+        self.send("down", vk=0x20, t=100)
+        self.send("up", vk=0x20, t=130)
+        self.send("down", vk=0x20, t=200)
+        converted = self.send("up", vk=0x20, t=230)
+        notes = dict(zip(converted["candidates"], converted["candidate_notes"], strict=True))
+        self.assertEqual(notes, {"木": "", "き": "ひらがな", "キ": "カタカナ", "♩": "記号"})
+        self.assertNotIn("candidate_notes", self.send("down", vk=13, t=270))
+
+        self.send("down", vk=0x61, t=400)  # Numpad1
+        self.send("up", vk=0x61, t=430)
+        self.send("down", vk=0x20, t=500)
+        self.send("up", vk=0x20, t=530)
+        self.send("down", vk=0x20, t=600)
+        number = self.send("up", vk=0x20, t=630)
+        notes = dict(zip(number["candidates"], number["candidate_notes"], strict=True))
+        self.assertEqual((notes["1"], notes["１"], notes["一"]), ("半角", "", ""))
+
     def test_mode_shortcuts_preserve_or_commit_pending_composition(self):
         self.send("down", vk=ord("K"), t=10)
         self.assertEqual(self.send("set_mode", mode="katakana")["commit"], "き")
