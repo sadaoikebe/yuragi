@@ -194,6 +194,193 @@ Apple のガイドは「入力中/変換中/候補表示中」といった状態
 
 ---
 
+## 10. 実機で確かめたこと
+
+§1〜§8 の「資料に無い」「出典で食い違う」を、Mac の実機で確かめた。全部の状態 × キーの表は [macos-table.md](macos-table.md)。
+Windows（MS-IME・ゆらぎ）との違いの整理は [macos-vs-windows.md](macos-vs-windows.md)。
+
+- **環境:** MacBook Air (M1)、macOS 27.2.1、内蔵キーボードは US 配列、入力ソース「日本語 - ローマ字入力」。2026-11-22。
+- **見方:** `tools/keyprobe/mac/`。試験アプリの窓（`NSTextInputClient`）にキーを合成して入れ、日本語入力プログラムの呼び出しを記録する（方法は [macos-probe.md](macos-probe.md)）。
+  11 の状態 × 147 キーを既定の設定で採り、「ライブ変換」「Windows風のキー操作」をオンにして採り直した。
+- **本物のキー:** システムが先に取るキーと押し続けは、人が押して確かめた（§10.8）。それ以外は合成したキー。
+- **設定:** ライブ変換オフ、推測候補表示オン、タイプミス修正オン（この Mac の設定）。試験中は学習を止めた（プライベートモード）。
+
+### 10.1 資料の「資料に無い」「食い違い」への答え
+
+| 問い | 実機 | 節 |
+|---|---|---|
+| 文節の移動は ←/→ か ↑/↓ か | **←/→**。↑/↓ は候補ウインドウを開く（[SC] の表の ↑/↓ は誤り、または縦書きの表） | §2 |
+| Control＋B / F の向き | **B が前、F が次**の文節（[SC] と逆。[MOZC] と同じ）。Control＋S / D も前 / 次 | §2 |
+| 文字種変換のあと、入力中に留まるか | **留まる**（確定しない）。変換中は注目文節の字種だけを変え、変換中に留まる | §1 |
+| 変換中の Control＋J / K / L / ; | 注目文節の字種を変える（ひらがな / カタカナ / 全角英字 / 半角英字） | §1 |
+| 推測候補をキーで選ぶ方法 | Tab・↓・Control＋N で入って次へ、Shift＋Tab・↑・Control＋P で前へ。Return で確定。数字では選べない | §2.1 |
+| 候補ウインドウの数字のあと、確定に Return が要るか | 要る。数字はその候補を選んで窓を閉じ、変換中に留まる | §2.1 |
+| 候補ウインドウの Tab | 下のタブ（標準 → 読み → 部首 → 名前 → 記号 → 標準）を順に替える。Shift＋Tab は逆順 | §2.1 |
+| ライブ変換中の ←/→、Esc、Control＋J / K | §10.7 | §5 |
+| 「Windows風」の Control＋K / L | 文節の伸縮（字種の変換ではない） | §7 |
+| 「Windows風」で Return 1 回で確定するか | する（候補ウインドウが開いていても 1 回） | §7 |
+| 英数 2 回、かな 2 回 | §10.6 | §2 |
+| Mozc にある Option＋A / C / S / X / Z | **ある**（既定）。A・S は半角英字、C は全角英字、X はカタカナ、Z はひらがな。Option＋J / L はカーソル左 / 予測候補に入る | §4 |
+| Control＋1、Control＋2 | 試験アプリでは何も起きなかった（確定直後・選択なし） | §4 |
+
+### 10.2 入力中（未変換）
+
+| キー | 動き |
+|---|---|
+| Space、Shift＋Space、PageUp/Down、Shift＋↑/↓、Control＋↑/↓、Control＋R / V | 変換する（候補ウインドウは出さない。予測候補の窓は閉じる） |
+| Return、Shift＋Return、Control＋M、**Control＋I** | 確定する |
+| Esc、Shift＋Esc、Control＋[ | 入力を全部消す |
+| Delete、Shift＋Delete、Control＋H | カーソルの前の 1 字を消す |
+| ForwardDelete（fn＋Delete）、Control＋D・Control＋G | **カーソルの後ろの字は消さない**（ForwardDelete は何もしない。Control＋D はカーソルを右へ） |
+| ←、Control＋B、Control＋S、Shift＋←、Option＋J | カーソルを左へ |
+| →、Control＋F、Control＋D、Shift＋→ | カーソルを右へ |
+| Home / End | 入力の先頭 / 末尾へ |
+| Tab、↓、Control＋N、Control＋X、Option＋L | 予測候補に入る（§10.3） |
+| ↑、Shift＋Tab | 何もしない |
+| F6 / F7 / F8 / F9 / F10 | ひらがな / カタカナ / 半角英字 / 全角英字 / 半角英字（F8 は資料の「半角英字」のとおり） |
+| Control＋J / K / L / ; / '、Control＋A | ひらがな / カタカナ / 全角英字 / 半角英字 / 半角英字 / 半角英字 |
+| Option＋Z / X / C / A / S | ひらがな / カタカナ / 全角英字 / 半角英字 / 半角英字 |
+| Option＋Space / Control＋Option＋Space | 入力中の文字に全角 / 半角の空白を足す |
+| 英数キー | 確定して英字（ABC）にする |
+| Shift＋英字 | 大文字を入れ、確定までその入力は英字の続き（Space は半角の空白を足し、変換しない）。「Shiftキーの動作」の既定 |
+| Control＋Q | **入力を捨てて制御文字 `\x11` を確定する**（本物のキーでも同じ。§10.8） |
+| Command＋矢印、Option＋矢印、Control＋C / E / O / P / T / U / W / Y / Z など | 食べて何もしない（入力は残る） |
+
+- 割り当ての無いキーは**食べて何もしない**。MS-IME のように「確定してアプリに通す」ことはしない。
+- ローマ字: `kya`→きゃ、`la`・`xa`→ぁ、`ltu`・`xtu`→っ、`nn`→ん、`n'`→ん（`kan'i`→かんい）。`zh`・`zj`・`zk`・`zl` は ← ↓ ↑ →。`z.`・`z,`・`z-`・`z/`・`z[` は記号にならない（z と記号のまま）。
+- 数字は半角で入力中の文字に入る。`1234` を変換すると 1234 → 🔢 → １２３４ … の順に候補が出る。
+
+### 10.3 予測候補（推測候補表示）
+
+| キー | 動き |
+|---|---|
+| （入力しただけ） | 予測候補の窓が出る。フォーカスは無い |
+| Tab、↓、Control＋N、Control＋X、Option＋L | 予測候補に入り、次の候補へ |
+| Shift＋Tab、↑、Control＋P | 前の候補へ（先頭では止まる） |
+| Return、Control＋M | 選んだ予測候補を確定する |
+| Space | 予測をやめ、読みを変換する（予測候補は使わない） |
+| Esc、Control＋[ | 予測候補から出て、入力中に戻る |
+| 数字、文字キー | **選んだ予測候補を確定して**、その字で次の入力を始める（数字で選ぶことはできない） |
+| Delete、Control＋H | **選んだ予測候補の末尾 1 字を消して確定する**（「感情」→「感」。本物のキーでも同じ） |
+| → | 候補の詳しい情報（辞書）を横に出す |
+| Home / End | **入力を捨てて制御文字 `\x01` / `\x04` を確定する**（Home は本物のキーでも同じ） |
+| 英数キー | 選んだ予測候補を確定して英字にする |
+
+### 10.4 変換中（文節）
+
+| キー | 動き |
+|---|---|
+| Space | 次の候補。2 回目で候補ウインドウを開く（MS-IME と同じく、1 回目の変換では窓を出さない） |
+| Shift＋Space、↑、↓、PageUp/Down、Shift＋↑/↓、Control＋↑/↓、Control＋E / N / P / R / V / X、Option＋L | 候補ウインドウを開く（候補は変えない） |
+| Return、Shift＋Return、Control＋M、**Tab** | 全部確定する |
+| Esc、Shift＋Esc、Control＋[ | **全部の文節を読みに戻す**（注目文節だけではない）。もう 1 回で全部消す |
+| Delete、Shift＋Delete、Control＋H | **表示の末尾 1 字を消して、残りを確定する**（「今日は雨です」→「今日は雨で」を確定） |
+| →、Control＋F、Control＋D | 次の文節（最後の文節では何もしない） |
+| ←、Control＋B、Control＋S、Option＋J | 前の文節 |
+| Home / End | 先頭 / 末尾の文節 |
+| Shift＋←、Control＋I、Control＋Q | 注目文節を縮める。**縮めたらすぐ変換し直す**（読みにはしない）。「今日は」→「今日／は」 |
+| Shift＋→、Control＋O、Control＋W | 注目文節を伸ばし、すぐ変換し直す。「今日は／雨です」→「今日はあ／目です」 |
+| F6〜F10、Control＋J / K / L / ; / '、Control＋A、Option＋Z / X / C / A / S | 注目文節の字種を変える |
+| 文字キー、数字、記号、Shift＋英字 | 確定して、その字で次の入力を始める |
+| Option＋Space | 確定して全角の空白を入れる |
+| 英数キー | 確定して英字にする |
+
+- 伸縮のあとの Space は、注目文節の次の候補へ進んで候補ウインドウを開く。
+- 縮めた文節の残りも、すぐ変換される（「今日」を「許」に縮めると、残りは「雨は」になった）。
+
+### 10.5 候補ウインドウ
+
+| キー | 動き |
+|---|---|
+| Space、↓、Control＋N、Control＋X、Option＋L | 次の候補 |
+| Shift＋Space、↑、Control＋P、Control＋E | 前の候補 |
+| PageDown、Shift＋↓、Control＋V、Control＋↓ / PageUp、Shift＋↑、Control＋R、Control＋↑ | 次 / 前のページ（9 件ずつ。先頭のページで前へ行くと最後のページへ） |
+| 1〜9 | その番号の候補を選び、窓を閉じる（変換中に留まる。確定には Return がもう 1 回要る） |
+| **Return** | **候補を選んで窓を閉じるだけ。確定しない。** 複数文節なら注目を次の文節へ移す。もう 1 回の Return で全部確定 |
+| Tab / Shift＋Tab | 窓の下のタブ（標準・読み・部首・名前・記号）を順に替える |
+| → / ← | 複数文節なら次 / 前の文節へ移り、窓を閉じる。1 文節では辞書の説明を横に出す |
+| Esc | 全部の文節を読みに戻し、窓を閉じる |
+| Delete | 末尾 1 字を消して確定する（§10.4 と同じ） |
+| Shift＋← / → など伸縮のキー | 伸縮して窓を閉じる |
+| 文字キー、0 | 確定して、その字で次の入力を始める |
+
+- 窓の候補の並びは Space で進む順と違う。1 番目はひらがな（「かんじ」。注記 Hiragana）で、Space の 1 回目に出る候補は 2 番目。↑ でひらがなに戻れる。
+- 辞書の印（📖）の付いた候補を選ぶと、→ で語の説明が出る。
+- 番号は窓の中の位置。2 ページ目で 2 を押すと、2 ページ目の 2 番目を選ぶ。
+
+### 10.6 確定のあと（取り消し・再変換・英数とかな）
+
+| 操作 | 動き |
+|---|---|
+| Control＋Delete（確定の直後） | **確定を取り消す**。確定した「感じ」が変換中に戻り、候補ウインドウが開く。選択しなくてよい。アプリが置き換え範囲（`replacementRange`）に対応している必要がある |
+| Control＋Shift＋R / Option＋Shift＋R | **選んだ文字**を再変換する。選択が無いと何もしない（試験アプリ。カーソルの前の語を自動で選ぶことはしなかった） |
+| 再変換中の Esc | 1 回目で読みに戻り、2 回目で元の表記を確定し直す |
+| かなキー 2 回（すばやく） | 選んだ文字を再変換する（間隔 0.15 秒では効き、0.45 秒では効かない）。選んだ英字「watashi」は英語の発音で読み、「ワット／アッシュ／愛」になった |
+| 英数キー 2 回 | 何も起きなかった（選択があってもなくても）。[SC] の「かなを英字に変換」は再現しなかった |
+| Control＋Z、Command＋Z | 日本語入力プログラムは使わない（アプリへ） |
+
+### 10.7 ライブ変換
+
+| キー | 動き |
+|---|---|
+| （入力しただけ） | 読みが変換されて出る（文節の区切りはあるが、注目文節の太い下線は無い）。予測候補の窓も出る |
+| Space | 文節を選ぶ状態に入り、候補ウインドウを開く |
+| ←、Control＋B / S | 文節を選ぶ状態に入り、**最後の文節**に注目して候補ウインドウを開く（カーソルは動かない） |
+| →、↑、↓、Control＋N / P / E / F / D / X | 文節を選ぶ状態に入り、先頭の文節に注目して候補ウインドウを開く |
+| Return | 確定する |
+| Esc | **1 回目は最後の文節を読みに戻す**（「今日は雨です」→「今日は／あめです」）。文節選択の状態からは全部を読みに戻す |
+| Delete | 読みの末尾 1 字を消す（確定しない。ライブ変換でないときと違う） |
+| F6〜F10、Control＋J / K / L / ; | 入力全体の字種を変える。文節選択中は注目文節だけ |
+| Shift＋← / →、Control＋I / O / W | 文節を選ぶ状態で、注目文節を伸縮する |
+| Option＋Space | 文節選択中は、確定して全角の空白を入れる |
+
+### 10.8 人の手で確かめたこと・確かめていないこと
+
+本物のキーボードで押したもの（`tools/keyprobe/mac/guide.py`）。
+
+| キー | 結果 |
+|---|---|
+| Control＋Space | 入力ソースを直前に使ったものへ切り替える（日本語 → 韓国語、ABC → 日本語）。入力中なら確定してから切り替える |
+| 地球儀キー（fn） | 何も起きない（この Mac は「fn キーを押して: 何もしない」。`AppleFnUsageType=0`） |
+| Shift の単独打鍵 | 何も起きない（「Shiftキーの動作」が既定でもカタカナでも。合成でも同じ） |
+| Space の押し続け | 繰り返しのたびに Space 1 回と同じ（変換 → 窓を開く → 次の候補 …）。押し続け特有の動きは無い |
+| 予測候補を選んでいるときの Delete | 末尾 1 字を消して確定（合成と同じ） |
+| 予測候補を選んでいるときの Home（fn＋←）、入力中の Control＋Q | 入力を捨てて制御文字を確定（合成と同じ） |
+
+確かめていないもの: Caps Lock（この Mac は Caps Lock を無効にしてある）、Control＋Option＋Space（入力メニューの次の入力ソース）、
+JIS キーボードの英数・かなキーを本物で押したとき、かな入力、ほかのアプリ（ブラウザなど）での違い。
+
+### 10.9 設定のキー名
+
+設定は `defaults` の `com.apple.inputmethod.Kotoeri` にある。`defaults write` で書き、日本語入力プログラムのプロセス（`JapaneseIM-RomajiTyping`）を強制終了すると、次に使うときに読み直す
+（SIGTERM は効かない。SIGKILL で止めると自動で起動し直す）。ライブ変換だけは、プロセスを止めなくても効いた。
+キー名は `CoreJapaneseEngine.framework` の `JIMPreferences` と、共有キャッシュの文字列から見つけた。
+
+| キー | 設定画面の項目 | 値 |
+|---|---|---|
+| `JIMPrefLiveConversionKey` | ライブ変換 | 0 / 1 |
+| `JIMPrefWindowsModeKey` | Windows風のキー操作 | 0 / 1 |
+| `JIMPrefShiftKeyActionKey` | Shiftキーの動作 | 未設定・1・2・3: 英字モードに入る。**0: カタカナを入力**（Shift＋A で「ア」、その 1 字だけ） |
+| `JIMPrefCapsLockActionKey` | Caps Lockの動作 | 確かめていない |
+| `JIMPrefPrivNoLearningKey` | プライベートモード（学習しない） | 1 で学習しない（対照実験で確かめた） |
+| `JIMPrefPredictiveCandidateKey` | 推測候補表示 | 0 / 1 |
+| `JIMPrefAutocorrectionKey` | タイプミスを修正 | 0 / 1 |
+| `JIMPrefConvertWithPunctuationKey`、`JIMPrefPunctuationTypeKey`、`JIMPrefFullWidthNumeralCharactersKey`、`JIMPrefCharacterForSlashKey`、`JIMPrefCharacterForYenKey`、`JIMPrefRomajiKeyboardLayoutKey`、`JIMPrefCandidateWindowFontKey`、`JIMPrefCandidateWindowFontSizeKey` | §8 の各項目 | 確かめていない |
+| `JIMPrefConvertWithArrowKey` | **設定画面に無い** | 確かめていない |
+
+### 10.10 「Windows風のキー操作」の実機
+
+Mac から Windows に移る人が使う設定ではないが、Apple が「Windows 風」として何を MS-IME 風にしたかの記録として残す。全部は [macos-table.md](macos-table.md) の最後。
+
+- F8 が半角カタカナ。Control＋U / I / O / P / T が F6〜F10（MS-IME と同じ）。Control＋J / K / L / ; の文字種変換は無くなる。
+- Control＋K / L が文節の縮め / 伸ばし。Control＋Z と変換中の Delete・Control＋H が「読みに戻す」（確定しない）。
+- 候補ウインドウの Return は 1 回で確定する。
+- ↑ / ↓ は前 / 次の候補を選んで窓を開く（既定は窓を開くだけ）。PageUp/Down は変換中は何もしない。
+- Option＋英字は Option の文字（∆ ¬ など）になる（Option＋A など Mozc 風の割り当ては無くなる）。
+- Control＋C は確定する。Control＋N は変換中と予測候補の選択中に、入力を捨てて制御文字 `\x0e` を確定する（Control＋Q と同じ癖）。入力中は何もしない。
+
+---
+
 ## 出典
 
 | 略号 | 資料名 | URL |

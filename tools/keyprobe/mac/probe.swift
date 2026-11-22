@@ -2,6 +2,8 @@
 // input method does (one JSON object per line on stdout), driven by synthetic key events.
 //
 //   probe <inject> <input-source-id> "<keys>" [shot-dir]
+//   probe table <cases.json>          (one JSON line per case; see table.py)
+//   probe guide <steps.json>          (a person presses the key shown in the window; see guide.py)
 //
 // inject   app  NSApp.sendEvent, in-process, no permission (the one to use)
 //          ns   the view's keyDown directly; mode keys (Eisu/Kana, Ctrl+Shift+J) do not work
@@ -14,7 +16,14 @@
 import Carbon
 import Cocoa
 
+var recording: [[String: Any]]? = nil
+// guide mode (declared here: top-level code after app.run() never runs, so globals there stay uninitialized)
+var realEvents: [[String: Any]] = []
+var lastReal = Date.distantPast
+var injecting = false
+
 func emit(_ d: [String: Any]) {
+    if recording != nil { recording!.append(d); return }
     let data = try! JSONSerialization.data(withJSONObject: d, options: [.sortedKeys])
     FileHandle.standardOutput.write(data)
     FileHandle.standardOutput.write("\n".data(using: .utf8)!)
@@ -29,7 +38,10 @@ let KEY: [String: Int] = [
     "F3": 99, "F8": 100, "F9": 101, "Eisu": 102, "F11": 103, "Kana": 104, "F10": 109, "F12": 111,
     "Home": 115, "PageUp": 116, "ForwardDelete": 117, "F4": 118, "End": 119, "F2": 120, "PageDown": 121,
     "F1": 122, "Left": 123, "Right": 124, "Down": 125, "Up": 126, "Yen": 93, "Underscore": 94,
+    "ShiftKey": 56, "CapsLock": 57, "OptKey": 58, "CtrlKey": 59, "CmdKey": 55, "Fn": 63,
 ]
+// a lone modifier: flagsChanged down (with its flag) and up (without)
+let MODKEYS: [Int: CGEventFlags] = [56: .maskShift, 57: .maskAlphaShift, 58: .maskAlternate, 59: .maskControl, 55: .maskCommand, 63: .maskSecondaryFn]
 let ARROWS: Set<Int> = [123, 124, 125, 126]
 let FUNCS: Set<Int> = [96, 97, 98, 99, 100, 101, 103, 109, 111, 115, 116, 117, 118, 119, 120, 121, 122]
 
@@ -39,6 +51,12 @@ class ProbeView: NSView, NSTextInputClient {
     var markedSel = NSRange(location: 0, length: 0)
 
     override var acceptsFirstResponder: Bool { true }
+    var banner = ""
+
+    override func flagsChanged(with e: NSEvent) {
+        let h = inputContext?.handleEvent(e) ?? false
+        emit(["ev": "flagsChanged", "code": Int(e.keyCode), "mods": e.modifierFlags.rawValue & 0xFFFF_0000, "handled": h])
+    }
 
     override func keyDown(with e: NSEvent) {
         let h = inputContext?.handleEvent(e) ?? false
@@ -59,8 +77,19 @@ class ProbeView: NSView, NSTextInputClient {
         return (a.string, segs)
     }
 
+    var selection: NSRange? = nil  // a selection in the committed text ({Sel:n}); the composition then replaces it
+
+    // The composition sits at the end of the text. A replacement range (reconversion, undo of a commit)
+    // is cut out of the text; the new string takes its place at the end (fine for the last word).
+    func cut(_ r: NSRange) {
+        guard r.location != NSNotFound, r.location + r.length <= (text as NSString).length else { return }
+        text = (text as NSString).replacingCharacters(in: r, with: "")
+    }
+
     func insertText(_ s: Any, replacementRange: NSRange) {
         let (str, _) = describe(s)
+        cut(replacementRange)
+        selection = nil
         text += str
         marked = NSAttributedString()
         emit(["ev": "insertText", "s": str, "rep": [replacementRange.location == NSNotFound ? -1 : replacementRange.location, replacementRange.length]])
@@ -72,9 +101,12 @@ class ProbeView: NSView, NSTextInputClient {
 
     func setMarkedText(_ s: Any, selectedRange: NSRange, replacementRange: NSRange) {
         let (str, segs) = describe(s)
+        cut(replacementRange)
+        selection = nil
         marked = (s as? NSAttributedString) ?? NSAttributedString(string: str)
         markedSel = selectedRange
-        emit(["ev": "setMarkedText", "s": str, "segs": segs, "sel": [selectedRange.location, selectedRange.length]])
+        emit(["ev": "setMarkedText", "s": str, "segs": segs, "sel": [selectedRange.location, selectedRange.length],
+              "rep": [replacementRange.location == NSNotFound ? -1 : replacementRange.location, replacementRange.length]])
     }
 
     func unmarkText() {
@@ -84,7 +116,8 @@ class ProbeView: NSView, NSTextInputClient {
     }
 
     func selectedRange() -> NSRange {
-        NSRange(location: (text as NSString).length + markedSel.location, length: markedSel.length)
+        if marked.length == 0, let r = selection { return r }
+        return NSRange(location: (text as NSString).length + markedSel.location, length: markedSel.length)
     }
 
     func markedRange() -> NSRange {
@@ -118,6 +151,10 @@ class ProbeView: NSView, NSTextInputClient {
         m.addAttributes([.font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor.textColor], range: NSRange(location: 0, length: m.length))
         s.append(m)
         s.draw(at: NSPoint(x: 20, y: 60))
+        if !banner.isEmpty {
+            NSAttributedString(string: banner, attributes: [.font: NSFont.boldSystemFont(ofSize: 18), .foregroundColor: NSColor.systemRed])
+                .draw(in: NSRect(x: 20, y: 100, width: bounds.width - 40, height: bounds.height - 105))
+        }
     }
 }
 
@@ -138,6 +175,7 @@ func tokens(_ s: String) -> [(String, Int, CGEventFlags)] {
                 }
             }
             if name == "Wait" { out.append((String(word), -1, f)); continue }
+            if name.hasPrefix("Sel:") { out.append((String(word), -100 - Int(name.dropFirst(4))!, f)); continue }
             guard let c = KEY[name] else { fatalError("key \(name)") }
             out.append((String(word), c, f))
         } else {
@@ -145,6 +183,12 @@ func tokens(_ s: String) -> [(String, Int, CGEventFlags)] {
         }
     }
     return out
+}
+
+func select(_ n: Int) {
+    let len = (view.text as NSString).length
+    view.selection = NSRange(location: len - min(n, len), length: min(n, len))
+    emit(["ev": "select", "range": [view.selection!.location, view.selection!.length]])
 }
 
 func imWindows() -> [[String: Any]] {
@@ -193,12 +237,15 @@ func otherWindows() -> [[String: Any]] {
 }
 
 let args = CommandLine.arguments
-let inject = args[1], sourceID = args[2], keys = tokens(args[3])
-let shotDir = args.count > 4 ? args[4] : nil
+let tableMode = args[1] == "table" || args[1] == "guide"
+let inject = tableMode ? "app" : args[1]
+let sourceID = tableMode ? "" : args[2]
+let keys = tableMode ? [] : tokens(args[3])
+let shotDir = tableMode ? nil : (args.count > 4 ? args[4] : nil)
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let win = NSWindow(contentRect: NSRect(x: 200, y: 400, width: 700, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+let win = NSWindow(contentRect: NSRect(x: 200, y: 400, width: 700, height: args[1] == "guide" ? 260 : 160), styleMask: [.titled], backing: .buffered, defer: false)
 win.title = "mac-keyprobe"
 let view = ProbeView(frame: win.contentView!.bounds)
 win.contentView = view
@@ -220,12 +267,19 @@ func send(_ code: Int, _ flags: CGEventFlags) {
         if ARROWS.contains(code) { f.insert(.maskNumericPad); f.insert(.maskSecondaryFn) }
         if FUNCS.contains(code) { f.insert(.maskSecondaryFn) }
         ev.flags = f
+        if let m = MODKEYS[code] {
+            ev.type = .flagsChanged
+            ev.flags = down || code == 57 ? f.union(m) : f
+        }
+        if let t = ProcessInfo.processInfo.environment["PROBE_KBTYPE"], let n = Int64(t) {
+            ev.setIntegerValueField(.keyboardEventKeyboardType, value: n)
+        }
         switch inject {
         case "ns":
             if let n = NSEvent(cgEvent: ev) {
                 if down { view.keyDown(with: n) } else { view.keyUp(with: n) }
             }
-        case "app": if let n = NSEvent(cgEvent: ev) { NSApp.sendEvent(n) }
+        case "app": if let n = NSEvent(cgEvent: ev) { injecting = true; NSApp.sendEvent(n); injecting = false }
         case "pid": ev.postToPid(getpid())
         case "hid":
             guard isFront() else { emit(["ev": "abort", "why": "not frontmost"]); exit(2) }
@@ -237,14 +291,15 @@ func send(_ code: Int, _ flags: CGEventFlags) {
 
 var i = 0
 func step() {
+    if tableMode { if args[1] == "guide" { runGuide(args[2]) } else { runTable(args[2]) }; exit(0) }
     if i == keys.count {
         emit(["ev": "end", "text": view.text, "marked": view.marked.string])
         exit(0)
     }
     let (name, code, flags) = keys[i]
     emit(["ev": "press", "key": name, "front": isFront()])
-    if code >= 0 { send(code, flags) }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+    if code >= 0 { send(code, flags) } else if code <= -100 { select(-100 - code) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + (Double(ProcessInfo.processInfo.environment["PROBE_GAP"] ?? "") ?? 0.45)) {
         view.needsDisplay = true
         emit(["ev": "after", "key": name, "text": view.text, "marked": view.marked.string,
               "sel": [view.markedSel.location, view.markedSel.length], "windows": imWindows(), "own": otherWindows(),
@@ -258,7 +313,173 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
     emit(["ev": "start", "front": isFront(), "active": app.isActive, "key": win.isKeyWindow,
           "ax": AXIsProcessTrusted(), "post": CGPreflightPostEventAccess(), "screen": CGPreflightScreenCaptureAccess(),
           "sources": view.inputContext?.keyboardInputSources ?? [], "before": view.inputContext?.selectedKeyboardInputSource ?? ""])
-    view.inputContext?.selectedKeyboardInputSource = sourceID
+    if !tableMode { view.inputContext?.selectedKeyboardInputSource = sourceID }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { step() }
 }
 app.run()
+
+// ---- table mode: many cases in one process --------------------------------------------------
+// cases.json: [{"id": ..., "source": "<input-source-id>", "prep": "<keys>", "key": "<keys>"}, ...]
+// Per case: discard any composition, empty the text, select the source, type prep, record the
+// state (before), press key, record what the input method did (events) and the state (after),
+// press Esc x3 and record the text that is left (kept = what was committed).
+
+// Wait, and meanwhile hand the keyboard's events to the app (a bare RunLoop.run would leave them
+// queued: real keys would never reach the window or the event monitor).
+func pause(_ t: Double) {
+    let end = Date().addingTimeInterval(t)
+    while Date() < end {
+        if let e = NSApp.nextEvent(matching: .any, until: end, inMode: .default, dequeue: true) { NSApp.sendEvent(e) }
+    }
+}
+
+func press(_ s: String, letter: Double = 0.07, chord: Double = 0.3) {
+    for (name, code, flags) in tokens(s) {
+        if code >= 0 { send(code, flags) } else if code <= -100 { select(-100 - code) }
+        pause(name.hasPrefix("{") ? chord : letter)
+    }
+}
+
+func segs() -> [[Any]] {
+    var out: [[Any]] = []
+    let a = view.marked
+    a.enumerateAttributes(in: NSRange(location: 0, length: a.length)) { attrs, r, _ in
+        out.append([(a.string as NSString).substring(with: r), (attrs[.underlineStyle] as? NSNumber)?.intValue ?? 0])
+    }
+    return out
+}
+
+func snap() -> [String: Any] {
+    ["text": view.text, "segs": segs(), "sel": [view.markedSel.location, view.markedSel.length],
+     "source": (view.inputContext?.selectedKeyboardInputSource ?? "").split(separator: ".").last.map(String.init) ?? "",
+     "panels": NSApp.windows.filter { $0 !== win && $0.isVisible }.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" },
+     "front": isFront(), "frontApp": NSWorkspace.shared.frontmostApplication?.localizedName ?? ""]
+}
+
+func compact(_ evs: [[String: Any]]) -> [String] {
+    evs.compactMap { e -> String? in
+        switch e["ev"] as? String ?? "" {
+        case "setMarkedText": return "mark"
+        case "insertText": return "ins:\(e["s"] ?? "")"
+        case "doCommand": return "cmd:\(e["sel"] ?? "")"
+        case "unmarkText": return "unmark"
+        case "source": return "src:\((e["id"] as? String ?? "").split(separator: ".").last ?? "")"
+        case "keyDown": return (e["handled"] as? Bool ?? false) ? nil : "unhandled"
+        default: return nil
+        }
+    }
+}
+
+func reset(_ source: String) {
+    if view.marked.length > 0 { view.inputContext?.discardMarkedText(); pause(0.15) }
+    view.marked = NSAttributedString()
+    view.markedSel = NSRange(location: 0, length: 0)
+    view.text = ""
+    if !isFront() { app.activate(ignoringOtherApps: true); win.makeKeyAndOrderFront(nil); pause(1.0) }
+    if view.inputContext?.selectedKeyboardInputSource != source {
+        view.inputContext?.selectedKeyboardInputSource = source
+        pause(0.4)
+    }
+}
+
+func runTable(_ path: String) {
+    let cases = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
+    for c in cases {
+        let source = c["source"] as! String
+        recording = []
+        reset(source)
+        pause(0.15)
+        press(c["prep"] as? String ?? "")
+        pause(0.35)
+        let before = snap()
+        recording = []
+        press(c["key"] as! String, letter: 0.45, chord: 0.45)
+        let evs = recording!
+        recording = []
+        let after = snap()
+        press("{Esc} {Esc} {Esc}", chord: 0.12)
+        pause(0.2)
+        recording = nil
+        var r = c
+        r["before"] = before
+        r["after"] = after
+        r["events"] = compact(evs)
+        r["kept"] = view.text + view.marked.string
+        emit(r)
+    }
+    recording = []
+    reset(cases.first?["source"] as? String ?? "")
+}
+
+// ---- guide mode: a person presses the keys ------------------------------------------------
+// steps.json: [{"id": ..., "source": ..., "prep": "<keys>", "say": "<what to press>"}, ...]
+// Per step: set the state up (synthetic keys), show `say` in the window, and record everything
+// until 0.3 s after the key is released (1 s after the last real key event otherwise) (10 s with none). If the first step gets no real key, stop. Real events come from a local event
+// monitor; it also sees the synthetic events given to NSApp.sendEvent, so those are skipped (injecting).
+
+
+func runGuide(_ path: String) {
+    let steps = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
+    NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { e in
+        if injecting { return e }
+        realEvents.append(["t": Date().timeIntervalSince1970, "type": e.type == .keyDown ? "down" : e.type == .keyUp ? "up" : "flags",
+                           "code": Int(e.keyCode), "mods": e.modifierFlags.rawValue & 0xFFFF_0000,
+                           "chars": e.type == .flagsChanged ? "" : (e.charactersIgnoringModifiers ?? ""),
+                           "repeat": e.type == .flagsChanged ? false : e.isARepeat])
+        lastReal = Date()
+        return e
+    }
+    for (n, c) in steps.enumerated() {
+        recording = []
+        reset(c["source"] as! String)
+        pause(0.2)
+        press(c["prep"] as? String ?? "")
+        pause(0.4)
+        let before = snap()
+        view.banner = "[\(n + 1)/\(steps.count)] \(c["say"] as? String ?? "")"
+        view.needsDisplay = true
+        NSSound.beep()
+        recording = []
+        realEvents = []
+        let start = Date()
+        lastReal = .distantPast
+        while true {
+            pause(0.1)
+            if realEvents.isEmpty && !(recording!.contains { ($0["ev"] as? String) == "source" }) {
+                if Date().timeIntervalSince(start) > (n == 0 ? 8 : 4) { break }
+                continue
+            }
+            let last = max(lastReal, start)
+            // done 0.3 s after every key is up again (a hold ends with its up), or 1 s after the last event
+            let released = (realEvents.last?["type"] as? String == "up") ||
+                (realEvents.last?["type"] as? String == "flags" && (realEvents.last?["mods"] as? UInt ?? 1) & 0x00FF_0000 == 0)
+            if Date().timeIntervalSince(last) > (released ? 0.3 : 1.0) { break }
+        }
+        let evs = recording!
+        recording = []
+        let after = snap()
+        let real = realEvents
+        view.banner = "（記録中。キーに触らないでください）"
+        view.needsDisplay = true
+        press("{Esc} {Esc} {Esc}", chord: 0.12)
+        pause(0.2)
+        recording = nil
+        var r = c
+        r["before"] = before
+        r["after"] = after
+        r["events"] = compact(evs)
+        r["raw"] = evs
+        r["real"] = real
+        r["kept"] = view.text + view.marked.string
+        emit(r)
+        if n == 0 && real.isEmpty {
+            view.banner = "キーが届きませんでした。中断します"
+            view.needsDisplay = true
+            pause(1.5)
+            return
+        }
+    }
+    view.banner = "終わりました"
+    view.needsDisplay = true
+    pause(1.0)
+}
