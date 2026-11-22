@@ -63,6 +63,12 @@ inline constexpr std::array<const char*, 8> kPhaseNames = {
 };
 
 enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, FullAlnum, Settings, Words, Menu };
+inline bool OpensKeyboard(GlobalCommand command) {
+    return command == GlobalCommand::Toggle || command == GlobalCommand::On ||
+           command == GlobalCommand::Hiragana || command == GlobalCommand::Katakana ||
+           command == GlobalCommand::FullAlnum;
+}
+
 inline GlobalCommand ParseGlobal(const std::string& id) {
     if (id == "ime_toggle") return GlobalCommand::Toggle;
     if (id == "ime_on") return GlobalCommand::On;

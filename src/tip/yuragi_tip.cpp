@@ -180,21 +180,23 @@ static bool KeyboardClosed(ITfThreadMgr* tm) {
     return closed;
 }
 
-static void SetKeyboardOpen(ITfThreadMgr* tm, TfClientId id, BOOL open) {
-    if (!tm || id == TF_CLIENTID_NULL) return;
+static bool OpenKeyboard(ITfThreadMgr* tm, TfClientId id) {
+    if (!tm || id == TF_CLIENTID_NULL) return false;
     ITfCompartmentMgr* cm = nullptr;
-    if (FAILED(tm->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return;
+    if (FAILED(tm->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return false;
+    bool changed = false;
     ITfCompartment* c = nullptr;
     if (SUCCEEDED(cm->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &c)) && c) {
         VARIANT v;
         VariantInit(&v);
         v.vt = VT_I4;
-        v.lVal = open ? 1 : 0;
-        c->SetValue(id, &v);
+        v.lVal = 1;
+        changed = SUCCEEDED(c->SetValue(id, &v));
         VariantClear(&v);
         c->Release();
     }
     cm->Release();
+    return changed;
 }
 
 static std::wstring DllDir() {
@@ -1169,7 +1171,7 @@ public:
             cat->Release();
         }
         EnsureWindow();
-        SetKeyboardOpen(tm_, client_, TRUE);
+        OpenKeyboard(tm_, client_);
         PreserveKeys();
         ITfLangBarItemMgr* lbm = nullptr;
         if (SUCCEEDED(tm_->QueryInterface(IID_ITfLangBarItemMgr, (void**)&lbm))) {
@@ -1321,12 +1323,15 @@ public:
             AdoptHeld();
             return S_OK;
         }
+        const bool eligible = ScopeAllowsInput() && !KeyboardDisabled(tm_) &&
+                              (!KeyboardClosed(tm_) || (decision.action == Action::Global &&
+                                                       tip_logic::OpensKeyboard(decision.command)));
         if (decision.Eats() && (decision.action == Action::Buffer || carry_.Active() ||
-                               !buffered_.empty() || KeysWaiting() || !Eligible() || !ScopeAllowsInput())) {
+                               !buffered_.empty() || KeysWaiting() || !eligible)) {
             Buffer(key);
             return S_OK;
         }
-        if (!Eligible() || !ScopeAllowsInput()) return S_OK;
+        if (!eligible) return S_OK;
         FlushReleases();
         if (!direct_ && tip_logic::Typing(key.chord)) {
             if (!link_.Connected()) TryConnect();
@@ -1378,17 +1383,12 @@ public:
             event.chord = {key.code & 0xFF, {bool(mods & 1), bool(mods & 2), bool(mods & 4), false}};
             if (IsReplay(event)) return S_OK;
             if (FocusChanged()) FocusMoved();
-            if (carry_.Active() || !buffered_.empty() || retry_replay_) {
+            auto decision = Decide(event);
+            if (decision.action == Action::Buffer) {
                 Buffer(event);
                 *e = TRUE;
-                return S_OK;
-            }
-            if (!Eligible() || !ScopeAllowsInput()) return S_OK;
-            auto command = GlobalFor(key.code);
-            if (command != tip_logic::GlobalCommand::None) {
-                *e = TRUE;
-                if (KeysWaiting()) Buffer(event);
-                else RunGlobal(command);
+            } else if (decision.action == Action::Global) {
+                *e = RunGlobal(decision.command) ? TRUE : FALSE;
             }
             break;
         }
@@ -2056,9 +2056,10 @@ private:
         return !sent_keys_.empty() || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_ ||
                menu_generation_;
     }
-    tip_logic::GlobalCommand GlobalFor(unsigned code) const {
+    tip_logic::GlobalCommand GlobalFor(unsigned code, bool closed = false) const {
         using tip_logic::GlobalCommand;
-        auto command = keymap_.GlobalAt(phase_, code);
+        auto command = keymap_.GlobalAt(closed ? tip_logic::Phase::Direct : phase_, code);
+        if (closed && !tip_logic::OpensKeyboard(command)) return GlobalCommand::None;
         if (command == GlobalCommand::Settings) return command;
         if (command == GlobalCommand::Words)
             return tip_logic::SendsKeys(CurrentMode()) ? command : GlobalCommand::None;
@@ -2068,11 +2069,16 @@ private:
     Decision Decide(const Stroke& key, bool buffer = true) {
         using namespace tip_logic;
         if (!tm_ || key.chord.mods.win || UntranslatedJisKey(key.raw, (uint32_t)key.flags)) return {};
+        const bool closed = KeyboardClosed(tm_);
+        auto reopen = closed ? GlobalFor(key.chord.Code(), true) : GlobalCommand::None;
+        if (closed && reopen == GlobalCommand::None) return {};
         const bool can_hold = HoldDuringCarry(key.chord, key.raw, (uint32_t)key.flags,
                                               keymap_.global.count(key.chord.Code()) != 0);
         if (buffer && carry_.Active()) return {can_hold ? Action::Buffer : Action::Pass};
         if (buffer && (!buffered_.empty() || retry_replay_) && can_hold) return {Action::Buffer};
-        if (!Eligible() || !ScopeAllowsInput()) return {};
+        if (KeyboardDisabled(tm_) || !ScopeAllowsInput()) return {};
+        if (closed)
+            return buffer && KeysWaiting() ? Decision{Action::Buffer} : Decision{Action::Global, reopen};
         auto local = LocalState();
         bool ready = link_.Connected() && SendsKeys(CurrentMode());
         if (AltVk(key.raw)) {
@@ -2150,12 +2156,15 @@ private:
         while (!buffered_.empty() && !KeysWaiting()) {
             auto started = CarryStarted();
             const auto now = NowMs();
-            const auto delivery = tip_logic::DeliverHeld({scope_ctx_ != nullptr, Eligible(), scope_}, now, started);
+            auto key = buffered_.front();
+            const bool eligible = !KeyboardDisabled(tm_) &&
+                (!KeyboardClosed(tm_) || (key.down &&
+                 GlobalFor(key.chord.Code(), true) != tip_logic::GlobalCommand::None));
+            const auto delivery = tip_logic::DeliverHeld({scope_ctx_ != nullptr, eligible, scope_}, now, started);
             if (delivery == tip_logic::Deliver::Wait) {
                 ArmTimer(kTimerCarry, *started + tip_logic::KEY_BUDGET_MS);
                 return;
             }
-            auto key = buffered_.front();
             buffered_.pop_front();
             if (delivery == tip_logic::Deliver::Raw || key.windows_only) {
                 if (key.down && !tip_logic::AltVk(key.raw)) {
@@ -2302,6 +2311,14 @@ private:
 
     bool RunGlobal(tip_logic::GlobalCommand command) {
         using tip_logic::GlobalCommand;
+        if (KeyboardClosed(tm_)) {
+            if (!tip_logic::OpensKeyboard(command) || !tip_logic::Toggles(CurrentMode()) ||
+                KeyboardDisabled(tm_) || !ScopeAllowsInput() || !OpenKeyboard(tm_, client_))
+                return false;
+            // Windows was off even if our last reported mode was kana.
+            if (command == GlobalCommand::Toggle || command == GlobalCommand::On)
+                command = GlobalCommand::Hiragana;
+        }
         if (command == GlobalCommand::Menu) {
             if (!PostMessageW(hwnd_, kMenuMessage, 0, 0))
                 return false;
