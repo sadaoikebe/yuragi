@@ -71,6 +71,21 @@ class EngineCase(unittest.TestCase):
         return self.request(engine, sid, {"op": "up", "vk": 65, "t": t + 30})
 
 
+class KeyDispatchTest(EngineCase):
+    def test_shift_caps_lock_keeps_pending_input(self):
+        engine = self.engine()
+        self.open(engine, 1)
+        reply = self.request(engine, 1, {"op": "down", "vk": 65, "t": 100})
+        self.assertEqual(reply["phase"], "empty")
+        self.assertGreater(reply["timer"], 101)
+
+        reply = self.request(engine, 1, {"op": "down", "vk": 0x14, "t": 101, "mods": ["shift"]})
+        self.assertIs(reply["eat"], True)
+        self.assertEqual((reply["phase"], reply["composition"], reply["commit"]),
+                         ("composing", "宇", ""))
+        self.assertNotIn("global", reply)
+
+
 class SlowModel:
     """Writes 卯 over the Viterbi 宇; each review sleeps (a slow model)."""
 

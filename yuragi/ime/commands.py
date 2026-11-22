@@ -28,6 +28,7 @@ class Command:
     key: str = "eat"
     where: str = "engine"
     run: Callable[[ImeSession], str | None] | None = None
+    until: str | None = None
 
 
 COMMANDS = MappingProxyType({c.id: c for c in (
@@ -48,15 +49,15 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("predict", "予測候補", COMPOSING, run=lambda s: s._predict_key()),
     Command("commit", "全確定", INPUT, run=lambda s: s._commit()),
     Command("commit_first_segment", "先頭の文節を確定", INPUT, run=lambda s: s._commit_prefix()),
-    Command("commit_one_char", "先頭の一字を確定", COMPOSING),
+    Command("commit_one_char", "先頭の一字を確定", COMPOSING, until="noop"),
     Command("commit_to_focus", "注目文節まで確定", CONVERTED),
     Command("delete_before", "前字削除", COMPOSING, run=lambda s: s._delete_before()),
-    Command("alnum_mode", "英数の続き", INPUT),
-    Command("delete_after", "後字削除", COMPOSING),
-    Command("cursor_left", "カーソルを左へ", COMPOSING),
-    Command("cursor_right", "カーソルを右へ", COMPOSING),
-    Command("cursor_home", "カーソルを先頭へ", COMPOSING),
-    Command("cursor_end", "カーソルを末尾へ", COMPOSING),
+    Command("alnum_mode", "英数の続き", INPUT, until="noop"),
+    Command("delete_after", "後字削除", COMPOSING, until="noop"),
+    Command("cursor_left", "カーソルを左へ", COMPOSING, until="noop"),
+    Command("cursor_right", "カーソルを右へ", COMPOSING, until="noop"),
+    Command("cursor_home", "カーソルを先頭へ", COMPOSING, until="noop"),
+    Command("cursor_end", "カーソルを末尾へ", COMPOSING, until="noop"),
     Command("cancel", "全消去", COMPOSING, run=lambda s: s._cancel()),
     Command("cancel_conversion", "変換を取り消す", CONVERTED | {"predicting"},
             run=lambda s: s._cancel_conversion()),
@@ -84,3 +85,8 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("pass_through", "そのまま通す", LOCAL, key="pass", run=lambda s: None),
     Command("commit_and_pass", "確定して通す", INPUT, key="commit_pass", run=lambda s: s._commit()),
 )})
+
+for command in COMMANDS.values():
+    if command.until is not None:
+        assert command.run is None and command.where == "engine", command.id
+        assert command.until in ("noop", "pass_through") and command.until in COMMANDS, command.id

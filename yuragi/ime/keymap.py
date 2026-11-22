@@ -37,8 +37,11 @@ class Keymap:
                     or (chord.character and phase in ("global", "direct", "empty", "composing"))
                     or (chord.typing and phase in ("global", "direct"))):
                 raise ValueError(f"invalid binding: {phase}, {name}, {command_id}")
-            if command.run is not None or command.where == "tip":
-                rows[phase][chord.code] = command
+            if command.run is None and command.where == "engine":
+                if command.until is None:
+                    continue
+                command = COMMANDS[command.until]
+            rows[phase][chord.code] = command
 
         for phase, parent in PARENT.items():
             rows[phase] = rows[parent] | rows[phase]
