@@ -81,8 +81,8 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
 インストール試験では、配置済みの Python・辞書・固定モデルを使い、`--require-lm` 付きの自己試験で zenz の変換を確認する。
 リリースに置く `setup.ps1` と `uninstall.ps1` の元は `packaging/setup.ps1` と
 `packaging/uninstall-entry.ps1` です（手順は DESIGN「インストール・更新・アンインストール」）。
-実機で確かめたら `gh release edit <tag> --prerelease=false --latest` で正式リリースにします
-（README の 1 行が使う `releases/latest` はプレリリースを指さず、正式リリースが無いと 404 になります）。
+実機確認が済むまではプレリリースのままです。正式公開するときは、リポジトリ所有者が GitHub の Releases 画面で対象のタグを選び、
+正式版に切り替えます。README の `releases/latest` は正式版の配布先です。ワークフローはプレリリースの作成前後でこの配布先を照合します。
 
 ## ライセンス
 

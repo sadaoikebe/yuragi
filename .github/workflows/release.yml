@@ -9,11 +9,13 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -97,13 +99,21 @@ jobs:
             Write-Host "parse OK: $f"
           }
 
-      # プレリリースとして公開する。README の latest URL はプレリリースを
-      # 指さないので、実機でインストールを確かめてから正式にする
-      # (gh release edit <tag> --prerelease=false --latest)。
+      - name: 現在の正式版の配布先を記録
+        id: stable
+        shell: pwsh
+        run: |
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/setup.ps1"
+          $destination = curl.exe --silent --show-error --head --max-time 15 --output NUL --write-out '%{redirect_url}' $url
+          if ($LASTEXITCODE -ne 0) { throw "Could not check the current installer URL" }
+          "destination=$destination" >> $env:GITHUB_OUTPUT
+
+      # 正式公開は、実機確認を終えた所有者が GitHub の Releases 画面で行う。
       - name: リリースへ公開 (プレリリース)
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
+          make_latest: "false"
           body: "インストール・更新・アンインストールは README を参照してください。"
           files: |
             setup.ps1
@@ -118,6 +128,22 @@ jobs:
             yuragi-source.zip.sha256
             python-3.13.7-tkinter-amd64.zip
             python-3.13.7-tkinter-amd64.zip.sha256
+
+      - name: プレリリースと正式版の配布先を確認
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STABLE_INSTALLER: ${{ steps.stable.outputs.destination }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:GITHUB_REF_NAME" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.prerelease -or $release.draft) {
+            throw "Expected a published prerelease for $env:GITHUB_REF_NAME"
+          }
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/setup.ps1"
+          $destination = curl.exe --silent --show-error --head --max-time 15 --output NUL --write-out '%{redirect_url}' $url
+          if ($LASTEXITCODE -ne 0 -or "$destination" -cne "$env:STABLE_INSTALLER") {
+            throw "The latest installer URL changed while publishing the prerelease"
+          }
 
   # 公開したプレリリースの setup.ps1 で、まっさらなランナーに実際に入れる (経路は 1 本)。
   # インストール → 動作 (ブローカーが ready、同梱ランタイムで tkinter と zenz の変換が動くか)
