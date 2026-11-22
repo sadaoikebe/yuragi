@@ -1,7 +1,7 @@
-# macOS 日本語入力プログラムを実機で調べる方法（提案）
+# macOS 日本語入力プログラムを実機で調べる方法
 
 [macos.md](macos.md) は Apple の資料から作ったので、「資料に無い」「出典で食い違う」が多く残っている。
-これを Mac の実機で確かめる方法を調べ、小さな試作で動くことを確かめた。Windows の [tools/keyprobe](../../tools/keyprobe/README.md) に当たるものを Mac 用に作る提案である。
+これを Mac の実機で確かめる方法を調べ、小さな試作で動くことを確かめた。Windows の [tools/keyprobe](../../tools/keyprobe/README.md) に当たるものを Mac 用に作る。
 
 - 試作した環境: MacBook Air (M1)、macOS 27.2.1、内蔵キーボードは US 配列、入力ソースは「日本語 - ローマ字入力」（ひらがなだけ有効）と ABC。2026-11-22。
 - 「確かめた」と書いたものは、この環境で試作を動かして見た結果。「未検証」と書いたものは動かしていない。
@@ -32,7 +32,7 @@
 | Alt+\` で MS-IME をオンにする | `inputContext.selectedKeyboardInputSource = "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"` | 確かめた |
 | `msime_tsf_seq.py` の画面の撮影（候補ウインドウ） | `screencapture -x -o -l <窓番号>`。候補ウインドウは試験アプリ自身の窓として出るので、窓番号は `NSApp.windows` から取れる | 確かめた。画面収録の許可が要る |
 | `msime_tsf_table.py`（状態 × キーの表） | 同じ作りで書ける（状態を作る → キー 1 つ → 記録 → Esc で片付け → 残った文字を見る） | 未実装 |
-| 確認用の TIP（TSF が TIP をどう呼ぶか） | 対応するものは要らない。Mac 向けの IME を作るわけではないので、InputMethodKit の呼ばれ方は調べなくてよい | — |
+| 確認用の TIP（TSF が TIP をどう呼ぶか） | この方法には入れない。InputMethodKit の呼ばれ方を見ても、Apple の日本語入力プログラムの動きは分からない（§10） | — |
 | `manual-start` / `manual-report`（本物のキーボードで押す） | 同じ試験アプリを「記録だけ」のモードで開き、人が押す | 未実装 |
 
 「食べなかったキー」の注意: `handleEvent` の戻り値は、IME が食べなくてもテキスト入力の仕組みがキーをコマンドに変えれば `true` になる（未入力で Return を押すと `handled=true` で `insertNewline:` が来る）。食べたかどうかは、`doCommand` や素通しの `insertText` が来たかで判断する。
@@ -55,7 +55,7 @@
 
 ### 3.2 記録するもの
 
-1 つのキーごとに次を 1 行ずつ書く（試作の出力そのまま）。
+1 つのキーごとに次を 1 行ずつ書く（試作の出力から、主な項目だけを抜いた）。
 
 ```
 {"ev":"press","key":"{Space}"}
@@ -190,14 +190,13 @@
 
 ## 9. 作るもの
 
-置き場所は `tools/keyprobe/mac/`（Windows 版と並べる）。いまは試作（`probe.swift` と、記録を 1 キー 1 行に縮める `summary.py`）だけが入っている。使い方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。下の表は、これから作るもの。
+置き場所は `tools/keyprobe/mac/`（Windows 版と並べる）。いまは試作（`probe.swift` と、記録を 1 キー 1 行に縮める `summary.py`）だけが入っている。使い方は [tools/keyprobe/mac/README.md](../../tools/keyprobe/mac/README.md)。下の表は、まだ無いもの。
 
 | ファイル | 中身 |
 |---|---|
-| `probe.swift` | 試験アプリ。`swiftc` で 1 ファイルをビルドする（Xcode のプロジェクトは作らない）。引数でキーの列を受け取り、JSON の行を標準出力に書く（ここまでは試作にある）。記録だけのモード（人が押す用）を足す |
+| `probe.swift` の記録だけのモード | 人が押したキーを記録する |
 | `seq.py` | `msime_tsf_seq.py` に当たる。キーの列を送り、キーごとの記録と候補ウインドウの画像を `out/` に出す |
 | `table.py` | `msime_tsf_table.py` に当たる。状態 × キーの表を `out/mac_table.jsonl` に書く |
-| `README.md` | 使い方と「してはいけないこと」（§7） |
 
 - キーの書き方は Windows 版に合わせる（`kyouhaamedesu {Space} {Shift+Left}`）。修飾の名前は `Ctrl`・`Shift`・`Opt`・`Cmd`、キーの名前に `Eisu`・`Kana` を足す。
 - 速さ: 試作は 1 キーごとに 0.45 秒待った。このままだと、状態 8 × キー 150 ほどの表は 1 つの設定の組につき 3 時間ほどかかる（1 件が状態作りを含めて 9 秒前後）。状態を作る文字の待ちを Windows 版並み（0.06 秒）に詰めれば 1 時間前後になる見込みだが、詰めて記録が崩れないかは未検証。

@@ -128,7 +128,7 @@ Google 日本語入力とそのオープンソース版 Mozc の、キー設定�
 
 - CompositionState の enum は、`CONVERT_TO_*` を「Switching to ConversionState」（Conversion に移る）、`DISPLAY_AS_*` / `TRANSLATE_*` を「Remaining CompositionState」（Composition のまま）と分けている。
 - ConversionState では「CONVERT_TO と TRANSLATE は同じ動作」とコメントがある。
-- MS-IME と ATOK は F6〜F10 / Ctrl+U/I/O/P/T を ConvertTo* に、ことえりは F6〜F10 / Ctrl+J/K/L/;/: を DisplayAs* に割り当てている。
+- MS-IME は F6〜F10 / Ctrl+U/I/O/P/T、ATOK は F6〜F10 / Ctrl+U/I/O/P/@ を ConvertTo* に、ことえりは F6〜F10 / Ctrl+J/K/L/;/: を DisplayAs* に割り当てている。
 
 ## 3. キーの表記（[KEYPARSER]）
 

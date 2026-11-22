@@ -1,7 +1,6 @@
 # 日本語 IME のキー操作の比較
 
-主要な日本語 IME の、キー操作の特徴・カスタマイズの仕組み・機能ごとの既定キー。プリセットを作るときと、
-キーバインドの設計（[../KEYBIND.md](../KEYBIND.md)）で他の IME に合わせるときに使う。IME ごとの全表と出典は次のファイルにある。
+主要な日本語 IME の、キー操作の特徴・カスタマイズの仕組み・機能ごとの既定キー。IME ごとの全表と出典は次のファイルにある。
 
 | ファイル | 中身 |
 |---|---|
@@ -9,6 +8,7 @@
 | [atok.md](atok.md) | ATOK（Windows・Mac）。8 状態 × キー、割り当てできる機能、Win/Mac の差 |
 | [macos.md](macos.md) | macOS 標準の日本語入力（旧ことえり）。Mac と「Windows風」、設定項目 |
 | [mozc.md](mozc.md) | Google 日本語入力 / Mozc。keymap の形式、状態とコマンドの全部、プリセットの比較 |
+| [reconversion.md](reconversion.md) | 再変換の仕組み（TSF・IMM32）と、Mozc・MS-IME の動き、アプリごとの違い |
 | [others.md](others.md) | Japanist、SKK 系、親指シフトのソフト、ibus-anthy・fcitx5-anthy・libkkc、azooKey |
 
 「無し」は、出典が無いと書いているもの。「資料に無い」は、出典で確かめられないもの。旧 MS-IME の「キー設定の表に無い」は、既定のキー設定の画面の表（ms-ime.md §2。割り当てのあるキーと、Shift+Enter のように割り当ての無いキーの行が載っている）のどの行にも、その機能が無いこと。
@@ -63,7 +63,7 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 | 1 字ずつ確定 | Shift+↓（1文字確定）（Mozc: 割り当て無し） | Shift+↓（1 音確定） | 資料に無い |
 | 1 打 / 1 字消す（左） | BS、Ctrl+H、Shift+BS、Ctrl+BS | BS、Ctrl+H | Delete、Ctrl+H |
 | カーソルの右を消す | Del、Ctrl+G | Del、Ctrl+G | 資料に無い（Mozc: Del、Ctrl+D） |
-| 全部消す | Esc、Shift+Esc、Ctrl+Z | Esc、Ctrl+[ | Esc、Clear |
+| 全部消す | Esc、Shift+Esc、Ctrl+Z。新 IME（実機）: ② の Ctrl+Z は何もしない | Esc、Ctrl+[ | Esc、Clear |
 | カーソル移動 ←→ | ←→、Shift+←→、Ctrl+K/L、Ctrl+S/D | ←→、Ctrl+K/L | ←→、Ctrl+S/D（Mozc: Ctrl+B/F、Option+J/L。Ctrl+D は右を消す） |
 | 先頭 / 末尾へ | Home/End、Ctrl+A/F、Ctrl+←/→、Ctrl+↑/↓、末尾は Ctrl+N も（Mozc: Ctrl+E で先頭、Ctrl+X で末尾も） | Ctrl+←/→ | 資料に無い（Mozc: Ctrl+A/E、Home/End、Ctrl+←/→） |
 | ひらがな | F6、Ctrl+U | F6、Ctrl+U | F6、Ctrl+J |
@@ -92,7 +92,7 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 | 全確定 | Enter、Ctrl+M、Ctrl+Enter | Enter、Ctrl+M | Return（Mozc: Ctrl+M も） |
 | 先頭の文節だけ確定 | Ctrl+↓、Ctrl+N | ↓、Ctrl+N | 資料に無い |
 | 先頭 / 末尾の 1 字を確定 | Shift+↓（③⑤⑥ の「先頭確定」。1 字か文節かは資料に無い）（Mozc: Shift+↓ は次のページ） | PgDn / PgUp | 資料に無い |
-| 変換をやめる（読みに戻す） | Esc・Ctrl+Z・Ctrl+BS・Shift+BS（文節戻し）、Shift+Esc（全戻し）（Mozc: BS・Ctrl+H・Del・Ctrl+G も） | BS、Ctrl+H（変換取消）、Insert（全変換取消。[W36] の表には無い）。Esc・Ctrl+[ は全文字削除 | Esc（読みに戻す）、Ctrl+Delete・(かな) 2 回（変換を取り消す）。Windows風は Ctrl+Z も（Mozc: BS・Ctrl+H も） |
+| 変換をやめる（読みに戻す） | Esc・Ctrl+Z・Ctrl+BS・Shift+BS（文節戻し）、Shift+Esc（全戻し）（Mozc: BS・Ctrl+H・Del・Ctrl+G も） | BS、Ctrl+H（変換取消）、Insert（全変換取消。atok.md の [W36] の表には無い）。Esc・Ctrl+[ は全文字削除 | Esc（読みに戻す）、Ctrl+Delete・(かな) 2 回（変換を取り消す）。Windows風は Ctrl+Z も（Mozc: BS・Ctrl+H も） |
 | 注目文節を消す | キー設定の表に無い | Shift+Del | 資料に無い |
 | 字種（F6〜F10 / Ctrl 系） | F6〜F10、Ctrl+U/I/O/P/T | F6〜F10、Ctrl+U/I/O/P/@ | F6〜F10、Ctrl+J/K/L/;/: |
 | 候補の学習を消す | Ctrl+Del（④ で単語削除）（Mozc: 予測候補の表示中に Ctrl+Del で履歴から削除） | Ctrl+Del（単語削除） | 資料に無い（Mozc: 予測候補の表示中に Ctrl+Del） |
@@ -102,8 +102,8 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 
 | 機能 | MS-IME | ATOK | macOS |
 |---|---|---|---|
-| 確定取り消し | Ctrl+BS（① の確定取消） | Ctrl+BS（確定のアンドゥ） | 資料に無い（Mozc: Ctrl+BS） |
-| 再変換 | (変換)（①）。新 IME: Ctrl+ImeOn も | Shift+(変換)（Mac は Ctrl+Shift+Y） | Ctrl+Shift+R、Option+Shift+R、(かな) 2 回 |
+| 確定取り消し | Ctrl+BS（① の確定取消）。新 IME（実機）: ① では通す（取り消さない） | Ctrl+BS（確定のアンドゥ） | 資料に無い（Mozc: Ctrl+BS） |
+| 再変換 | (変換)、Ctrl+ImeOn（①）（[reconversion.md](reconversion.md)） | Shift+(変換)（Mac は Ctrl+Shift+Y） | Ctrl+Shift+R、Option+Shift+R、(かな) 2 回 |
 | 単語登録を開く | Ctrl+F7（①）（Mozc: 割り当て無し） | Ctrl+F7 | キーは資料に無い（入力メニュー「ユーザ辞書を編集」） |
 | 設定を開く | キー設定の表に無い（Ctrl+F10 は ① のメニュー） | Ctrl+F12 | キーは資料に無い（入力メニュー） |
 | IME パッド・文字パレット・絵文字 | F5・Ctrl+Y（IME パッドの部首・コード変換）。新 IME: Win+.（絵文字。OS の機能） | Ctrl+F11（文字パレット） | Command+Control+Space（文字ビューア） |
@@ -120,9 +120,9 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
 
 ---
 
-## 3. プリセットの元になる資料
+## 3. IME ごとの資料
 
-| プリセット | 使える資料 | 出典の状況 |
+| IME | 資料 | 出典の状況 |
 |---|---|---|
 | MS-IME | 新 MS-IME の実機の動き（[ms-ime.md](ms-ime.md) §1.5）、旧 MS-IME の表（ms-ime.md §2）、Mozc の `ms-ime.tsv`・`chromeos.tsv`（[mozc.md](mozc.md)） | 実機の動きは TSF のアプリで採った。旧 IME の表と Mozc は照合でき、違う所は §2 の「（Mozc: …）」。旧 IME の表はキー設定の画面と同じで、「–」は割り当てなし |
 | ATOK | ATOK Windows の公式マニュアル（[atok.md](atok.md)）と Mozc の `atok.tsv` | 公式マニュアルの表は状態別ではない。状態別の表は利用者が改変したエクスポート [GIST34]。出典で食い違う所がある（Ctrl+F8、入力中の Shift+Enter など。atok.md §1.1・§1.3） |
@@ -134,7 +134,7 @@ Google 日本語入力 / Mozc の既定は、Windows・Linux では ms-ime.tsv�
   消える行には再変換（Henkan）、オン/オフ、入力モード（Hiragana・Katakana・Muhenkan・Eisu）の行がある。各 IME の US 配列での代わり:
   新 MS-IME は Alt+`` ` ``・Ctrl/Shift/Alt+CapsLock、ATOK は CapsLock（Caps Lock英数の代わり）・Shift+Ctrl+CapsLock（カタカナひらがなの代わり。半角/全角の代わりは資料に無い）、macOS は Ctrl+Shift+J/'。
   これらが US 配列でどの仮想キーコードとして届くかは [windows.md](windows.md) §3。
-- **Space**: どのプリセットでも Space は変換・次候補。ibus-anthy と fcitx5-anthy は、親指キーの単独打鍵（ibus-anthy はタイムアウトか文字キーなしで離したとき、fcitx5-anthy はタイムアウトしたとき）を
+- **Space**: どの IME の既定でも Space は変換・次候補。ibus-anthy と fcitx5-anthy は、親指キーの単独打鍵（ibus-anthy はタイムアウトか文字キーなしで離したとき、fcitx5-anthy はタイムアウトしたとき）を
   通常のキー表で処理する（others.md §4.1・§4.2）。右親指を space にすれば、キー表の Space が Space の単独打鍵として働く。
   やまぶきR には、右親指を Space にして単独打鍵で変換する実例がある（others.md §3.2）。awase で Space を親指キーにしたときに単独打鍵で変換をどう起こすかは資料に無い（others.md §3.5）。
   NICOLA 規格の単独打鍵（任意仕様）「左親指＝無変換・右親指＝変換」は、左右の親指キーをスペースバー 1 つで兼ねると使えない。

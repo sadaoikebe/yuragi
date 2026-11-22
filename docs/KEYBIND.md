@@ -45,7 +45,7 @@
 | 用語 | 中身 |
 |---|---|
 | 和音（chord） | キー 1 つと修飾（Shift・Ctrl・Alt）の組。`Ctrl+U`、`Shift+Left`、`Space` |
-| 局面（phase） | 入力の進み具合。直接入力／入力なし／入力中／変換中／候補選択中／文節長変更中／予測の候補 |
+| 局面（phase） | 入力の進み具合。直接入力／入力なし／入力中／変換中／候補選択中／文節長変更中／予測の候補／文節内入力 |
 | コマンド | 名前の付いた操作 1 つ。`convert`、`commit`、`segment_shrink` など（§3.2） |
 | キー表（keymap） | （局面, 和音）→ コマンド の全体。プリセットに利用者の差分を重ねたもの |
 | 食べる表（eat table） | キー表から作る、TIP 用の（局面, 和音）→ 食べる／通す。コマンドの中身は持たない |
@@ -184,7 +184,7 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
 
 - 修飾の順は Ctrl、Alt、Shift に決める。読み込みでは順不同・大文字小文字の違いを受け付け、書き出しではこの順にそろえる。
 - キー名: `A`–`Z`、`0`–`9`、記号は US 配列の刻印（`` ` `` `-` `=` `[` `]` `\` `;` `'` `,` `.` `/`）、
-  `Space` `Enter` `Backspace` `Tab` `Esc` `Delete` `Insert` `Home` `End` `PageUp` `PageDown` `Left` `Right` `Up` `Down`
+  `Space` `Enter` `Backspace` `Tab` `Convert` `NonConvert` `Esc` `Delete` `Insert` `Home` `End` `PageUp` `PageDown` `Left` `Right` `Up` `Down`
   `F1`–`F24` `CapsLock` `Numpad0`–`Numpad9` `NumpadAdd` `NumpadSubtract` `NumpadMultiply` `NumpadDivide` `NumpadDecimal`。
 - キー名は US 配列の刻印で、**利用者が押した形**を表す。内部では和音を整数 1 つで持つ:
   `code = US 配列の仮想キーコード | 修飾 << 8`（修飾は Shift=1、Ctrl=2、Alt=4。TIP が `tip.json` の `toggle_mods`（`["alt"]` などの名前の並び）から作る値と同じ）。
@@ -421,7 +421,7 @@ on_key(down, vk, t, mods):
        b. LM 待ちがあれば、残りを待ちのあとに回す（_then）
        c. その時点の局面で表を引く → コマンドを実行。行が無ければ §4.3
   3. 打鍵層の和音（文字キー、修飾なしの Space）:
-       a. 局面が converting 以降か predicting（LM 待ちがあれば、2b と同じく待ちのあとの局面で見る）で、
+       a. 文字キーで、局面が converting 以降か predicting（LM 待ちがあれば、2b と同じく待ちのあとの局面で見る）で、
           表に行があれば → 判定待ちを締めて、コマンドを実行（同時打鍵の判定には入れない）
        b. それ以外 → Shift 面・英数の続き・同時打鍵の判定へ
   4. 同時打鍵の判定が「Space の単独打鍵」（ThumbTap）を出したとき:
@@ -487,7 +487,7 @@ TIP が持つのは、エンジンが作った次の形の表だけ。親の局�
 ### 7.2 受け取るかの規則
 
 ```cpp
-enum class Phase { Empty, Composing, Converting, Selecting, Resizing, Predicting, Direct };
+enum class Phase { Empty, Composing, Converting, Selecting, Resizing, Predicting, Editing, Direct };
 enum class Take { Pass, Send };              // アプリに通す／エンジンに送る
 
 struct KeyTable { ... };                     // ParseKeyTable(json) で作る。Sends(phase, code)・Overrides(phase, code)・GlobalAt(phase, code)
@@ -555,9 +555,9 @@ MS-IME と同じく、届いた出来事を 1 つずつ、届いた時点の形�
 
 `global` の行は、TIP が自分で実行する。直接入力の間も、準備中も効く必要があるため。
 
-- 実行できるコマンドは `where: tip` のものだけ: `ime_toggle`・`ime_on`・`ime_off`・`mode_hiragana`・`mode_katakana`（手元の入力モードを変え、`set_direct`・`set_mode` を送る。
+- 実行できるコマンドは `where: tip` のものだけ: `ime_toggle`・`ime_on`・`ime_off`・`mode_hiragana`・`mode_katakana`・`mode_full_alnum`（手元の入力モードを変え、`set_direct`・`set_mode` を送る。
   入力があれば、先にエンジンに確定を頼む）、`open_settings`・`open_word_register`（ブローカーに `open_admin` を送る）。
-- `open_menu` は `empty` の行からエンジンが返す。MS-IME プリセットでは Ctrl+F10。TIP は入力欄のスレッドで、キーのコールバックを抜けてからメニューを開く。
+- `open_menu` は `empty` の行からエンジンが返す。MS-IME プリセットでは Ctrl+F10 と Ctrl+変換。TIP は入力欄のスレッドで、キーのコールバックを抜けてからメニューを開く。
 - **Alt 付き（Ctrl なし）の行だけを TSF の PreservedKey に登録する。** Alt 付きの和音は PreservedKey にしか届かない（[windows.md](keybind/windows.md) §1.3）。
   ほかの行は `OnKeyDown` で照合する（局面の表に同じ和音があれば、そちらが先。§7.1）。
 - **局面が決まっていない間は、局面で意味が変わる和音を TIP が自分で決めない。** 返事を待つ要求があるか、判定のタイマーが掛かっている間（§7.2 の `unsettled`）、
@@ -568,7 +568,7 @@ MS-IME と同じく、届いた出来事を 1 つずつ、届いた時点の形�
   どの局面の表にも無い和音（Alt+`` ` `` など）、局面が決まっているとき、直接入力、エンジンに送れないとき（準備中）は、TIP が手元の局面で決める。
 - 登録の形は、TSF に届く形に合わせる。**Alt+`` ` `` は `{VK_KANJI, TF_MOD_IGNORE_ALL_MODIFIER}` で登録する**
   （`{VK_OEM_3, TF_MOD_ALT}` や `{VK_KANJI, TF_MOD_ALT}` には届かない。[windows.md](keybind/windows.md) §3.6）。同じ理由で、§4.1 の IME 用のキーに変わる和音（Alt+CapsLock など）は、変わったあとの仮想キーコードで登録する。
-- PreservedKey には 1 つずつ GUID が要る。決まった GUID の列から、Alt 付きの行に順に当てる。1 スレッドで 40 個まで登録できる（[windows.md](keybind/windows.md) §1.4）。
+- PreservedKey には 1 つずつ GUID が要る。決まった GUID の列から、Alt 付きの行に順に当てる。40 個まで登録する（1 スレッドで 40 個を登録できることは確かめた。[windows.md](keybind/windows.md) §1.4）。
   それより多い行は登録しない（記録には出さない）。
 - 表が変わったら、登録を全部外して登録し直す。アクティブなまま登録し直せて、すぐ効く。
   登録は TIP のスレッドで行う（読み取りスレッドから届いた表は、非同期の返事と同じ道で UI スレッドに渡す）。
@@ -638,7 +638,7 @@ MS-IME では A は次の欄に入る（キーを 1 打ずつその場で処理�
 
 | 向き | 項目 | 中身 |
 |---|---|---|
-| TIP → ブローカー | `{"op":"set_mode","mode":"katakana"}` | 入力モード（`hiragana`・`katakana`）。`mode_hiragana`・`mode_katakana`（§7.5） |
+| TIP → ブローカー | `{"op":"set_mode","mode":"katakana"}` | 入力モード（`hiragana`・`katakana`・`full_alnum`）。`mode_hiragana`・`mode_katakana`・`mode_full_alnum`（§7.5） |
 | TIP → ブローカー | `{"op":"open_admin","tab":"words"}` | 開くタブ。無ければ既定のタブ |
 | エンジン → ブローカー | `ready` に `"keymap":{…}` | 食べる表（§7.1） |
 | エンジン → ブローカー | `{"event":"keymap","keymap":{…}}` | 読み直したあとの表（段 3） |
@@ -701,7 +701,7 @@ TIP: rev が違えば表を入れ替え、常時のキーを登録し直す
 | 部品 | 中身 |
 |---|---|
 | キー設定 | プリセットの一覧と「ユーザー定義」から選ぶ。表を変えると「ユーザー定義」になる（§5.3） |
-| 表 | 行がキー、列が局面（常時・入力なし・入力中・変換中・候補選択中・文節長変更中・予測の候補）。欄に機能の名前を出し、割り当てなしは「–」 |
+| 表 | 行がキー、列が局面（常時・入力なし・入力中・変換中・候補選択中・文節長変更中・予測の候補・文節内入力）。欄に機能の名前を出し、割り当てなしは「–」 |
 | 変更 | 欄をダブルクリックするか［変更］を押すと、その局面で使える機能の一覧が開き、そこから選ぶ |
 | キー追加 | 表に無いキーを、キーと修飾の一覧から選んで足す。§4.2 で割り当てられない和音は一覧に出さない。Alt 付き（Ctrl なし）の和音は、常時の列だけを変えられる |
 | 読み込みの記録 | `keymap.json` に無視した行があれば、理由と一緒に出す（§5.4） |

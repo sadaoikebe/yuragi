@@ -21,7 +21,7 @@
 
 - **キーボードフック・Raw Input を使う IME は無い。** どれも、修飾の状態を呼び出しの中で `GetKeyboardState`／`GetKeyState` で読む。
 - **PreservedKey の繰り返しを見分ける IME は無い。** `OnPreservedKey` が呼ばれるたびに実行する。
-- **離すときに仮想キーコードが変わること（`VK_KANJI` の down と `VK_OEM_3` の up）を扱う IME は無い。** Mozc・azooKey・chewing は up を食べないので問題にならず、
+- **離すときに仮想キーコードが変わること（`VK_KANJI` の down と `VK_OEM_3` の up）を扱う IME は無い。** Mozc・azooKey・chewing は `VK_OEM_3` の up を食べないので問題にならず、
   CorvusSKK・tsf-tutcode・SampleIME は up をそのときの状態で決める。
 - `TF_MOD_ON_KEYUP` を使うのは SampleIME だけ（Shift 単独）。
 
