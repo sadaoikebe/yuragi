@@ -534,7 +534,7 @@ README の 1 行で `setup.ps1` を取得して実行する。管理者ではな
 
 リリースの `uninstall.ps1` は入口（`packaging/uninstall-entry.ps1`）で、HKCU の Tag で入っている版を見つけ、
 その版の本体（`versions\<tag>\app\packaging\uninstall.ps1`）を、引数（`-RemoveData` `-Yes`）をそのまま渡して呼ぶ。
-Tag が無いか、その版の本体が無ければ「インストールされていません」と表示して終わる。Tag が `dev`（開発用の登録）なら、リポジトリの `packaging\uninstall.ps1` を使うよう伝えて止まる。本体がすること:
+Tag が無いか、その版の本体が無ければ「インストールされていません」と表示して終わる（`-RemoveData` なら、残っている `~\.yuragi-ime\` を確かめてから消す）。Tag が `dev`（開発用の登録）なら、リポジトリの `packaging\uninstall.ps1` を使うよう伝えて止まる。本体がすること:
 
 1. 保守中の印。
 2. Run キーを消し、言語一覧から外す。
