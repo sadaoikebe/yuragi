@@ -19,7 +19,7 @@ from tests.support import Keys, type_plain
 
 VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
-VK_CAPITAL = 0x14
+VK_CAPITAL, VK_PAGEUP = 0x14, 0x21
 
 
 class PartialCommitTest(unittest.TestCase):
@@ -226,6 +226,26 @@ class PartialCommitTest(unittest.TestCase):
         selected = k.convert()
         self.assertEqual((selected["phase"], selected["cand_index"], selected["candidates"][0]),
                          ("selecting", 1, "私"))
+
+    def test_previous_candidate_and_macos_previous_page_wrap_from_the_top(self):
+        k = self.typed("かんじ")
+        k.convert()
+        k.convert()  # the window opens on the second row
+        k.press(VK_UP)
+        wrapped = k.press(VK_UP)
+        self.assertEqual((wrapped["has_next_page"], wrapped["cand_index"]),
+                         (False, len(wrapped["candidates"]) - 1))
+        self.assertEqual(wrapped["composition"], wrapped["candidates"][-1])
+
+        k = self.typed("かんじ")
+        k.s.keymap = self.macos_keymap()
+        k.convert()
+        first = k.press(VK_DOWN)
+        self.assertEqual((first["candidate_page"], first["cand_index"]), (0, 0))
+        last = k.press(VK_PAGEUP)
+        self.assertEqual((last["has_next_page"], last["cand_index"]), (False, 0))
+        self.assertGreater(last["candidate_page"], 0)
+        self.assertEqual(last["composition"], last["candidates"][0])
 
     def test_fixed_width_spaces_follow_the_phase(self):
         k = self.typed("わたし")

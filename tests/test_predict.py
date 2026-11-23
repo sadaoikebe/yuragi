@@ -19,7 +19,7 @@ from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 from tests.support import type_plain
 
-VK_TAB, VK_RETURN = 0x09, 0x0D
+VK_TAB, VK_RETURN, VK_DELETE = 0x09, 0x0D, 0x2E
 VK_SPACE, VK_ESCAPE = 0x20, 0x1B
 
 
@@ -95,6 +95,14 @@ class TabGestureTest(Fixture):
             s = self.session(learning=LearningStore(path))
             type_plain(s, "こう")
             self.assertEqual(press(s, VK_TAB)["candidates"][:1], ["公正"])
+            # Ctrl+Delete forgets it: the list opens again, without the learned row first.
+            s = self.session(learning=LearningStore(path))
+            type_plain(s, "こうせ")
+            self.assertEqual(press(s, VK_TAB)["candidates"][0], "公正")
+            forgotten = press(s, VK_DELETE, ["ctrl"])
+            self.assertTrue(forgotten["predicting"])
+            self.assertNotEqual(forgotten["candidates"][0], "公正")
+            self.assertEqual(forgotten["composition"], forgotten["candidates"][0])
 
     def test_no_prediction_keeps_the_original_clauses(self):
         s = self.session()

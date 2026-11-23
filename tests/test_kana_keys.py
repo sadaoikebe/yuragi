@@ -11,7 +11,7 @@ from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
 from tests.support import Keys, ingest_plain, kana_session, type_plain
 
-VK_F7, VK_F10 = 0x76, 0x79
+VK_F6, VK_F7, VK_F10, VK_SEMICOLON = 0x75, 0x76, 0x79, 0xBA
 VK_BACK, VK_LEFT, VK_RIGHT, VK_HOME = 0x08, 0x25, 0x27, 0x24
 
 
@@ -45,6 +45,18 @@ class KanaKeyTest(unittest.TestCase):
         self.assertTrue(s.converted)
         selected = s.segments[s.focus].selected
         self.assertEqual((selected.surface, selected.kind), ("キョウ", "kana"))
+
+    def test_f7_again_steps_to_the_next_reading_the_thumb_keys_allow(self):
+        # く, あ/じ, ん, ば/み: one thumb key leaves each of the two ambiguous.
+        k = Keys(kana_session(self.lex))
+        k.plain("i")
+        k.chords("s")
+        k.tap(VK_SEMICOLON)
+        k.chords("h")
+        k.idle()
+        self.assertEqual([k.tap(VK_F7)["composition"] for _ in range(5)],
+                         ["クジンバ", "クジンミ", "クアンミ", "クアンバ", "クジンバ"])
+        self.assertEqual([k.tap(VK_F6)["composition"] for _ in range(2)], ["くじんば", "くじんみ"])
 
     def test_f10_gives_the_typed_keys_and_cycles_case(self):
         s = self.session()
