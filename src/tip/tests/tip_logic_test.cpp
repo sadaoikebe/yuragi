@@ -319,7 +319,7 @@ static void LeftContextTail() {
     assert(ContextTail(L"", false) == L"");
     auto cut = std::wstring(1, 0xdfb7) + tail;
     assert(ContextTail(cut, true) == tail);
-    assert(!ContextTail(cut, false));
+    assert(ContextTail(cut, false) == tail);  // a lone surrogate before the tail is cut off with it
     assert(!ContextTail(tail + std::wstring(1, 0xd842), true));
     std::wstring astral;
     for (size_t i = 0; i < CONTEXT_CHARS; ++i) astral += {0xd842, 0xdfb7};

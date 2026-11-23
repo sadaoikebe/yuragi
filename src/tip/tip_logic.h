@@ -26,13 +26,14 @@ constexpr uint32_t NOTICE_SHOW_MS = 4000;  // DESIGN「小さな表示」: the n
 constexpr size_t CONTEXT_CHARS = 200;
 constexpr size_t CONTEXT_UNITS = 2 * CONTEXT_CHARS;
 
-// The input uses UTF-16 units even on the platforms that only run these tests.
+// The last CONTEXT_CHARS code points; none when they hold a lone surrogate (what lies
+// before them is not looked at). The input uses UTF-16 units even on the platforms that
+// only run these tests.
 inline std::optional<std::wstring_view> ContextTail(std::wstring_view text, bool clipped) {
     auto low = [](wchar_t c) { return c >= 0xdc00 && c <= 0xdfff; };
     if (clipped && !text.empty() && low(text.front())) text.remove_prefix(1);
-    size_t end = text.size(), count = 0, start = 0;
-    while (end) {
-        if (count++ == CONTEXT_CHARS) start = end;
+    size_t end = text.size();
+    for (size_t count = 0; end && count < CONTEXT_CHARS; ++count) {
         wchar_t c = text[--end];
         if (low(c)) {
             if (!end || text[end - 1] < 0xd800 || text[end - 1] > 0xdbff)
@@ -42,7 +43,7 @@ inline std::optional<std::wstring_view> ContextTail(std::wstring_view text, bool
             return std::nullopt;
         }
     }
-    return text.substr(start);
+    return text.substr(end);
 }
 
 // Win32 virtual keys used here (no windows.h in this header).

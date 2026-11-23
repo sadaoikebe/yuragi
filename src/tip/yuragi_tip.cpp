@@ -1059,6 +1059,7 @@ static bool TaskbarIsLight() {
 // GetSystemMetrics answers at 96 dpi (16 px) while a 150 % taskbar shows 24 px.
 static HICON MakeModeIcon(const wchar_t* glyph, bool faint) {
     UINT dpi = GetDpiForWindow(FindWindowW(L"Shell_TrayWnd", nullptr));
+    if (!dpi) dpi = GetDpiForSystem();  // no taskbar (Explorer restarting)
     int cx = GetSystemMetricsForDpi(SM_CXSMICON, dpi), cy = GetSystemMetricsForDpi(SM_CYSMICON, dpi);
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
@@ -2408,10 +2409,13 @@ private:
         // SendInput uses the keyboard state at injection time; restore any
         // modifiers the user changed while this key was waiting for its reply.
         std::vector<INPUT> input;
-        auto add = [&](UINT vk, bool up, bool extended = false) {
+        // With the scan code: applications that read it (Chromium's KeyboardEvent.code)
+        // see the key that was pressed.
+        auto add = [&](UINT vk, bool up, bool extended = false, UINT scan = 0) {
             INPUT event{};
             event.type = INPUT_KEYBOARD;
             event.ki.wVk = (WORD)vk;
+            event.ki.wScan = (WORD)(scan ? scan : MapVirtualKeyW(vk, MAPVK_VK_TO_VSC));
             event.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) | (extended ? KEYEVENTF_EXTENDEDKEY : 0);
             event.ki.dwExtraInfo = (ULONG_PTR)kReplayMarker;
             input.push_back(event);
@@ -2438,9 +2442,10 @@ private:
             }
         }
         const bool extended = (key.flags & (1L << 24)) != 0;
+        const UINT scan = (UINT)((key.flags >> 16) & 0xFF);
         const bool released = !(GetAsyncKeyState(key.raw) & 0x8000);
-        add(key.raw, false, extended);
-        if (released) add(key.raw, true, extended);
+        add(key.raw, false, extended, scan);
+        if (released) add(key.raw, true, extended, scan);
         for (auto it = restore.rbegin(); it != restore.rend(); ++it)
             add(it->first, it->second, it->first == VK_RCONTROL || it->first == VK_RMENU);
         if (SendInput((UINT)input.size(), input.data(), sizeof(INPUT)) != input.size()) {
@@ -2931,7 +2936,14 @@ BOOL APIENTRY DllMain(HINSTANCE h, DWORD reason, LPVOID) {
     return TRUE;
 }
 
-STDAPI DllCanUnloadNow() { return g_locks ? S_FALSE : S_OK; }
+// A window class outlives the DLL that registered it: one left behind would point at the
+// old WndProc when the DLL is loaded again elsewhere. With no Tip there are no windows.
+STDAPI DllCanUnloadNow() {
+    if (g_locks) return S_FALSE;
+    UnregisterClassW(L"YuragiTip", g_hinst);
+    UnregisterClassW(L"YuragiPopup", g_hinst);
+    return S_OK;
+}
 
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
     if (!IsEqualCLSID(rclsid, CLSID_YuragiTip)) return CLASS_E_CLASSNOTAVAILABLE;
@@ -2945,7 +2957,7 @@ STDAPI DllRegisterServer() {
     HRESULT co = CoInitialize(nullptr);
     HRESULT hr = RegisterCom();
     if (SUCCEEDED(hr)) hr = RegisterProfile(TRUE);
-    if (co == S_OK) CoUninitialize();
+    if (SUCCEEDED(co)) CoUninitialize();  // S_FALSE (already initialized) also counts
     return hr;
 }
 
@@ -2963,6 +2975,6 @@ STDAPI DllUnregisterServer() {
     }
     LONG e = RegDeleteTreeW(HKEY_LOCAL_MACHINE, ClsidKey().c_str());
     if (e != ERROR_SUCCESS && e != ERROR_FILE_NOT_FOUND && SUCCEEDED(hr)) hr = HRESULT_FROM_WIN32(e);
-    if (co == S_OK) CoUninitialize();
+    if (SUCCEEDED(co)) CoUninitialize();  // S_FALSE (already initialized) also counts
     return hr;
 }
