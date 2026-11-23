@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from yuragi.ime import predict as P
+from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import PersonalLexicon, add_word, remove_word
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ConversionRequest, ImeSession
@@ -49,6 +50,9 @@ class TabGestureTest(Fixture):
         reply = press(s, VK_TAB)
         self.assertTrue(reply["predicting"])
         self.assertIn("マイナス", reply["candidates"])
+        s = self.session()
+        type_plain(s, "でしょ")  # only function words continue it: でしょう, でしょうか, ...
+        self.assertFalse(press(s, VK_TAB)["predicting"])
 
     def test_tab_opens_predictions_and_enter_commits(self):
         s = self.session()
@@ -77,6 +81,20 @@ class TabGestureTest(Fixture):
         self.assertEqual([(segment.start, segment.end) for segment in s.segments], [(0, 2), (2, 5)])
         self.assertEqual(s.segments[0].selected.reading, "そら")
         self.assertEqual(press(s, VK_RETURN)["commit"], reply["composition"])
+
+    def test_a_learned_word_comes_back_from_its_first_two_kana(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "learning.jsonl"
+            s = self.session(learning=LearningStore(path))
+            type_plain(s, "こうせい")
+            press(s, VK_SPACE)
+            press(s, VK_SPACE)
+            self.assertEqual(press(s, ord("3"))["composition"], "公正")  # not the first row
+            press(s, VK_RETURN)
+
+            s = self.session(learning=LearningStore(path))
+            type_plain(s, "こう")
+            self.assertEqual(press(s, VK_TAB)["candidates"][:1], ["公正"])
 
     def test_no_prediction_keeps_the_original_clauses(self):
         s = self.session()
