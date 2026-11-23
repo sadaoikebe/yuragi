@@ -26,7 +26,8 @@ This process appends its own rows and updates the index directly. A file that
 changed otherwise (the management window forgot a pair) is read again from the
 start at the next conversion: one stat per conversion tells. Compaction runs
 once at engine start (compact_if_needed). A file that cannot be read or
-written leaves learning off for now, with a line on stderr.
+written leaves learning off for now, with a line on stderr when it starts;
+an unreadable file is tried again once its stat changes, or at the next write.
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ from .bunsetsu import (Bunsetsu, Candidate, ZenzEvidence, from_words, learnable,
 DEFAULT_LEARNING_PATH = Path.home() / ".yuragi-ime" / "learning.jsonl"
 USER_WORD_COST = 6000
 COMPACT_MIN_LINES = 5000  # DESIGN「定数」
+LOCK_WAIT_S = 1.0  # a request waits this long at most, well under the broker's ENGINE_HANG_MS (5 s)
 _UNREAD = object()
 
 
@@ -237,6 +239,7 @@ class LearningStore:
         self.lines = 0  # lines of the file, valid or not
         self.skipped = 0  # lines that were not JSON with the needed fields
         self._seen = None  # the file's (st_dev, st_ino, st_size, st_mtime_ns) when last read
+        self._failed = None  # its stamp when reading it last failed
         # (reading, surface, word) -> the latest such confirmation, oldest first
         self._rows: dict[tuple[str, str, bool], tuple[int, Confirmation]] = {}
         # Pair -> left surface -> latest confirmation in that context.
@@ -280,13 +283,21 @@ class LearningStore:
     def _lock(self):
         # Lock a stable sidecar, since compaction replaces the history inode.
         with self.path.with_name(self.path.name + ".lock").open("a+b") as lock:
-            if os.name == "nt":
-                import msvcrt
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            deadline = time.monotonic() + LOCK_WAIT_S
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        lock.seek(0)
+                        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("learning history lock held elsewhere") from None
+                    time.sleep(0.02)
             yield  # closing the file releases the lock
 
     # -- reading the file ----------------------------------------------------
@@ -324,10 +335,13 @@ class LearningStore:
                 self._apply(event, self.lines)
 
     def sync(self) -> None:
-        """Read a changed file with the same lock used by its writers."""
+        """Read a changed file with the same lock used by its writers.
+
+        A file that could not be read is not tried again until its stat changes."""
+        stamp = _UNREAD
         try:
             stamp = self._stat()
-            if stamp == self._seen:
+            if stamp == self._seen or (self._seen is _UNREAD and stamp == self._failed):
                 return
             if stamp is None:
                 self._clear(None)
@@ -335,10 +349,12 @@ class LearningStore:
                 with self._lock():
                     self._sync_locked()
         except OSError as exc:
+            # A lock held elsewhere is let go of; the same file is tried again.
+            self._failed = None if isinstance(exc, TimeoutError) else stamp
             if self._seen is not _UNREAD:
                 self._clear(_UNREAD)
-            print(f"learning history unreadable ({type(exc).__name__}); not used for now",
-                  file=sys.stderr, flush=True)
+                print(f"learning history unreadable ({type(exc).__name__}); not used for now",
+                      file=sys.stderr, flush=True)
 
     def records(self) -> list[Confirmation]:
         """One surviving confirmation per pair, oldest first."""

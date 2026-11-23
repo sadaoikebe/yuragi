@@ -176,8 +176,9 @@ class LearningTest(unittest.TestCase):
         self.path.rename(aside)
         self.path.mkdir()  # it exists, but cannot be read as a file
         with redirect_stderr(io.StringIO()) as log:
-            self.assertNotEqual(self.convert(s, "こうせい").selected.surface, chosen)
-        self.assertIn("learning history unreadable", log.getvalue())
+            for _ in range(2):  # one line for the whole time, not one per conversion
+                self.assertNotEqual(self.convert(s, "こうせい").selected.surface, chosen)
+        self.assertEqual(log.getvalue().count("learning history unreadable"), 1)
         self.path.rmdir()
         aside.rename(self.path)
         self.assertEqual(self.convert(s, "こうせい").selected.surface, chosen)
