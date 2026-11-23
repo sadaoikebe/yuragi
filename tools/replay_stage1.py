@@ -16,7 +16,7 @@ from yuragi.chord.keys import (
     SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, VK_SPACE,
     classify, literal_character,
 )
-from yuragi.ime.recording import COMMA_KEY, SCHEMA, VK_NEXT_PROMPT
+from yuragi.ime.recording import SCHEMA, VK_NEXT_PROMPT
 from yuragi.lattice.table import load_table
 
 LABELS = {
@@ -63,7 +63,6 @@ def expected_tokens(reading: str, table: dict | None = None) -> list:
             text = faces.get(face)
             if text:
                 reverse.setdefault(text, Plain(key) if face == "plain" else AmbShift(key))
-    reverse["、"] = Plain(COMMA_KEY)
     result = []
     for char in reading:
         if char in reverse:

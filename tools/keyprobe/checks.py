@@ -441,6 +441,9 @@ def main():
     if args[0] != "run":
         sys.exit(__doc__)
     names = list(CHECKS) if args[1:] == ["all"] else args[1:]
+    unknown = [name for name in names if name not in CHECKS]
+    if unknown:
+        sys.exit(f"no such check: {' '.join(unknown)} (python -m tools.keyprobe.checks list)")
     os.makedirs(L.OUT, exist_ok=True)
     try:
         for name in names:
