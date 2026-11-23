@@ -74,10 +74,6 @@ public:
 private:
     struct Client {
         bool hello = false;
-        // The TIP lets keys through by itself while the engine is not ready
-        // (hello "passes"). Without it (a v0.1.2 DLL), see DESIGN「使えない間の打鍵」.
-        bool passes = false;
-        bool direct = false;  // its input mode, as last asked or answered
         bool app_container = false;
     };
     struct InFlight {

@@ -313,8 +313,7 @@ static void Requests() {
            R"({"seq":8,"op":"set_direct","direct":true})");
     const std::string hello = Hello();
     tip_json::Value v;
-    assert(tip_json::Parser(hello).Parse(v) && v.Get("op").text == "hello" &&
-           v.Get("passes").boolean);
+    assert(tip_json::Parser(hello).Parse(v) && v.Get("op").text == "hello");
 }
 
 static void LeftContextTail() {

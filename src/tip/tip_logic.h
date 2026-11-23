@@ -679,8 +679,7 @@ inline PopupLayout MeasurePopup(const PopupMetrics& m, int work_width, int rows,
 
 // Requests (the TIP -> broker messages, DESIGN「通信」).
 inline std::string Hello() {
-    // passes: keys are let through here while the engine is not ready (DESIGN「使えない間の打鍵」).
-    return R"({"op":"hello","proto":1,"passes":true})";
+    return R"({"op":"hello","proto":1})";
 }
 inline std::string ModsJson(Mods m) {
     std::string out = "[";

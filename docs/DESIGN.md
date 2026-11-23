@@ -100,7 +100,7 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 TIP → ブローカー（プロトコル 1）:
 
 ```json
-{"op":"hello","proto":1,"passes":true}
+{"op":"hello","proto":1}
 {"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest/reload_keymap
 {"op":"retry"}                                              ← 利用者が「もう一度試す」を選んだ
 {"op":"open_admin"}                                         ← 設定ウィンドウを開く（最初のタブの単語登録で開く）

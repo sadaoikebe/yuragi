@@ -56,7 +56,7 @@ void Ready(Broker& b) { b.OnEngineLine(R"({"ready":true,"proto":1,"warnings":[]}
 
 void Hello(Broker& b, ClientId c, bool app_container = false) {
     b.OnClientConnected(c, app_container);
-    b.OnClientLine(c, R"({"op":"hello","proto":1,"passes":true})");
+    b.OnClientLine(c, R"({"op":"hello","proto":1})");
 }
 
 bool Contains(const std::vector<std::string>& lines, const std::string& text) {
@@ -110,7 +110,7 @@ void SessionsOpenOnlyAfterHello() {
     Hello(b, 2);
     assert(f.to_engine.size() == 1 && f.to_engine.back() == R"({"op":"open","sid":2})");
     assert(f.Client(2).back() == R"({"proto":1,"state":"ready","warnings":[]})");
-    b.OnClientLine(2, R"({"op":"hello","proto":1,"passes":true})");
+    b.OnClientLine(2, R"({"op":"hello","proto":1})");
     b.OnClientLine(2, R"({"op":"down","vk":74,"t":0,"mods":[]})");
     assert(f.to_engine.size() == 1 && f.Client(2).size() == 1);
     b.OnClientClosed(2);

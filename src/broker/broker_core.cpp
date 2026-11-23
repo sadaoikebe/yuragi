@@ -36,12 +36,6 @@ std::string SeqState(long long seq, const char* state) {
     return "{\"seq\":" + std::to_string(seq) + ",\"state\":\"" + state + "\"}";
 }
 
-// For a TIP without "passes": in the shape of an engine reply, so that it lets the key through.
-std::string SeqPass(long long seq, bool direct) {
-    return "{\"seq\":" + std::to_string(seq) + ",\"pass_through\":true,\"direct\":" +
-           (direct ? "true" : "false") + "}";
-}
-
 bool Flag(const Value& msg, const char* key, bool& out) {
     const Value& v = msg.Get(key);
     if (v.kind != Value::Boolean) return false;
@@ -120,7 +114,6 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     if (op == "hello") {
         if (client.hello) return;
         client.hello = true;
-        Flag(msg, "passes", client.passes);
         std::string reply = std::string("{\"proto\":1,\"state\":\"") + ClientState() +
                             "\",\"warnings\":[";
         for (size_t i = 0; i < warnings_.size(); ++i)
@@ -159,7 +152,6 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
         Log("a request with broker-owned session fields or operations; ignored");
         return;
     }
-    if (op == "set_direct") Flag(msg, "direct", client.direct);
     if (state_ != EngineState::Ready) {
         if (op == "reload_keymap") {
             platform_.WriteClient(id, "{\"seq\":" + std::to_string(seq) +
@@ -167,8 +159,7 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
             return;
         }
         // DESIGN「使えない間の打鍵」: nothing is held; the TIP lets keys through until the engine is ready.
-        platform_.WriteClient(id, client.passes ? SeqState(seq, ClientState())
-                                                : SeqPass(seq, client.direct));
+        platform_.WriteClient(id, SeqState(seq, ClientState()));
         return;
     }
     in_flight_.push_back({id, seq, platform_.Now()});
@@ -221,7 +212,6 @@ void Broker::OnEngineLine(const std::string& line) {
     if (it != in_flight_.end()) in_flight_.erase(it);
     auto client = clients_.find((ClientId)sid);
     if (client == clients_.end()) return;
-    Flag(msg, "direct", client->second.direct);
     platform_.WriteClient((ClientId)sid, line);
 }
 
