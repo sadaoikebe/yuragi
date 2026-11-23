@@ -9,11 +9,11 @@ static Value Parse(const std::string& s) {
     return v;
 }
 int main() {
-    // Endpoint fields are looked up on the object, never inside another string.
-    auto endpoint = Parse(R"({"version":1,"port":12345,"token":"test-only"})");
+    // Fields are looked up on the object, never inside another string.
+    auto state = Parse(R"({"seq":12345,"state":"starting"})");
     long long n = 0;
-    assert(endpoint.Get("port").Int(n) && n == 12345);
-    assert(endpoint.Get("token").text == "test-only");
+    assert(state.Get("seq").Int(n) && n == 12345);
+    assert(state.Get("state").text == "starting");
     auto fake = Parse(R"({"nested":{"ok":true},"msg":"\"ok\":true"})");
     assert(fake.Get("ok").kind == Value::Null);
     assert(fake.Get("nested").Get("ok").boolean);

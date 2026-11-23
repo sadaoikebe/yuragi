@@ -7,7 +7,7 @@
 #include <vector>
 #include <utility>
 
-// Small JSON value/parser shared by endpoint, config and protocol replies.
+// Small JSON value/parser for tip.json and the broker's messages; the broker reads engine.json with it.
 // Strings are UTF-8, including decoded JSON escapes. No substring field lookup.
 namespace tip_json {
 struct Value {

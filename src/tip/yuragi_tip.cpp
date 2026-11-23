@@ -393,9 +393,8 @@ static bool ServedByBroker(HANDLE pipe) {
 class BrokerLink {
 public:
     struct Item {
-        enum Kind { Line, Connected, Lost, Unavailable, Connecting } kind;
+        enum Kind { Line, Connected, Lost, Unreachable, NotAllowed, Connecting } kind;
         std::string line;
-        Link link = Link::Connected;
     };
 
     BrokerLink() = default;
@@ -480,12 +479,12 @@ private:
         for (;;) {
             HANDLE waits[] = {stop_, connect_};
             if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) return;
-            Link why = Link::Unreachable;
+            Item::Kind why = Item::Unreachable;
             HANDLE pipe = Open(why);
             if (pipe == INVALID_HANDLE_VALUE) {
                 if (Stopping()) return;
                 idle_ = true;
-                Push({Item::Unavailable, {}, why});
+                Push({why, {}});
                 continue;
             }
             // The hello goes first; only then may the UI thread write (keys).
@@ -496,19 +495,19 @@ private:
             if (!greeted) {
                 CloseHandle(pipe);
                 idle_ = true;
-                Push({Item::Unavailable, {}, Link::Unreachable});
+                Push({Item::Unreachable, {}});
                 continue;
             }
             {
                 std::lock_guard<std::mutex> lock(pipe_lock_);
                 pipe_ = pipe;
             }
-            Push({Item::Connected, {}, Link::Connected});
+            Push({Item::Connected, {}});
             Read(pipe);
             Close();
             if (Stopping()) return;
             idle_ = true;
-            Push({Item::Lost, {}, Link::Connecting});
+            Push({Item::Lost, {}});
         }
     }
 
@@ -520,7 +519,7 @@ private:
 
     // The pipe; when there is none, maybe start the broker (DESIGN「ブローカーを起動する条件」) and wait for
     // its pipe at most BROKER_WAIT_MS, looking every BROKER_POLL_MS.
-    HANDLE Open(Link& why) {
+    HANDLE Open(Item::Kind& why) {
         bool spawned = false;
         ULONGLONG deadline = 0;
         for (;;) {
@@ -533,34 +532,34 @@ private:
                 if (ServedByBroker(pipe)) return pipe;
                 CloseHandle(pipe);
                 Log(L"pipe refused: its server is not the broker");
-                why = Link::NotAllowed;
+                why = Item::NotAllowed;
                 return INVALID_HANDLE_VALUE;
             }
             DWORD error = GetLastError();
             if (error == ERROR_ACCESS_DENIED) {
-                why = Link::NotAllowed;  // e.g. a sandbox the pipe does not admit (DESIGN「通信」)
+                why = Item::NotAllowed;  // e.g. a sandbox the pipe does not admit (DESIGN「通信」)
                 return INVALID_HANDLE_VALUE;
             }
             if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PIPE_BUSY) {
-                why = Link::Unreachable;
+                why = Item::Unreachable;
                 return INVALID_HANDLE_VALUE;
             }
             if (error == ERROR_FILE_NOT_FOUND && !spawned) {
                 if (!MaySpawn()) {
-                    why = Link::NotAllowed;
+                    why = Item::NotAllowed;
                     return INVALID_HANDLE_VALUE;
                 }
                 if (!SpawnBroker()) {
-                    why = Link::Unreachable;
+                    why = Item::Unreachable;
                     return INVALID_HANDLE_VALUE;
                 }
                 spawned = true;
                 deadline = GetTickCount64() + tip_logic::BROKER_WAIT_MS;
-                Push({Item::Connecting, {}, Link::Connecting});
+                Push({Item::Connecting, {}});
             }
             if (!spawned) deadline = deadline ? deadline : GetTickCount64() + tip_logic::BROKER_WAIT_MS;
             if (GetTickCount64() >= deadline) {
-                why = Link::Unreachable;
+                why = Item::Unreachable;
                 return INVALID_HANDLE_VALUE;
             }
             if (WaitForSingleObject(stop_, tip_logic::BROKER_POLL_MS) == WAIT_OBJECT_0)
@@ -589,7 +588,7 @@ private:
             buffer.append(chunk, n);
             size_t start = 0;
             for (size_t nl; (nl = buffer.find('\n', start)) != std::string::npos; start = nl + 1)
-                Push({Item::Line, buffer.substr(start, nl - start), Link::Connected});
+                Push({Item::Line, buffer.substr(start, nl - start)});
             buffer.erase(0, start);
         }
         CloseHandle(done);
@@ -1162,6 +1161,7 @@ class Tip final : public ITfTextInputProcessorEx,
     };
     struct TestedKey { Stroke key; Decision decision; uint64_t generation; };
     struct SentKey {
+        long long seq;
         Stroke key;
         long long replay_after = 0;
         std::optional<tip_logic::GlobalCommand> run_after;
@@ -1784,8 +1784,9 @@ private:
                 case BrokerLink::Item::Connecting:
                     link_state_ = Link::Connecting;
                     break;
-                case BrokerLink::Item::Unavailable:
-                    link_state_ = item.link;
+                case BrokerLink::Item::Unreachable:
+                case BrokerLink::Item::NotAllowed:
+                    link_state_ = item.kind == BrokerLink::Item::NotAllowed ? Link::NotAllowed : Link::Unreachable;
                     admin_request_ = nullptr;
                     break;
                 case BrokerLink::Item::Lost:
@@ -1841,12 +1842,11 @@ private:
             return false;
         }
         if (!m.engine) {
-            auto sent = sent_keys_.find(m.seq);
-            if (sent != sent_keys_.end()) {
-                auto key = sent->second.key;
+            if (sent_key_ && sent_key_->seq == m.seq) {
+                auto key = sent_key_->key;
                 key.windows_only = true; // the broker explicitly did not process it
                 buffered_.push_front(key);
-                sent_keys_.erase(sent);
+                sent_key_.reset();
             }
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
             if (!buffered_.empty()) PostMessageW(hwnd_, kKeysMessage, 0, 0);
@@ -1863,7 +1863,7 @@ private:
         }
         if (tip_logic::CommitsVisibleText(m)) FinishLocal(false);
         if (m.error) {
-            sent_keys_.clear();
+            sent_key_.reset();
             pending_mode_seq_ = mode_edit_seq_ = 0;
             NoteReply(m);  // the engine started a clean session; the text stays (DESIGN「見えている文字の確定」)
             PostMessageW(hwnd_, kKeysMessage, 0, 0);
@@ -1928,7 +1928,7 @@ private:
             in_flight_.Answer(seq);
             return SendResult::Unavailable;
         }
-        if (capture) sent_keys_.emplace(seq, SentKey{key});
+        if (capture) sent_key_ = SentKey{seq, key};
         if (key.down && capture) down_sent_[key.raw] = key.chord;
         if (sync) {
             while (in_flight_.Waiting(seq) && !Drain(true, seq)) {
@@ -2069,7 +2069,7 @@ private:
         if (invalidate_replies) {
             stale_upto_ = in_flight_.Last();
             in_flight_.Clear();
-            sent_keys_.clear();
+            sent_key_.reset();
             releases_.clear();
             tested_up_.reset();
             pending_mode_seq_ = mode_edit_seq_ = 0;
@@ -2197,7 +2197,7 @@ private:
                key.message_time == event->message_time;
     }
     bool KeysWaiting() const {
-        return !sent_keys_.empty() || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_ ||
+        return sent_key_ || pending_mode_seq_ || mode_edit_seq_ || replay_ || retry_replay_ ||
                menu_generation_;
     }
     tip_logic::GlobalCommand GlobalFor(unsigned code, bool closed = false) const {
@@ -2259,13 +2259,12 @@ private:
     }
     void KeyResult(long long seq, bool eat, std::optional<tip_logic::GlobalCommand> global,
                    long long reply_seq) {
-        auto key = sent_keys_.find(seq);
-        if (key == sent_keys_.end()) return;
+        if (!sent_key_ || sent_key_->seq != seq) return;
         if (eat && !global) {
-            sent_keys_.erase(key);
+            sent_key_.reset();
         } else {
-            key->second.run_after = global;
-            key->second.replay_after = reply_seq;
+            sent_key_->run_after = global;
+            sent_key_->replay_after = reply_seq;
         }
     }
     void FlushReleases() {
@@ -2288,11 +2287,10 @@ private:
             if (scope_ctx_ && (!state_ || state_->applied_seq < mode_edit_seq_)) return;
             mode_edit_seq_ = 0;
         }
-        if (!sent_keys_.empty()) {
-            auto sent = sent_keys_.begin();
-            auto [key, after, global] = sent->second;
+        if (sent_key_) {
+            auto [seq, key, after, global] = *sent_key_;
             if (!after || !state_ || state_->applied_seq < after) return;
-            sent_keys_.erase(sent);
+            sent_key_.reset();
             if ((!global || !RunGlobal(*global)) && !ReplayHeld(key)) return;
             if (replay_ || retry_replay_ || pending_mode_seq_ || menu_generation_) return;
         }
@@ -2623,7 +2621,9 @@ private:
     std::optional<TestedKey> tested_;
     std::optional<Stroke> tested_up_, replay_, retry_replay_;
     std::array<std::optional<tip_logic::Chord>, 256> down_sent_{};
-    std::map<long long, SentKey> sent_keys_;
+    // The one key sent to the engine whose answer is awaited: KeysWaiting() holds the next
+    // key back until it is resolved.
+    std::optional<SentKey> sent_key_;
     std::deque<Stroke> buffered_, releases_;
     tip_logic::Carry carry_;
     std::vector<Registration> preserved_;
