@@ -401,6 +401,45 @@ class DeadlineTest(unittest.TestCase):
                          run_reference(self.session, keys.events, PickyModel()))
         self.assertEqual(pipe.handle(TERMINAL)["commit"], "")
 
+    def test_the_key_that_starts_the_conversion_runs_when_it_finishes(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        keys = Typist().kana("きしゃ").key("down", VK_SPACE, 150)
+        for event in keys.events:
+            pipe.handle(event)
+        # Enter while Space is held: Space converts first, and Enter waits for the LM.
+        enter = pipe.handle({"op": "down", "vk": VK_RETURN, "t": keys.t + 10, "seq": 7})
+        self.assertEqual((enter["pending"], enter["eat_pending"]), (True, True))
+        worker.complete(pipe.job)
+        reply = pipe.handle({"op": "timeout", "t": keys.t + 20, "seq": 8})
+        self.assertEqual((reply["pending"], reply["phase"], reply["composition"]),
+                         (False, "empty", ""))
+        self.assertTrue(reply["commit"])
+        self.assertEqual(reply["resolved_keys"], [{"seq": 7, "eat": True}])
+
+    def test_the_current_keys_global_passes_through_the_pipeline(self):
+        pipe, _, _ = self.pipeline(prefetch="off")
+        reply = pipe.handle({"op": "down", "vk": 0x14, "mods": ["shift"], "t": 0})
+        self.assertEqual((reply["eat"], reply["global"]), (False, "ime_toggle"))
+
+    def test_while_the_lm_loads_the_conversion_does_not_wait(self):
+        pipe, worker, _ = self.pipeline(prefetch="off")
+        worker.ready = False
+        for event in Typist().kana("きしゃ").space().events:
+            reply = pipe.handle(event)
+        self.assertEqual((reply["pending"], reply["converted"]), (False, True))
+
+    def test_without_a_deadline_the_machines_calibration_sets_it(self):
+        pipe, worker, clock = self.pipeline(prefetch="off", deadline_ms=None)
+        worker.template.calibration_ms = 100  # a slow PC: 10 x 100 ms
+        for event in Typist().kana("きしゃ").space().events:
+            reply = pipe.handle(event)
+        job = pipe.job
+        clock.now = job.wanted_at + 0.9
+        worker.complete(job)
+        with redirect_stderr(io.StringIO()) as log:
+            reply = pipe.handle(TERMINAL)
+        self.assertEqual((reply["pending"], log.getvalue()), (False, ""))
+
     def test_disconnect_drops_pending_enter_before_and_after_completion(self):
         for completed in (False, True):
             with self.subTest(completed=completed):
