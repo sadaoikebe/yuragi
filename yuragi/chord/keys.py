@@ -185,13 +185,11 @@ def alnum_character(vk: int, shift: bool) -> str:
 
 
 def classify(vk: int) -> tuple[str, str | None]:
-    """Return (kind, key_id). kind is M, O, MOD, EDIT, OTHER."""
+    """Return (kind, key_id): M (a character key), O (Space), MOD (a modifier) or OTHER."""
     if vk == VK_SPACE:
         return "O", "space"
     if vk in VK_TO_M:
         return "M", VK_TO_M[vk]
     if vk in MODIFIER_VKS:
         return "MOD", None
-    if vk in (VK_BACK, VK_RETURN, VK_ESCAPE):
-        return "EDIT", None
     return "OTHER", None

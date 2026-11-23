@@ -250,10 +250,6 @@ def apply_numeral_context(lex: MozcLex) -> None:
     Use the original cost when adjacent words indicate a number or date.
     Assign private IDs only to the connection sides that need the distinction.
     """
-    # Raw caches written before this field was added have no value for it.
-    if getattr(lex, "numeral_pos", ()):
-        return
-
     left: list[tuple[Entry, NumeralPos]] = []
     right: list[tuple[Entry, NumeralPos]] = []
     for bucket in lex.by_reading.values():

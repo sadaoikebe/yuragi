@@ -60,9 +60,7 @@ class _St:
     side: str | None = None  # direction of the press open here (alternation.py)
 
 
-def spans_from(tokens: list[dict], i: int, lex: MozcLex, learning=None,
-               plan: Plan | None = None) -> list[Word]:
-    plan = plan or Plan(tokens)
+def spans_from(tokens: list[dict], i: int, lex: MozcLex, learning, plan: Plan) -> list[Word]:
     out: list[Word] = []
     # A word may only traverse the reading side of a token.
     for end, acc, sides in plan.walk(tokens, i, lex.prefixes.__contains__, MAX_WORD_MORA):
@@ -309,7 +307,7 @@ def nbest_tokens(
         if not forward[i]:
             continue
         present = list(dict.fromkeys(side for _, side in forward[i]))
-        for w in spans_from(tokens, i, lex, plan=plan):
+        for w in spans_from(tokens, i, lex, None, plan):
             if w.unknown or w.entry.cost >= UNK_COST:
                 continue  # Apply the existing output policy before searching.
             lid = BOUNDARY_RID if w.literal else w.entry.lid
