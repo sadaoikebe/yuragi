@@ -187,9 +187,14 @@ function Get-Verified([string]$url, [string]$dest) {
     return $expected
 }
 
-# 共有物は「作りかけの名前で作って、完成したら改名」。完成したものは取り直さない。
-function New-Shared([string]$final, [scriptblock]$build) {
-    if (Test-Path -LiteralPath $final) { return }
+# 共有物は「作りかけの名前で作って、完成したら改名」。完成したものも $check で中身を確かめ、
+# だめなら作り直す (壊れた共有物も、インストールの 1 行のやり直しで直る)。
+function New-Shared([string]$final, [scriptblock]$check, [scriptblock]$build) {
+    if (Test-Path -LiteralPath $final) {
+        if (& $check $final) { return }
+        Say "  $final が壊れているため、作り直します"
+        Remove-Item -LiteralPath $final -Recurse -Force
+    }
     $partial = "$final.partial"
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Recurse -Force }
     New-Item -ItemType Directory -Force $partial | Out-Null
@@ -245,7 +250,15 @@ $reqHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash.Subs
 $torchId = if ($TorchVariant -eq "cpu") { "torch$TorchVersion" } else { "torch$TorchVersion-$TorchVariant" }
 $runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"
 $Runtime = Join-Path $Shared "runtime\$runtimeId"
+# ランタイムが使えるか: torch・依存・tkinter が読み込めるか (作った直後と、在るものを使うとき)。
+$ImportCheck = "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
 New-Shared $Runtime {
+    param($dir)
+    $py = Join-Path $dir "python.exe"
+    if (-not (Test-Path -LiteralPath $py)) { return $false }
+    & $py -c $ImportCheck | Out-Host
+    return ($LASTEXITCODE -eq 0)
+} {
     param($dir)
     Say "== Python ランタイムの作成 ($runtimeId)"
     $embedZip = Join-Path $Download "python-embed.zip"
@@ -274,7 +287,7 @@ New-Shared $Runtime {
         & $py -m pip install --isolated --no-cache-dir --no-warn-script-location -r $requirements
     }
     Invoke-Checked "インポートの確認" {
-        & $py -c "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
+        & $py -c $ImportCheck
     }
     if ($TorchVariant -ne "cpu") {
         # 情報だけ。モデルを暖機できるデバイスはエンジンが判定する。
@@ -293,6 +306,10 @@ if ($LASTEXITCODE -ne 0) { Fail "辞書マニフェストを読めませんで�
 $script:Dict = Join-Path $Shared "dict\$dictId"
 New-Shared $script:Dict {
     param($dir)
+    Invoke-App $script:Python $StageApp @("yuragi.lattice.dict_manifest", "verify", "--dict-dir", $dir) | Out-Host
+    return ($LASTEXITCODE -eq 0)
+} {
+    param($dir)
     Invoke-Checked "Mozc 辞書のダウンロード" {
         Invoke-App $script:Python $StageApp @("tools.eval.fetch_mozc_dict", "--out", $dir)
     }
@@ -309,11 +326,15 @@ function Get-Model([string]$modelName) {
     if (-not $line) { Fail "packaging\fetch_model.py に MODEL_$modelName がありません。" }
     $repo = $line.Matches[0].Groups[1].Value
     $dir = Join-Path $Shared "model\$($line.Matches[0].Groups[2].Value)"
+    $fetchModel = Join-Path $StageApp "packaging\fetch_model.py"
+    # 在るものはファイルの大きさを、取得したものは SHA-256 まで fetch_model.py の固定値と照合する。
     New-Shared $dir {
+        param($existing)
+        & $script:Python $fetchModel --check $modelName $existing | Out-Host
+        return ($LASTEXITCODE -eq 0)
+    } {
         param($partial)
-        Invoke-Checked "言語モデルのダウンロード ($repo)" {
-            & $script:Python (Join-Path $StageApp "packaging\fetch_model.py") $modelName $partial
-        }
+        Invoke-Checked "言語モデルのダウンロード ($repo)" { & $script:Python $fetchModel $modelName $partial }
     } | Out-Host   # the download's output must not become this function's value
     return $dir
 }
@@ -332,7 +353,8 @@ New-Item -ItemType Directory -Force $script:Cache | Out-Null
 $selftestData = Join-Path $Stage "selftest-data"
 New-Item -ItemType Directory -Force $selftestData | Out-Null
 $stageEngine = Join-Path $Stage "engine.json"
-Write-EngineJson $stageEngine $StageApp @("--data-dir", $selftestData)
+# --require-lm: LM を読み込んで暖機できなければ失敗にする (LM なしのまま「完了」にしない)。
+Write-EngineJson $stageEngine $StageApp @("--data-dir", $selftestData, "--require-lm")
 Say ""
 Say "== 動作テスト (初回は辞書の準備に数分かかります)"
 $selftestOut = Join-Path $Stage "selftest.txt"
