@@ -54,11 +54,19 @@ $Boot = "import os,sys,runpy; sys.path.insert(0, os.getcwd()); m = sys.argv.pop(
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
 function Say([string]$msg) { Write-Host $msg }
+# 段 6 で Tag を新しい版に書き換えたら、止まったときの案内が変わる (DESIGN の段の表)。
+$script:Switched = $false
 function Fail([string]$msg) {
     Write-Host "エラー: $msg" -ForegroundColor Red
-    Write-Host "インストール済みの版はそのまま使えます。再実行すると続きから進みます。"
+    if ($script:Switched) {
+        Write-Host "新しい版への切り替えは済んでいます (次の打鍵かサインインで起動します)。再実行すると最後まで進みます。"
+    } else {
+        Write-Host "インストール済みの版はそのまま使えます。再実行すると続きから進みます。"
+    }
     exit 1
 }
+# Fail を通らない失敗 (予期しない例外) も同じ形で表示して止める。
+trap { Fail $_.Exception.Message }
 function Ask([string]$question) {
     if ($Yes) { Say "$question [Y/n] Y (-Yes)"; return $true }
     $ans = Read-Host "$question [Y/n]"
@@ -443,6 +451,7 @@ $leftOld = @($result.left)
 Say ""
 Say "== 新しい版への切り替え"
 Stop-Broker
+$script:Switched = $true
 New-Item -Force $ProductKey | Out-Null
 Set-ItemProperty -LiteralPath $ProductKey -Name "Tag" -Value $Tag
 # Run は他のアプリと共有するため、キーが無いときだけ作る。
