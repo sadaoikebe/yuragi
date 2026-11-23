@@ -398,12 +398,14 @@ class Engine:
                 log(f"unreadable message from the broker ({type(exc).__name__}); ignored")
                 continue
             op = msg.get("op")
-            if op == "open":
-                self.connections[msg.get("sid")] = Connection(self)
-            elif op == "close":
-                connection = self.connections.pop(msg.get("sid"), None)
-                if connection is not None:
-                    connection.close()
+            if op in ("open", "close"):
+                with self.lock:  # watch_device reads the connections under it
+                    if op == "open":
+                        self.connections[msg.get("sid")] = Connection(self)
+                    else:
+                        connection = self.connections.pop(msg.get("sid"), None)
+                        if connection is not None:
+                            connection.close()
             else:
                 with self.lock:
                     self.last_request = time.monotonic()
