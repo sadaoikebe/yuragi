@@ -105,7 +105,7 @@ static void EatingKeys() {
     assert(table.global.at(kanji.Code()) == GlobalCommand::Toggle);
     assert(NormalizeKey(0xF3, none).Code() == NormalizeKey(0xF4, none).Code());
     assert(take(0xF3, none, Phase::Composing) == Take::Pass);
-    assert(take(0xC0, none, Phase::Composing) == Take::Send);  // repeats after Alt up
+    assert(take(0xC0, none, Phase::Composing) == Take::Send);
     auto caps = NormalizeKey(0xF0, none);
     auto ctrl_caps = NormalizeKey(0x14, ctrl);
     assert(UseGlobal(caps.Code(), {Phase::Empty, true}, table) == GlobalUse::Ask);
