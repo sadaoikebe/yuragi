@@ -20,6 +20,7 @@ struct Fake : Platform {
     std::vector<std::string> to_engine;
     std::vector<std::pair<ClientId, std::string>> to_client;
     std::vector<Stop> stops;
+    std::vector<bool> admin;  // OpenAdmin(words)
     std::vector<std::string> log;
 
     int64_t Now() override { return now; }
@@ -33,7 +34,7 @@ struct Fake : Platform {
     void WriteClient(ClientId c, const std::string& line) override { to_client.push_back({c, line}); }
     void NotifyStopped(Stop reason) override { stops.push_back(reason); }
     void ClearStopped() override { ++cleared; }
-    void OpenAdmin(bool) override {}
+    void OpenAdmin(bool words) override { admin.push_back(words); }
     void Log(const std::string& line) override { log.push_back(line); }
     void Quit() override { ++quits; }
 
@@ -83,6 +84,9 @@ void KeysPassWhileStartingThenGoToTheEngine() {
     assert(f.to_engine.back() ==
            R"({"sid":1,"seq":3,"op":"down","vk":74,"t":0,"mods":[],"left_context":"document","after_commit_seq":null})");
     b.OnEngineLine(R"({"sid":1,"seq":3,"composition":"x"})");
+    const size_t sent = f.to_engine.size();
+    b.OnClientLine(1, R"({"seq":4,"op":"down","vk":74,"t":0,"mods":[)");  // cut short
+    assert(f.to_engine.size() == sent);
     assert(f.Client(1).back() == R"({"sid":1,"seq":3,"composition":"x"})");
     Advance(b, f, ENGINE_HANG_MS);
     assert(f.kills == 0);
@@ -111,6 +115,17 @@ void SessionsOpenOnlyAfterHello() {
     assert(f.to_engine.size() == 1 && f.Client(2).size() == 1);
     b.OnClientClosed(2);
     assert(f.to_engine.size() == 2 && f.to_engine.back() == R"({"op":"close","sid":2})");
+}
+
+// DESIGN「メニュー」: the TIP's settings and word-registration commands.
+void ManagementWindowOpensOnTheAskedTab() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    Hello(b, 1);
+    b.OnClientLine(1, R"({"op":"open_admin"})");
+    b.OnClientLine(1, R"({"op":"open_admin","tab":"words"})");
+    assert((f.admin == std::vector<bool>{false, true}));
 }
 
 void ReplyOnlyAnswersTheMatchingSession() {
@@ -165,6 +180,19 @@ void OldTipIsToldToLetKeysThrough() {
     b.OnClientLine(1, R"({"seq":2,"op":"set_direct","direct":true})");
     assert(f.Client(1).back() == R"({"seq":2,"pass_through":true,"direct":true})");
     assert(f.to_engine.empty());
+    // Asked while ready: the engine ends before it answers.
+    Ready(b);
+    b.OnClientLine(1, R"({"seq":3,"op":"set_direct","direct":false})");
+    b.OnEngineExit(1);
+    b.OnClientLine(1, R"({"seq":4,"op":"down","vk":74,"t":0,"mods":[]})");
+    assert(f.Client(1).back() == R"({"seq":4,"pass_through":true,"direct":false})");
+    // Answered by the engine (its own key turned direct input on).
+    Ready(b);
+    b.OnClientLine(1, R"({"seq":5,"op":"down","vk":243,"t":0,"mods":[]})");
+    b.OnEngineLine(R"({"sid":1,"seq":5,"direct":true})");
+    b.OnEngineExit(1);
+    b.OnClientLine(1, R"({"seq":6,"op":"down","vk":74,"t":0,"mods":[]})");
+    assert(f.Client(1).back() == R"({"seq":6,"pass_through":true,"direct":true})");
 }
 
 // DESIGN「見張り」: an exit restarts at once; the lost key and composition are told.
@@ -337,6 +365,14 @@ void RetryWhileRunningRestartsWithoutCounting() {
     }
     Hello(b, 3);  // the new engine's warnings only
     assert(f.Client(3).back() == R"({"proto":1,"state":"ready","warnings":[]})");
+    b.OnClientLine(1, R"({"op":"retry"})");
+    b.OnEngineExit(9);
+    b.OnEngineLine(R"({"ready":true,"proto":1,"warnings":["lm"]})");
+    Hello(b, 4);
+    assert(f.Client(4).back() == R"({"proto":1,"state":"ready","warnings":["lm"]})");
+    b.OnEngineLine(R"({"event":"warning","warning":"lm","active":false})");
+    Hello(b, 5);
+    assert(f.Client(5).back() == R"({"proto":1,"state":"ready","warnings":[]})");
     for (int attempt = 1; attempt < ENGINE_MAX_EXITS; ++attempt) {
         b.OnEngineExit(21);
         assert(f.stops.empty() && b.State() == EngineState::Starting);
@@ -350,6 +386,7 @@ void RetryWhileRunningRestartsWithoutCounting() {
 int main() {
     KeysPassWhileStartingThenGoToTheEngine();
     SessionsOpenOnlyAfterHello();
+    ManagementWindowOpensOnTheAskedTab();
     ReplyOnlyAnswersTheMatchingSession();
     AnAppPackageCannotQuit();
     OldTipIsToldToLetKeysThrough();
