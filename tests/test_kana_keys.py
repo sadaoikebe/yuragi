@@ -12,6 +12,7 @@ from tests.real_dictionary import real_lex
 from tests.support import Keys, kana_session, type_plain
 
 VK_F7, VK_F10 = 0x76, 0x79
+VK_BACK, VK_LEFT, VK_RIGHT = 0x08, 0x25, 0x27
 
 
 def type_keys(s, keys):
@@ -77,6 +78,31 @@ class JisKeyTest(unittest.TestCase):
         for reply in changed:
             self.assertEqual((reply["phase"], reply["commit"]), ("composing", ""))
         self.assertEqual(k.tap(VK_SPACE)["composition"], "とうき")
+
+    def test_converted_nonconvert_restyles_the_focused_clause_and_a_literal_keeps_its_rows(self):
+        k = Keys(kana_session(real_lex()))
+        k.letters("jak")  # とうき
+        k.tap(ord("1"))
+        k.tap(ord("2"))
+        k.tap(VK_SPACE)
+        self.assertEqual([k.tap(VK_NONCONVERT)["composition"] for _ in range(4)],
+                         ["とうき１２", "トウキ１２", "ﾄｳｷ１２", "とうき１２"])
+        k.tap(VK_RIGHT)
+        self.assertEqual(k.tap(VK_NONCONVERT, ["shift"])["composition"], "とうき12")
+        opened = k.tap(VK_CONVERT, ["shift"])
+        self.assertEqual((opened["candidates"], opened["cand_index"]),
+                         (["１２", "12", "一二", "十二"], 1))
+
+        # A clause that Backspace left as typed text, revisited: its own rows.
+        s = kana_session(real_lex())
+        type_plain(s, "きょうはがっこうにいく")
+        k = Keys(s)
+        k.tap(VK_SPACE)
+        self.assertEqual(k.tap(VK_BACK)["composition"], "今日は学校に行")
+        k.tap(VK_LEFT, ["ctrl"])
+        k.tap(VK_LEFT)
+        k.tap(VK_RIGHT)
+        self.assertEqual(k.tap(VK_CONVERT, ["shift"])["candidates"], ["行"])
 
     def test_width_changes_leave_the_input_uncommitted_and_keep_it_when_typing(self):
         k = Keys(kana_session())

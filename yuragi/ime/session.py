@@ -923,8 +923,10 @@ class ImeSession:
         segment.fixed, segment.raw = True, False
         segment.index = -1
         selected = segment.selected
+        # A literal keeps its kind: a symbol or a run of digits has its own rows.
+        kind = selected.kind if segment.literal else "alnum" if alnum else "kana"
         self._set_selection(self.focus, Candidate(surface, selected.reading, selected.score,
-                                                  selected.lid, selected.rid, "alnum" if alnum else "kana"))
+                                                  selected.lid, selected.rid, kind))
 
     def _set_input_script(self, script: str, *, move_to_end: bool = True) -> None:
         self._input_script = script
@@ -1284,6 +1286,9 @@ class ImeSession:
         self._clear_cands()
         if self.focus < 0:
             return
+        segment = self.segments[self.focus]
+        if segment.raw and segment.literal:
+            self._convert_edited_segment()  # as _cycle: its parts have their own rows
         self._prepare_cands(self.focus)
         self._show_page()
 
