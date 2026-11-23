@@ -11,7 +11,7 @@
 
     ["empty", "Space", "insert_space"],
     ["empty", "Shift+Space", "insert_alt_space"],
-    ["empty", "Ctrl+Delete", "undo_commit"],
+    ["empty", "Ctrl+Backspace", "undo_commit"],
     ["empty", "Ctrl+Shift+R", "reconvert"],
     ["direct", "Ctrl+Shift+R", "reconvert"],
 
