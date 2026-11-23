@@ -5,7 +5,9 @@
 Per run: set the state up in an empty document, press the key, and record
   passed   the key downs that reached the app (the IME did not eat them)
   shown    the text right after the key (composition included)
-  kept     the text after Esc x3 (Esc cancels a composition, so this is what was committed)
+  kept     the text after Esc x3. Esc cancels a composition, so this is what was committed, except in
+           "resized" (⑤): there Esc x3 goes back to the reading and leaves it, so kept is that
+           composition (わたしはなまえです) even for a key that committed nothing
 Writes out/msime_tsf_table.jsonl.
 """
 import json

@@ -21,7 +21,7 @@ TSF が TIP をどう呼ぶか（[docs/keybind/windows.md](../../docs/keybind/wi
 
 | スクリプト | 中身 |
 |---|---|
-| `msime_tsf_table.py [状態 ...]` | 状態 × キーの表（TSF のアプリ）。`target_tsf.py` の窓に送り、アプリに届いた down、キーの直後の文字、Esc を 3 回押したあとに残る文字を `out/msime_tsf_table.jsonl` に書く。全部で 70 分ほど |
+| `msime_tsf_table.py [状態 ...]` | 状態 × キーの表（TSF のアプリ）。`target_tsf.py` の窓に送り、アプリに届いた down、キーの直後の文字、Esc を 3 回押したあとに残る文字（確定した文字。ただし文節長変更（`resized`）では、Esc 3 回で読みに戻った入力中の文字が残る）を `out/msime_tsf_table.jsonl` に書く。全部で 70 分ほど |
 | `msime_tsf_seq.py <名前> "<キー>" ...` | キーの列を `target_tsf.py` の窓に送り、名前の付いたキーごとに、届いた down、文字、IME の状態を出し、画面を `out/shots/` に撮る（窓全体と、1 行目を 4 倍にしたもの）。候補ウィンドウと下線はこれで見る |
 | `msime_table.py [状態 ...]` | 同じ表を IMM のアプリで採る。`out/msime_table.jsonl` |
 | `msime_hold.py` | 押し続けと、修飾とキーを離す 4 つの順序（IMM の窓）。`out/msime_hold.txt` |
