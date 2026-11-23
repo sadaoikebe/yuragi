@@ -1280,13 +1280,20 @@ class ImeSession:
 
     def _move_segment(self, delta: int) -> None:
         # Every segment is a stop: a symbol or a run of digits has its own rows.
+        # At the end there is nowhere to go: the candidate window stays open.
         if self.focus >= 0:
             focus = max(0, min(self.focus + delta, len(self.segments) - 1))
             if focus != self.focus:
                 self.editing = False
                 self._cursor = None
                 self.focus = focus
-            self._clear_cands()
+                self._clear_cands()
+
+    def _move_segment_or_pass(self, delta: int) -> str | None:
+        if 0 <= self.focus + delta < len(self.segments):
+            self._move_segment(delta)
+            return None
+        return self._commit_and_pass_key()
 
     def _accept_candidate(self) -> None:
         self.segments[self.focus].fixed = True

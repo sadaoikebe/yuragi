@@ -115,7 +115,7 @@
 | `key` | キーの行き先。`eat`（食べる）／`pass`（アプリに通す）／`commit_pass`（確定してから通す） |
 | `where` | `engine`（エンジンが実行）／`tip`（TIP が自分で実行。オン/オフなど） |
 | `label` | 編集画面に出す日本語の名前 |
-| `passes_at_edge` | 入力全体の端で確定して通すことがある（`*_or_pass`・`delete_after`）。`editing` の `Space` には割り当てられない（§4.2） |
+| `passes_at_edge` | 入力全体の端で確定して通すことがある（`*_or_pass`・`delete_after`）。`converting`・`editing` の `Space` には割り当てられない（§4.2） |
 | `starts_input` | 入力が無いときに文書へ文字を入れる（空白の 4 つ）。打鍵と同じく入力開始の down として、載せた `left_context`・`after_commit_seq` で左文脈を決め直す |
 
 コマンドの一覧。「作った」が × のものは、プリセットの行に書いてもキー表を作るときに無視する（§5.4）。
@@ -164,7 +164,8 @@
 | `select_candidate_1` … `select_candidate_9` | selecting 以降 | ○ | 番号の候補を選ぶ |
 | `pick_candidate_1` … `pick_candidate_9` | selecting | ○ | 番号の候補を選んで窓を閉じる |
 | `candidate_first` / `candidate_last` | selecting 以降 | ○ | 先頭／最後の候補を選ぶ |
-| `segment_left` / `segment_right` | converting 以降 | ○ | 前／次の文節へ |
+| `segment_left` / `segment_right` | converting 以降 | ○ | 前／次の文節へ。端の文節では何もしない（候補窓も開いたまま） |
+| `segment_right_or_pass` | converting | ○ | 次の文節へ。最後の文節にいれば確定して通す（MS-IME の変換中の →。ms-ime.md §1.5 は文節が 1 つのときの記録で、複数文節の最後の文節は `editing` の `cursor_right_or_pass` に合わせた） |
 | `segment_first` / `segment_last` | converting 以降 | ○ | 先頭／末尾の文節へ |
 | `segment_shrink` / `segment_expand` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動くと `resizing` になる（§3.1） |
 | `segment_shrink_and_convert` / `segment_expand_and_convert` | converting 以降 | ○ | 文節を 1 打縮める／伸ばす。境界が動いた文節をその場で変換する |
@@ -241,7 +242,7 @@ Mozc のコマンド名との対応は、プリセットを作るときに `tool
   割り当てが無ければ、確定して次の入力を始める。
 - **`Space`** は親指キーで、同時打鍵の判定を通る。キー表の `Space` は、判定の結果が**単独打鍵**（`ThumbTap`）になったときに引く。
   文字キーと同時に押した Space は親指シフトで、キー表を見ない。単独と判定した時点では元の打鍵をアプリに返せないため、
-  `Space` にはアプリに通すコマンドと TIP が実行するコマンドを割り当てられない。`editing` では、端で確定して通すことがあるコマンド（`passes_at_edge`）も割り当てられない。「何もしない」は割り当てられる。
+  `Space` にはアプリに通すコマンドと TIP が実行するコマンドを割り当てられない。`converting`・`editing` では、端で確定して通すことがあるコマンド（`passes_at_edge`）も割り当てられない。「何もしない」は割り当てられる。
   先行の親指シフト実装（ibus-anthy、fcitx5-anthy、やまぶきR）と同じ扱いなので、他の IME のプリセットの `Space` の行はそのまま使える。
 - **修飾付きの Space**（Shift+Space、Ctrl+Space など）は親指キーにしない。押した時点で、ふつうの機能キーとして表を引く。
 - **`global` の行は、局面の行が無いときに効く**（親をたどった最後）。Shift+CapsLock のように、`global` で切り替え、`composing` では英数の続き、と局面で意味を変えられる。
@@ -411,7 +412,7 @@ class Command:
     where: str = "engine"       # engine / tip
     run: Callable[[ImeSession], str | None] | None = None   # 確定した文字を返す。tip のコマンドは None
     keeps_resizing: bool = False  # 実行しても文節長変更を終えない（§6.3）
-    passes_at_edge: bool = False  # 入力全体の端で確定して通すことがある。editing の Space には割り当てられない
+    passes_at_edge: bool = False  # 入力全体の端で確定して通すことがある。converting・editing の Space には割り当てられない
     starts_input: bool = False    # 入力なしで文書に文字を入れる。打鍵と同じく左文脈を読み直す
 
 COMMANDS = {c.id: c for c in (

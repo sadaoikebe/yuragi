@@ -58,6 +58,21 @@ class PartialCommitTest(unittest.TestCase):
         settings.save(directory)
         return load_keymap(directory).compile()
 
+    def test_right_at_the_last_segment(self):
+        # MS-IME (ms-ime.md §1.5): with the window open → is eaten and the window
+        # stays; converted with the window closed, → commits and goes to the app.
+        k = self.typed("きき")
+        k.convert()
+        opened = k.convert()
+        stayed = k.press(VK_RIGHT)
+        self.assertEqual((stayed["phase"], stayed["eat"], stayed["candidates"]),
+                         ("selecting", True, opened["candidates"]))
+        closed = k.press(VK_ESC)
+        self.assertEqual(closed["phase"], "converting")
+        passed = k.press(VK_RIGHT)
+        self.assertEqual((passed["phase"], passed["eat"], passed["commit"]),
+                         ("empty", False, closed["composition"]))
+
     def test_macos_candidate_enter_only_advances_to_the_next_segment(self):
         k = self.typed("わたしはがっこうにいく")
         k.s.keymap = self.macos_keymap()

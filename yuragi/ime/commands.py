@@ -133,6 +133,8 @@ COMMANDS = MappingProxyType({c.id: c for c in (
               run=lambda s, row=n - 1: s._select_row(row, close=True)) for n in range(1, 10)),
     Command("segment_left", "前の文節へ", CONVERTED, run=lambda s: s._move_segment(-1)),
     Command("segment_right", "次の文節へ", CONVERTED, run=lambda s: s._move_segment(1)),
+    Command("segment_right_or_pass", "次の文節へ（最後の文節で確定して通す）", frozenset({"converting"}),
+            run=lambda s: s._move_segment_or_pass(1), passes_at_edge=True),
     Command("segment_first", "先頭の文節へ", CONVERTED,
             run=lambda s: s._move_segment(-len(s.segments))),
     Command("segment_last", "末尾の文節へ", CONVERTED,

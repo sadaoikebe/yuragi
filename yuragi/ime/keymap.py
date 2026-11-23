@@ -49,7 +49,7 @@ def command_allowed(phase: str, chord: Chord, command: Command) -> bool:
     # stroke or ask the TIP to act require a regular key request.
     return chord != SPACE or (
         command.where == "engine" and command.key == "eat"
-        and not (phase == "editing" and command.passes_at_edge)
+        and not (phase in ("converting", "editing") and command.passes_at_edge)
     )
 
 
