@@ -1,34 +1,25 @@
 """Loading the bundled overlay independently of the base Mozc dictionary."""
 
 from array import array
-from contextlib import redirect_stderr
-from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from yuragi.lattice.mozc_dict import Entry, MozcLex, apply_user_lex
+from yuragi.lattice.mozc_dict import DictionaryFormatError, MozcLex, apply_user_lex
 
 
 class UserLexiconTest(unittest.TestCase):
-    def test_invalid_json_does_not_stop_loading_the_overlay(self):
-        lex = MozcLex({}, set(), array("h", [0]), 1)
-        errors = StringIO()
+    def test_a_broken_row_stops_loading(self):
+        # The overlay is a program file: a broken row stops like a broken
+        # dictionary line instead of being skipped or ending in a traceback.
+        rows = ['{broken JSON}', '{"reading":"いろ","surface":"色"}',
+                '{"reading":"いろ","surface":"色","cost":"x"}']
         with TemporaryDirectory() as directory:
             path = Path(directory) / "user_lexicon.jsonl"
-            path.write_text(
-                '{"reading":"あ","surface":"亜","cost":10,"lid":0}\n'
-                '{broken JSON}\n'
-                '{"reading":"いろ","surface":"色","cost":20,"lid":0}\n',
-                encoding="utf-8",
-            )
-            with redirect_stderr(errors):
-                loaded = apply_user_lex(lex, path)
-
-        self.assertEqual(loaded, 2)
-        self.assertEqual(lex.by_reading, {
-            "あ": [Entry("亜", "あ", 0, 0, 10)],
-            "いろ": [Entry("色", "いろ", 0, 0, 20)],
-        })
-        self.assertEqual(lex.prefixes, {"あ", "い", "いろ"})
-        self.assertIn(f"{path}:2:", errors.getvalue())
+            for row in rows:
+                with self.subTest(row=row):
+                    path.write_text('{"reading":"あ","surface":"亜","cost":10}\n' + row + "\n",
+                                    encoding="utf-8")
+                    lex = MozcLex({}, set(), array("h", [0]), 1)
+                    with self.assertRaisesRegex(DictionaryFormatError, r"user_lexicon\.jsonl:2:"):
+                        apply_user_lex(lex, path)

@@ -191,7 +191,12 @@ def _parse_connection() -> tuple[array, int]:
 
 
 def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
-    """Overlay the bundled corrections from data/user_lexicon.jsonl in memory."""
+    """Overlay the bundled corrections from data/user_lexicon.jsonl in memory.
+
+    A spelling already in the dictionary only gets the lower cost: the row's
+    lid/rid are not read. The file is part of the program, so a broken row
+    stops loading like a broken dictionary line (DESIGN「起動時の読み込み」).
+    """
     p = path or USER_LEX
     if not p.exists():
         return 0
@@ -202,14 +207,13 @@ def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
             continue
         try:
             row = json.loads(line)
-        except json.JSONDecodeError:
-            print(f"{p}:{line_no}: invalid JSON; skipping entry", file=sys.stderr, flush=True)
-            continue
-        reading = row["reading"]
-        surface = row["surface"]
-        cost = int(row["cost"])
-        lid = int(row.get("lid", DEFAULT_NOUN_ID))
-        rid = int(row.get("rid", lid))
+            reading = row["reading"]
+            surface = row["surface"]
+            cost = int(row["cost"])
+            lid = int(row.get("lid", DEFAULT_NOUN_ID))
+            rid = int(row.get("rid", lid))
+        except (ValueError, KeyError, TypeError):
+            raise DictionaryFormatError(f"{p.name}:{line_no}: not a user lexicon row") from None
         bucket = lex.by_reading.setdefault(reading, [])
         replaced = False
         for e in bucket:

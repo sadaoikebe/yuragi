@@ -264,6 +264,7 @@ TIP → ブローカー（プロトコル 1）:
 | 作り直したキャッシュを書けない（ディスクの空きなど） | **止まる**（`cache-not-written`） | 停止の通知 |
 | 辞書ファイルが無い（中身はインストール時に照合済み。起動時は在るかだけ見る） | **止まる**（`dictionary-missing`） | 停止の通知 |
 | 辞書ファイルの形式が違う・UTF-8 でない・開けない | **止まる**（`dictionary-unreadable`） | 停止の通知 |
+| 同梱の補正辞書 `data/user_lexicon.jsonl` の壊れた行（JSON でない、`reading`・`surface`・`cost` が無い、数でない） | **止まる**（`dictionary-unreadable`） | 停止の通知 |
 | LM のモデル・torch が読めない、またはどの装置・モデルも遅すぎる（CONVERSION「装置とモデル」） | LM なしで動く | 設定ウィンドウの注意（`lm`） |
 | `tip.json` の切り替えキー（`toggle_vk`・`toggle_mods`）が使えない | 同梱の `ms-ime.json` の表（`` Alt+` ``）で動く | なし |
 | `keymap.json` や選んだプリセットが使えない（KEYBIND §5.4） | 起動時は同梱の `ms-ime.json` を使い、稼働中の読み直しでは前の表を使い続ける | 設定ウィンドウの注意（`keymap`） |
