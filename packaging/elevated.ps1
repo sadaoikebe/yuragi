@@ -76,9 +76,17 @@ try {
             # DESIGN「守ること」6: registered is what the registry says, read back.
             if ((Registered $view) -ne $dll) { Write-Result $false "登録後のレジストリに $dll がありません" }
         }
-        foreach ($old in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object { $_.Name -ne $Tag })) {
-            Remove-Unused $old.FullName
+        $old = @(Get-ChildItem -LiteralPath $Root -Force | Where-Object { $_.Name -ne $Tag })
+        # setup.ps1 sent quit to the user's broker just before this: wait for a broker of a
+        # version being removed to end, so that its exe goes with the rest.
+        $deadline = (Get-Date).AddSeconds(15)
+        foreach ($broker in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue)) {
+            $exe = $broker.Path
+            if (@($old | Where-Object { $exe -and $exe.StartsWith("$($_.FullName)\", [StringComparison]::OrdinalIgnoreCase) }).Count) {
+                [void]$broker.WaitForExit([Math]::Max(0, [int]($deadline - (Get-Date)).TotalMilliseconds))
+            }
         }
+        foreach ($dir in $old) { Remove-Unused $dir.FullName }
     } else {
         # A version from before the 32-bit build has the 64-bit one only.
         foreach ($view in $Views) {

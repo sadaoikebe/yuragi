@@ -344,13 +344,17 @@ function Read-BrokerLine($conn, [int]$timeoutMs) {
     if ($task.Wait($timeoutMs)) { return $task.Result }
     return $null
 }
-function Stop-Broker {
+# 返事を 1 行読んでから quit を送る (読まずに閉じると quit が届かないことがある)。
+function Send-Quit {
     $conn = Connect-Broker 1000
     if ($conn) {
         [void](Read-BrokerLine $conn 2000)
         try { $conn.Writer.WriteLine('{"op":"quit"}') } catch { }
         $conn.Pipe.Dispose()
     }
+}
+function Stop-Broker {
+    Send-Quit
     $session = (Get-Process -Id $PID).SessionId
     $brokers = @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session })
     foreach ($b in $brokers) {
@@ -409,6 +413,9 @@ function Invoke-Elevated([string[]]$arguments) {
 
 Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
+# 旧ブローカーを終わらせておく (elevated.ps1 は旧版を消す前にその終了を待つので、旧版の exe も消える)。
+# 保守中の印があるので TIP は起動し直さない。ここで止まれば、印が消えたあと TIP が旧版を起動し直す。
+Send-Quit
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag, "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
     "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
     "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-ScriptSource", $ElevatedPath)
