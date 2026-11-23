@@ -74,6 +74,18 @@ class PartialCommitTest(unittest.TestCase):
                          ("converting", "", 1))
         self.assertEqual(k.press(VK_RETURN)["commit"], opened["composition"])
 
+    def test_macos_backspace_commits_without_the_last_character_and_learns_the_choice(self):
+        k = self.typed("こうせいをみる", learning=True)
+        k.s.keymap = self.macos_keymap()
+        k.convert()
+        k.press(VK_DOWN)
+        chosen = k.press(VK_DOWN)  # the second row of the first clause
+        self.assertEqual(self.surfaces(chosen), ["厚生を", "見る"])
+        k.press(VK_RETURN)  # on to 見る
+        self.assertEqual(k.press(0x08)["commit"], "厚生を見")
+        self.assertEqual([(row["reading"], row["surface"]) for row in self.rows()],
+                         [("こうせい", "厚生")])
+
     def test_macos_shrink_reconverts_and_escape_restores_all_readings(self):
         reading = "わたしはがっこうにいく"
         k = self.typed(reading)

@@ -137,7 +137,7 @@
 | `commit_first_segment` | composing 以降 | ○ | 先頭の文節だけ確定する |
 | `commit_one_char` | composing | ○ | 先頭の 1 打を、かなのまま確定する（CONVERSION「部分確定」） |
 | `delete_before` | composing、converting 以降 | ○ | 入力中と文節内入力はカーソルの前の 1 打、変換済みは表示の末尾の 1 字を消す |
-| `delete_last_and_commit` | converting 以降、predicting | ○ | 表示の末尾の 1 字を消して残りを確定する |
+| `delete_last_and_commit` | converting 以降、predicting | ○ | 表示の末尾の 1 字を消して残りを確定する。末尾の文節より前の文節は、ふつうの確定と同じく学習に書く |
 | `alnum_mode` | composing 以降 | ○ | 入力と変換を残したまま、入力が終わるまで英数の続きにする（CONVERSION「英数の続き」）。`resizing` は終えない |
 | `cycle_kana_mode` / `toggle_alnum_width` | empty | ○ | 未確定文字が無いときに、かなの字種または英数の幅の入力モードを変える |
 | `cycle_kana_script` / `cycle_alnum_width` | composing 以降 | ○ | 無変換・Shift+無変換。未変換の入力の字種、または変換中の注目文節の字種を変える |

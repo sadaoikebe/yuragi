@@ -1713,6 +1713,8 @@ class ImeSession:
     def _delete_last_and_commit(self) -> str:
         text = self.composition[:-1]
         if text:
+            # The last clause loses a character: what it showed is not a choice.
+            self._confirm(self.segments[:-1], standalone=False)
             self._note_commit(text)
         self._reset_input()
         return text
