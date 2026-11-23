@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "description": "数字・記号キーの単独面（全角。[ は 、、] は何も入らない）。Shift+英字のあとは英数の続きで、Shift+記号は刻印の上段の半角。続きの Space は押した時点で変換し、変換のあとの Shift+記号は全角。",
   "lexicon": [],
   "steps": [
@@ -46,6 +45,5 @@
     {"event": {"op": "down", "t": 2850, "vk": 13}},
     {"event": {"op": "up", "t": 2880, "vk": 13}}
   ],
-  "committed": "０９、￥’－＝｀A!):?！",
-  "composition": ""
+  "committed": "０９、￥’－＝｀A!):?！"
 }

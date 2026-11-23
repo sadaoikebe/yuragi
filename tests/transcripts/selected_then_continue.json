@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "description": "2 回目の Space で選んだ候補は、次の文字を打つと確定する。次の親指の同時打鍵もそのまま入る。",
   "lexicon": [
     {"reading": "きどく", "surface": "既読", "cost": 100},
@@ -42,6 +41,5 @@
     {"event": {"op": "down", "t": 2000, "vk": 13}},
     {"event": {"op": "up", "t": 2030, "vk": 13}}
   ],
-  "committed": "記憶か記憶の",
-  "composition": ""
+  "committed": "記憶か記憶の"
 }

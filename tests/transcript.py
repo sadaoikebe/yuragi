@@ -17,6 +17,7 @@ from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 
 TRANSCRIPT_NOW = datetime(2026, 11, 12, 9, 30)  # a Thursday
+OPS = ("down", "up", "timeout", "reset")  # README.md
 
 
 def make_session(case: dict, real_lex: MozcLex | None = None) -> ImeSession:
@@ -49,6 +50,7 @@ def run_transcript(test, path: Path, real_lex: MozcLex | None = None) -> None:
     session = make_session(case, real_lex)
     committed = ""
     for step in case["steps"]:
+        test.assertIn(step["event"]["op"], OPS, step["event"])
         commit = dispatch(session, step["event"])["commit"]
         if "commit" in step:
             test.assertEqual(commit, step["commit"], step["event"])

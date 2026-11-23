@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "description": "変換中の 0（1〜9 は候補の選択）・Shift+英字・句読点は、表示中の変換を確定して次の入力になる。",
   "lexicon": [{"reading": "か", "surface": "蚊"}],
   "steps": [
@@ -20,6 +19,5 @@
     {"event": {"op": "down", "t": 1010, "vk": 13}},
     {"event": {"op": "up", "t": 1040, "vk": 13}}
   ],
-  "committed": "蚊０B、",
-  "composition": ""
+  "committed": "蚊０B、"
 }
