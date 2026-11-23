@@ -68,6 +68,10 @@ class ManualWorker:
     def available(self):
         return self.ready
 
+    def busy(self):
+        """A job is queued or running (the worker drops cancelled ones)."""
+        return any(not job.done.is_set() and not job.cancelled for job in self.jobs)
+
     def submit(self, job):
         self.jobs.append(job)
         if job.wanted:
