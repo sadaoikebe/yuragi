@@ -11,7 +11,7 @@ runners have it), else Windows PowerShell 5.1 (powershell, what users run).
 """
 from __future__ import annotations
 
-import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -90,23 +90,31 @@ class PowerShellTest(unittest.TestCase):
                             "[string]$DllSource, [string]$BrokerSource)\n"
                             "[IO.File]::WriteAllText($ResultFile, ($PSBoundParameters | ConvertTo-Json))",
                             encoding="utf-8-sig")
+            def run(encoded):
+                return subprocess.run([PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                                      capture_output=True, text=True, timeout=120)
+
+            args = ["-Action", "install"]
+            for key, value in odd.items():
+                args += [f"-{key}", value]
+            listed = ", ".join(ps_quote(a) for a in args)
             for script in ("setup.ps1", "uninstall.ps1"):
                 with self.subTest(script=script):
                     func = function_text(ROOT / "packaging" / script, "New-ElevatedCommand")
-                    args = ["-Action", "install"]
-                    for key, value in odd.items():
-                        args += [f"-{key}", value]
-                    listed = ", ".join(ps_quote(a) for a in args)
-                    encoded = pwsh(f"{func}\nNew-ElevatedCommand {ps_quote(str(fake))} @({listed})").strip()
-                    command = base64.b64decode(encoded).decode("utf-16-le")
-                    self.assertTrue(command.startswith("& '"))
-                    run = subprocess.run([PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                                          "-EncodedCommand", encoded],
-                                         capture_output=True, text=True, timeout=120)
-                    self.assertEqual(run.returncode, 0, run.stderr)
+                    # setup.ps1 runs only the content whose SHA-256 it took (the script is in a
+                    # folder the user can write); uninstall.ps1 runs the copy in Program Files.
+                    sha = ps_quote(hashlib.sha256(fake.read_bytes()).hexdigest().upper()) if script == "setup.ps1" else ""
+                    encoded = pwsh(f"{func}\nNew-ElevatedCommand {ps_quote(str(fake))} {sha} @({listed})").strip()
+                    done = run(encoded)
+                    self.assertEqual(done.returncode, 0, done.stderr)
                     got = json.loads(result.read_text(encoding="utf-8-sig"))
                     self.assertEqual(got, {"Action": "install", **odd})
                     result.unlink()
+                    if script == "setup.ps1":
+                        # Changed between the check at stage 2 and the UAC prompt: it does not run.
+                        fake.write_text(fake.read_text(encoding="utf-8-sig") + "\n# changed", encoding="utf-8-sig")
+                        self.assertEqual(run(encoded).returncode, 3)
+                        self.assertFalse(result.exists())
 
     def test_torch_variant_from_nvidia_smi(self):
         """setup.ps1 picks the CUDA build of torch only for a GPU and driver it supports."""

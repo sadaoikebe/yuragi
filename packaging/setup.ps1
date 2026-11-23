@@ -220,11 +220,14 @@ $dllPath = Join-Path $Download "yuragi_tip.dll"
 $dll32Path = Join-Path $Download "yuragi_tip32.dll"  # 32 ビットのアプリ用 (DESIGN「32 ビットのアプリ」)
 $brokerPath = Join-Path $Download "yuragi-broker.exe"
 [void](Get-Verified "$baseUrl/yuragi-source.zip" $sourceZip)
-[void](Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath)
-[void](Get-Verified "$baseUrl/yuragi_tip32.dll" $dll32Path)
-[void](Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath)
+# 段 5 で、管理者権限の側が Program Files に写したものをこのハッシュと照合する。
+$dllSha256 = Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath
+$dll32Sha256 = Get-Verified "$baseUrl/yuragi_tip32.dll" $dll32Path
+$brokerSha256 = Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath
 $StageApp = Join-Path $Stage "app"
 Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
+# 管理者権限で動かす elevated.ps1 のハッシュは、照合した zip から展開した直後に取る。
+$elevatedSha256 = (Get-FileHash -LiteralPath (Join-Path $StageApp "packaging\elevated.ps1") -Algorithm SHA256).Hash
 
 # 同梱ランタイム: Python の版・依存の固定・torch の版で名前が決まる。中身が同じなら共有する。
 # 「tk」は tkinter 一式 (リリースのアセット。同じ版の通常版 Python から取ったもの) 入りの印。
@@ -388,24 +391,32 @@ Write-EngineJson (Join-Path $Version "engine.json") $App @()
 # 管理者用スクリプトの呼び出しと引数を 1 つのコマンドにして -EncodedCommand 用に符号化する
 # (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む。PowerShell は ' のほか
 # U+2018・U+2019・U+201A・U+201B も単一引用符として読むので、5 種類とも二重にする。
-function New-ElevatedCommand([string]$scriptPath, [string[]]$arguments) {
+# elevated.ps1 は利用者が書けるフォルダにあるので、昇格した側はそれを 1 度だけ読み、その中身の SHA-256 が
+# $scriptSha256 と合うときだけ、読んだ中身を実行する (合わなければ結果ファイルを書かずに終了コード 3)。
+function New-ElevatedCommand([string]$scriptPath, [string]$scriptSha256, [string[]]$arguments) {
     # パスは - で始まらないので、引数の値と同じく囲まれる。
     $quoted = @(@($scriptPath) + $arguments | ForEach-Object { if ($_ -like "-*") { $_ } else {
         "'" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($_) + "'" } })
-    $command = "& " + ($quoted -join " ")
+    $command = "`$b = [IO.File]::ReadAllBytes($($quoted[0])); " +
+        "if ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b)).Replace('-', '') -ne '$scriptSha256') { exit 3 }; " +
+        "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b).TrimStart([char]0xFEFF))) " +
+        (@($quoted | Select-Object -Skip 1) -join " ")
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
 $ElevatedPath = Join-Path $App "packaging\elevated.ps1"   # from the verified source zip
 function Invoke-Elevated([string[]]$arguments) {
     $resultFile = Join-Path $env:TEMP ("yuragi-elevated-" + [Guid]::NewGuid().ToString("N") + ".json")
-    $encoded = New-ElevatedCommand $ElevatedPath ($arguments + @("-ResultFile", $resultFile))
+    $encoded = New-ElevatedCommand $ElevatedPath $elevatedSha256 ($arguments + @("-ResultFile", $resultFile))
     try {
         $p = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru `
             -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded)
     } catch {
         Fail "管理者権限の確認がキャンセルされました。"
     }
-    if (-not (Test-Path -LiteralPath $resultFile)) { Fail "管理者権限の処理が結果を返さずに終了しました (終了コード $($p.ExitCode))。" }
+    if (-not (Test-Path -LiteralPath $resultFile)) {
+        if ($p.ExitCode -eq 3) { Fail "SHA-256 不一致: elevated.ps1 (照合のあとで書き換えられています)" }
+        Fail "管理者権限の処理が結果を返さずに終了しました (終了コード $($p.ExitCode))。"
+    }
     $result = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
     Remove-Item -LiteralPath $resultFile -Force
     return $result
@@ -416,9 +427,11 @@ Say "== Windows への登録 (管理者権限の確認が出ます)"
 # 旧ブローカーを終わらせておく (elevated.ps1 は旧版を消す前にその終了を待つので、旧版の exe も消える)。
 # 保守中の印があるので TIP は起動し直さない。ここで止まれば、印が消えたあと TIP が旧版を起動し直す。
 Send-Quit
-$result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag, "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
-    "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
-    "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-ScriptSource", $ElevatedPath)
+$result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag,
+    "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"), "-DllSha256", $dllSha256,
+    "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"), "-Dll32Sha256", $dll32Sha256,
+    "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-BrokerSha256", $brokerSha256,
+    "-ScriptSource", $ElevatedPath, "-ScriptSha256", $elevatedSha256)
 # DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "Windows への登録に失敗しました: $($result.message)" }
 $DllFinal = Join-Path $ProgramRoot "$Tag\yuragi_tip.dll"
