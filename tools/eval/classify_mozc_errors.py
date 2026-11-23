@@ -46,17 +46,18 @@ from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end
 from .run_mozc_eval import criterion_passes, parse_criterion
 
 
+# The primary class is a cause. criterion_review (the command does not
+# confirm the recorded surface) is only a secondary tag.
 PRIMARY_ORDER = (
-    "input_excluded", "criterion_review", "reading_mismatch", "orthographic_variant",
-    "generation_constraint", "search_pruning_suspected", "vocabulary_missing_suspected",
+    "input_excluded", "reading_mismatch", "orthographic_variant",
+    "generation_constraint", "search_pruning_suspected",
     "segmentation_suspected", "homophone_rank", "needs_review",
 )
 PRIMARY_NAMES = {
-    "input_excluded": "入力対象外", "criterion_review": "比較基準要確認",
+    "input_excluded": "入力対象外",
     "reading_mismatch": "読み違い", "orthographic_variant": "表記ゆれのみ",
     "generation_constraint": "探索・入力境界の制約",
     "search_pruning_suspected": "枝刈り疑い（探索制約）",
-    "vocabulary_missing_suspected": "語彙不足疑い",
     "segmentation_suspected": "分割違い（推定）", "homophone_rank": "同音語順位",
     "needs_review": "未判定", "no_error": "観測上の不一致なし",
 }
@@ -439,7 +440,7 @@ def classify(row: dict) -> dict:
             if "数" in pos or any(ch.isdecimal() for ch in p["surface"]):
                 labels.add("numeric_pos_or_pattern")
     if row["state"] == "complete" and not raw_mismatch and not failed and amb.get("reading_match"):
-        primary = "criterion_review" if "criterion_review" in labels else "no_error"
+        primary = "no_error"
     else:
         primary = next((label for label in PRIMARY_ORDER if label in labels), "needs_review")
     if primary == "needs_review":
@@ -453,9 +454,9 @@ def classify(row: dict) -> dict:
 
 
 def run_rows(rows, lex, overlay, names, reverse, timeout=10.0, memory_mb=2048):
-    # fork lets the worker inherit the caller's lexicon (and, in tests, a
-    # patched diagnose_condition); elsewhere fall back to the platform
-    # default context, where the worker re-imports and receives pickled args.
+    # fork lets the worker inherit the caller's lexicon; elsewhere the worker
+    # re-imports and receives the pickled lexicon. Either way the row's
+    # deadline starts once the worker reports ready, not at its start.
     ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
     process = connection = None
 
@@ -528,8 +529,6 @@ def condition_differences(rows, metric):
 
 def problem_patterns(row, primary, amb, diag):
     """Group comparable changed spans, without treating inferred spans as words."""
-    if primary == "criterion_review":
-        return [f"criterion:{row['command']}|recorded_status:{row['recorded_status']}"]
     if primary == "reading_mismatch":
         return sorted({f"reading:{row['input_reading'][a:b]}=>{amb.get('reading', '')[c:d]}"
                        for kind, a, b, c, d in difflib.SequenceMatcher(
@@ -565,8 +564,7 @@ def work_items(rows):
                                                 "effort": "未見積", "decision": "未採否", "reviewer": "未確認"})
             item["row_ids"].append(row["row_id"])
             item["ranks"].append(diag.get("rank_exact") or diag.get("rank_status", "unknown_not_measured"))
-    actions = {"criterion_review": "記録表記とコマンドの意図を確認（Not引数を追加語にしない）",
-               "reading_mismatch": "左右解決とuna対照を確認",
+    actions = {"reading_mismatch": "左右解決とuna対照を確認",
                "orthographic_variant": "明示同値規則と許容表記を確認",
                "generation_constraint": "長さ・高コスト除外・入力境界をエンジン課題として確認",
                "search_pruning_suspected": "厳密経路とRID枝刈りを比較",
