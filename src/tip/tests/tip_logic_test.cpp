@@ -134,6 +134,39 @@ static void EatingKeys() {
     assert(pending.eat_pending && pending.eat == true);
 }
 
+static void KeysSentInPlace() {
+    // A user's table: Ctrl+H sends Backspace (composing keeps 前字削除), Ctrl+Q sends ↑.
+    tip_json::Value json;
+    const std::string encoded(kDefaultKeyTable);
+    assert(tip_json::Parser(encoded).Parse(json));
+    auto& global = json.object.at("global").array;
+    for (auto [code, id] : {std::pair{0x248, "send_backspace"}, std::pair{0x251, "send_up"}}) {
+        tip_json::Value entry;
+        assert(tip_json::Parser("{\"code\":" + std::to_string(code) + ",\"command\":\"" + id + "\"}")
+               .Parse(entry));
+        global.push_back(entry);
+    }
+    const auto table = ParseKeyTable(json).value();
+    Mods ctrl;
+    ctrl.ctrl = true;
+    const Chord back{'H', ctrl}, up{'Q', ctrl};
+    auto take = [&](Chord chord, Phase phase, bool unsettled = false) {
+        return WantKey(chord, {phase, unsettled}, table);
+    };
+    // No input: the TIP sends the key itself, also with the keyboard closed.
+    assert(take(back, Phase::Empty) == Take::Pass);
+    assert(table.GlobalAt(Phase::Empty, back.Code()) == GlobalCommand::SendBackspace);
+    assert(SentKeyOf(GlobalCommand::SendBackspace)->vk == 0x08);
+    assert(table.GlobalAt(Phase::Direct, up.Code()) == GlobalCommand::SendUp);
+    assert(WorksClosed(GlobalCommand::SendUp) && !WorksClosed(GlobalCommand::Settings));
+    // With input: the phase's row runs, or the engine commits before the key is sent.
+    assert(take(back, Phase::Composing) == Take::Send);
+    assert(table.GlobalAt(Phase::Composing, back.Code()) == GlobalCommand::None);
+    assert(take(up, Phase::Composing) == Take::Send);
+    assert(take(up, Phase::Empty, true) == Take::Send);
+    for (const auto& sent : kSentKeys) assert(ParseGlobal(sent.id) == sent.command);
+}
+
 static void OrderOfReplies() {
     InFlight f;
     assert(!f.Waiting());
@@ -353,6 +386,7 @@ int main(int argc, char** argv) {
     CommittingVisibleText();
     StatesAndWhatTheUserSees();
     EatingKeys();
+    KeysSentInPlace();
     OrderOfReplies();
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();

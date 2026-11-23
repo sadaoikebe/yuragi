@@ -61,14 +61,52 @@ inline constexpr std::array<const char*, 8> kPhaseNames = {
     "empty", "composing", "converting", "selecting", "resizing", "predicting", "editing", "direct"
 };
 
-enum class GlobalCommand { None, Toggle, On, Off, Hiragana, Katakana, FullAlnum, Settings, Words, Menu };
+enum class GlobalCommand {
+    None, Toggle, On, Off, Hiragana, Katakana, FullAlnum, Settings, Words, Menu,
+    SendBackspace, SendDelete, SendLeft, SendRight, SendUp, SendDown, SendHome, SendEnd,
+    SendPageUp, SendPageDown, SendEnter, SendEscape, SendTab,
+};
 inline bool OpensKeyboard(GlobalCommand command) {
     return command == GlobalCommand::Toggle || command == GlobalCommand::On ||
            command == GlobalCommand::Hiragana || command == GlobalCommand::Katakana ||
            command == GlobalCommand::FullAlnum;
 }
 
+// The send_* commands (KEYBIND §7.5): the key the application gets in place of the pressed one.
+struct SentKey {
+    const char* id;
+    GlobalCommand command;
+    uint32_t vk;
+    bool extended;  // the navigation keys beside the main block
+};
+inline constexpr std::array<SentKey, 13> kSentKeys = {{
+    {"send_backspace", GlobalCommand::SendBackspace, 0x08, false},
+    {"send_delete", GlobalCommand::SendDelete, 0x2E, true},
+    {"send_left", GlobalCommand::SendLeft, 0x25, true},
+    {"send_right", GlobalCommand::SendRight, 0x27, true},
+    {"send_up", GlobalCommand::SendUp, 0x26, true},
+    {"send_down", GlobalCommand::SendDown, 0x28, true},
+    {"send_home", GlobalCommand::SendHome, 0x24, true},
+    {"send_end", GlobalCommand::SendEnd, 0x23, true},
+    {"send_page_up", GlobalCommand::SendPageUp, 0x21, true},
+    {"send_page_down", GlobalCommand::SendPageDown, 0x22, true},
+    {"send_enter", GlobalCommand::SendEnter, 0x0D, false},
+    {"send_escape", GlobalCommand::SendEscape, 0x1B, false},
+    {"send_tab", GlobalCommand::SendTab, 0x09, false},
+}};
+inline const SentKey* SentKeyOf(GlobalCommand command) {
+    for (const auto& sent : kSentKeys)
+        if (sent.command == command) return &sent;
+    return nullptr;
+}
+// What runs while the keyboard is closed (IME off in Windows' sense).
+inline bool WorksClosed(GlobalCommand command) {
+    return OpensKeyboard(command) || SentKeyOf(command);
+}
+
 inline GlobalCommand ParseGlobal(const std::string& id) {
+    for (const auto& sent : kSentKeys)
+        if (id == sent.id) return sent.command;
     if (id == "ime_toggle") return GlobalCommand::Toggle;
     if (id == "ime_on") return GlobalCommand::On;
     if (id == "ime_off") return GlobalCommand::Off;
@@ -475,13 +513,18 @@ private:
 enum class GlobalUse { None, Run, Ask };
 
 inline GlobalUse UseGlobal(unsigned code, const Local& local, const KeyTable& table) {
-    if (!table.global.count(code)) return GlobalUse::None;
+    auto found = table.global.find(code);
+    if (found == table.global.end()) return GlobalUse::None;
     if (local.phase == Phase::Direct) return GlobalUse::Run;
-    if (!local.unsettled)
-        return table.Overrides(local.phase, code) ? GlobalUse::None : GlobalUse::Run;
+    // A key sent in place of another goes after the input: the engine commits it first.
+    const bool sent = SentKeyOf(found->second) != nullptr;
+    if (!local.unsettled) {
+        if (table.Overrides(local.phase, code)) return GlobalUse::None;
+        return sent && local.phase != Phase::Empty ? GlobalUse::Ask : GlobalUse::Run;
+    }
     for (size_t i = 0; i < table.phases.size(); ++i)
         if (table.Overrides(static_cast<Phase>(i), code)) return GlobalUse::Ask;
-    return GlobalUse::Run;
+    return sent ? GlobalUse::Ask : GlobalUse::Run;
 }
 
 enum class Take { Pass, Send };

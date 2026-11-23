@@ -22,6 +22,13 @@ INPUT = COMPOSING | CONVERTED | SELECTING
 KANA = EMPTY | INPUT
 LOCAL = KANA | {"direct"}
 
+SEND_KEYS = {
+    "send_backspace": "Backspace", "send_delete": "Delete", "send_left": "←", "send_right": "→",
+    "send_up": "↑", "send_down": "↓", "send_home": "Home", "send_end": "End",
+    "send_page_up": "PageUp", "send_page_down": "PageDown", "send_enter": "Enter",
+    "send_escape": "Esc", "send_tab": "Tab",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Command:
@@ -46,6 +53,11 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("open_settings", "設定を開く", GLOBAL, where="tip"),
     Command("open_word_register", "単語登録を開く", GLOBAL | EMPTY, where="tip"),
     Command("open_menu", "IME メニューを開く", EMPTY, where="tip"),
+    # The TIP sends this key to the application in place of the pressed one; with
+    # input, the engine commits first (KEYBIND §7.5).
+    *(Command(id, f"{label} を送る", GLOBAL, where="tip",
+              run=lambda s: s._commit() if s.composition else None)
+      for id, label in SEND_KEYS.items()),
     Command("insert_space", "空白", EMPTY, run=lambda s: s._insert_space("　"),
             starts_input=True),
     Command("insert_alt_space", "別幅空白", EMPTY, run=lambda s: s._insert_space(" "),

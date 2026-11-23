@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MappingProxyType
 from yuragi.chord.keys import ALT, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, modifier_bits
 from . import config
-from .commands import COMMANDS, Command, INPUT
+from .commands import COMMANDS, Command, INPUT, SEND_KEYS
 
 PRESET_PATH = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime.json"
 DEFAULT_PRESET = "ms-ime"
@@ -58,9 +58,11 @@ def implemented(command: Command) -> bool:
 
 
 def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
+    # A key given a global command leaves the phase rows, except a key sent in place of another:
+    # where a phase binds it (Ctrl+H while composing), that row stays first.
     global_keys = {chord for (phase, chord), command_id in overrides.items()
                    if phase == "global" and command_id is not None
-                   and implemented(COMMANDS[command_id])}
+                   and implemented(COMMANDS[command_id]) and command_id not in SEND_KEYS}
     rows = {key: command for key, command in base.items()
             if key[0] == "global" or key[1] not in global_keys}
     for key, command in overrides.items():

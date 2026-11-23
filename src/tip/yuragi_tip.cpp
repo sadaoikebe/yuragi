@@ -1421,7 +1421,7 @@ public:
         }
         const bool eligible = ScopeAllowsInput() && !KeyboardDisabled(tm_) &&
                               (!KeyboardClosed(tm_) || (decision.action == Action::Global &&
-                                                       tip_logic::OpensKeyboard(decision.command)));
+                                                       tip_logic::WorksClosed(decision.command)));
         if (decision.Eats() && (decision.action == Action::Buffer || carry_.Active() ||
                                !buffered_.empty() || KeysWaiting() || !eligible)) {
             Buffer(key);
@@ -2215,8 +2215,8 @@ private:
     tip_logic::GlobalCommand GlobalFor(unsigned code, bool closed = false) const {
         using tip_logic::GlobalCommand;
         auto command = keymap_.GlobalAt(closed ? tip_logic::Phase::Direct : phase_, code);
-        if (closed && !tip_logic::OpensKeyboard(command)) return GlobalCommand::None;
-        if (command == GlobalCommand::Settings) return command;
+        if (closed && !tip_logic::WorksClosed(command)) return GlobalCommand::None;
+        if (command == GlobalCommand::Settings || tip_logic::SentKeyOf(command)) return command;
         if (command == GlobalCommand::Words)
             return tip_logic::SendsKeys(CurrentMode()) ? command : GlobalCommand::None;
         return tip_logic::Toggles(CurrentMode()) ? command : GlobalCommand::None;
@@ -2468,6 +2468,15 @@ private:
 
     bool RunGlobal(tip_logic::GlobalCommand command) {
         using tip_logic::GlobalCommand;
+        if (auto sent = tip_logic::SentKeyOf(command)) {
+            // The pressed key stays eaten. Replay lifts the held modifiers around the sent
+            // key and marks it, so it reaches the application and not this TIP again.
+            Log(L"send in place vk=0x%02X", sent->vk);
+            Stroke key{sent->vk, sent->extended ? (LPARAM)(1L << 24) : 0, GetMessageTime(), NowMs(),
+                       tip_logic::Chord{sent->vk, {}}, true};
+            ReplayHeld(key);
+            return true;
+        }
         if (KeyboardClosed(tm_)) {
             if (!tip_logic::OpensKeyboard(command) || !tip_logic::Toggles(CurrentMode()) ||
                 KeyboardDisabled(tm_) || !ScopeAllowsInput() || !OpenKeyboard(tm_, client_))

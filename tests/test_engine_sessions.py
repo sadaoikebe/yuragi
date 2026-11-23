@@ -125,6 +125,26 @@ class KeyDispatchTest(EngineCase):
         self.assertIn({"code": chord.code, "command": "ime_toggle"}, table["global"])
         self.assertNotIn(chord.code, table["phases"]["composing"]["eat"])
 
+    def test_a_key_sent_in_place_keeps_the_phase_rows_and_commits_first(self):
+        # Ctrl+H stays 前字削除 while composing; Ctrl+Q, bound in no phase, commits and is sent.
+        self.write_keymap(["global", "Ctrl+H", "send_backspace"], ["global", "Ctrl+Q", "send_up"])
+        engine = self.engine()
+        engine.keymap = load_keymap(self.dir).compile()
+        table = engine.keymap.eat_table()
+        back = Chord.parse("Ctrl+H").code
+        self.assertIn({"code": back, "command": "send_backspace"}, table["global"])
+        self.assertIn(back, table["phases"]["composing"]["eat"])
+        self.assertNotIn(back, table["phases"]["empty"]["eat"])  # the TIP sends it itself
+        self.open(engine, 1)
+
+        self.type_a(engine, 1)
+        reply = self.request(engine, 1, {"op": "down", "vk": 0x48, "mods": ["ctrl"], "t": 100})
+        self.assertEqual((reply["eat"], reply.get("global"), reply["composition"]), (True, None, ""))
+        self.type_a(engine, 1, 200)
+        reply = self.request(engine, 1, {"op": "down", "vk": 0x51, "mods": ["ctrl"], "t": 300})
+        self.assertEqual((reply["eat"], reply["global"], reply["commit"], reply["phase"]),
+                         (False, "send_up", "宇", "empty"))
+
     def test_reload_changes_existing_sessions_and_keeps_other_input(self):
         engine = self.engine()
         self.open(engine, 1)
