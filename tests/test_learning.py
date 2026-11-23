@@ -13,7 +13,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE = 0x0D, 0x20, 0x26, 0x28, 0x2E
+VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE, VK_F7 = 0x0D, 0x20, 0x26, 0x28, 0x2E, 0x76
 
 
 class LearningTest(unittest.TestCase):
@@ -102,7 +102,13 @@ class LearningTest(unittest.TestCase):
     def test_committing_what_was_shown_writes_nothing(self):
         # Every way to commit the shown result. One path that misses it would
         # learn the engine's own pick again (CONVERSION「学習」).
+        # きょうは shows an earlier choice, a learned row without words.
         text = "きょうはいいてんきですね"
+        earlier = self.session()
+        self.convert(earlier, "きょうは")
+        dispatch(earlier, {"op": "down", "vk": VK_F7})
+        dispatch(earlier, {"op": "down", "vk": VK_RETURN})
+        learned = self.path.read_bytes()
         s = self.session()
         s._table = {"keys": {c: {"plain": c} for c in text}}
 
@@ -113,6 +119,7 @@ class LearningTest(unittest.TestCase):
                 for op in ("down", "up"):  # a lone thumb key converts on its release
                     dispatch(s, {"op": op, "vk": VK_SPACE})
                 self.assertTrue(s.converted)
+                self.assertTrue(s.composition.startswith("キョウハ"))
             return s.composition
 
         for name, convert, keys in (
@@ -130,7 +137,7 @@ class LearningTest(unittest.TestCase):
             shown = show(True)
             self.assertEqual(s._ingest([Plain(text[0])]), shown)
             s.reset()
-        self.assertEqual(self.path.read_bytes(), b"")
+        self.assertEqual(self.path.read_bytes(), learned)
 
     def test_ctrl_delete_forgets_the_choice(self):
         s = self.session()
