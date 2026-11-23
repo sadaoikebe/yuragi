@@ -50,7 +50,7 @@ jobs:
       # pwsh はランナーに入っている (tests/test_installer_scripts.py)。
       - name: Python の試験 (インストーラの脚本の実動作を含む。ブローカーのプロセスの試験は Windows で)
         run: |
-          python -m unittest -v $(ls tests/test_*.py | sed 's#/#.#;s#\.py$##')
+          python -m unittest discover -v
 
   windows:
     runs-on: windows-latest

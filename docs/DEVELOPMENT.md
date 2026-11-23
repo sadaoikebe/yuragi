@@ -43,7 +43,7 @@ winget install --id Microsoft.VisualStudio.BuildTools -e --accept-package-agreem
 ```sh
 python -m tools.eval.fetch_mozc_dict                 # 初回のみ。Mozc OSS 辞書
 python -m yuragi.lattice.dict_manifest verify       # 辞書がマニフェストと一致するか（write で書き出し）
-python -m unittest $(ls tests/test_*.py | sed 's#/#.#;s#\.py$##')   # 全試験
+python -m unittest discover                   # 全試験（リポジトリの直下で）
 cmake -S src/broker -B build/broker -DCMAKE_BUILD_TYPE=Release && cmake --build build/broker && ctest --test-dir build/broker
 cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release && cmake --build build/tip && ctest --test-dir build/tip
 ```
