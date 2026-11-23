@@ -151,6 +151,8 @@ Space で変換し、もう一度 Space を押すと候補窓が出て、候補�
 | Ctrl+F10（かな入力で未確定の文字がないとき） | 同じメニューを入力欄の近くに開く |
 | ImeOn（「あ」キー、USB HID の LANG1） | ひらがな入力にする |
 | ImeOff（「A」キー、USB HID の LANG2） | 半角英数の直接入力にする |
+| Shift+ImeOn | 全角カタカナ入力にする |
+| Ctrl+ImeOff / Shift+ImeOff（入力中） | 入力中の文字を、かなの字種で切り替える／全角英数にする |
 
 ほかの IME との切り替えは Win+Space です。
 

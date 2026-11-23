@@ -291,6 +291,8 @@ MS-IME のプリセットは、新 MS-IME を実機で見た動き（[keybind/ms
 `VK_IME_ON` が届いたらひらがなに、`VK_IME_OFF` が届いたら半角英数に切り替える。
 変換・無変換は `Convert`／`NonConvert` の仮想キーコードが届いたときに使える。
 `kbd101` が INT4 を 0xFF、INT5 を `VK_OEM_PA1` として届けたときは、未確定文字を保ってそのままアプリに通す。
+ImeOn・ImeOff の和音は ms-ime.md §1.1 の表による。Shift+ImeOn は全角カタカナ、入力中の Ctrl+ImeOff はかなの字種、Shift+ImeOff は全角英数（続けて押すと大文字・小文字）。入力なしの変換と Ctrl+ImeOn は再変換（`reconvert`。作るまでは行が無いのと同じ）。
+Alt+ImeOn（かな入力とローマ字入力の切り替え）は書かない。ゆらぎの入力は NICOLA だけで、切り替える先が無い。
 JIS 専用キーの実機での動きは [keybind/ms-ime.md](keybind/ms-ime.md) を参照。
 TIP はどちらのファイルも読まない（§8）。
 
