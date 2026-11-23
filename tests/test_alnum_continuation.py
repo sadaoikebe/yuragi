@@ -8,6 +8,7 @@ from tests.support import Keys, kana_session
 
 VK_SPACE, VK_RETURN, VK_BACK, VK_ESCAPE = 0x20, 0x0D, 0x08, 0x1B
 VK_LEFT, VK_RIGHT = 0x25, 0x27
+VK_F6, VK_F7, VK_F8, VK_F9, VK_F10 = 0x75, 0x76, 0x77, 0x78, 0x79
 VK_COMMA, VK_PERIOD, VK_SLASH, VK_RBRACKET = 0xBC, 0xBE, 0xBF, 0xDD
 
 
@@ -60,6 +61,16 @@ class AlnumContinuationTest(unittest.TestCase):
         self.assertTrue(reply["converted"])
         self.assertEqual(reply["composition"], "Test")
         self.assertEqual(k.tap(VK_RETURN)["commit"], "Test")
+
+    def test_script_keys_leave_a_run_with_no_kana_as_typed(self):
+        k = self.keys()
+        k.shift("A")
+        k.letters("bc")
+        for vk in (VK_F6, VK_F7, VK_F8, VK_F9, VK_F10):
+            reply = k.tap(vk)
+            self.assertEqual((reply["phase"], reply["composition"]), ("composing", "Abc"))
+        self.assertEqual(k.letters("d")["composition"], "Abcd")
+        self.assertEqual(k.committed, "")
 
     def test_ways_back_to_kana(self):
         k = self.keys()

@@ -962,12 +962,15 @@ class ImeSession:
         F9/F10 the typed keys as full-/half-width alphanumerics (the kana-input
         convention: what the keys would have typed with the IME off); pressed
         again they cycle lower → UPPER → Capitalized. Not learned.
-        Input not yet converted converts first, as with the MS-IME gesture.
+        Input not yet converted converts first, as with the MS-IME gesture;
+        input with no kana clause (only literals) is left as it is.
         """
         if not self.tokens:
             return
         if self.predicting:
             self._cancel_conversion()  # the kana spelling of what was typed
+        if not self.converted and all(segment.literal for segment in self.segments):
+            return  # no clause to respell: the input stays, 英数の続き goes on
         show = not self.converted
         if show:
             self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
