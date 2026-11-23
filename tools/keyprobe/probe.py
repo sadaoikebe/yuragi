@@ -94,17 +94,20 @@ def probe(eat=(), test_only=(), preserve=(), exe=None):
     cfg = {"on": True, "seq": _seq[0], "eat": [list(c) for c in eat],
            "test_only": [list(c) for c in test_only], "preserve": [list(c) for c in preserve]}
     os.makedirs(HOME, exist_ok=True)
+    start = log_size()
     with open(PROBE_JSON + ".tmp", "w", encoding="utf-8") as f:
         json.dump(cfg, f)
     os.replace(PROBE_JSON + ".tmp", PROBE_JSON)
     if exe:
-        wait_log(lambda r: r.get("exe", "").lower() == exe.lower() and r["what"] == "config"
+        wait_log(start, lambda r: r.get("exe", "").lower() == exe.lower() and r["what"] == "config"
                  and r.get("seq") == str(_seq[0]), f"probe config in {exe}")
 
 
 def probe_off():
-    if os.path.exists(PROBE_JSON):
-        os.remove(PROBE_JSON)
+    """Turn the probe off and delete its log: the TIP writes nothing once probe.json is gone."""
+    for path in (PROBE_JSON, PROBE_LOG):
+        if os.path.exists(path):
+            os.remove(path)
 
 
 def log_size():
@@ -137,10 +140,11 @@ def log_since(offset):
     return rows
 
 
-def wait_log(pred, label, timeout=6.0):
+def wait_log(offset, pred, label, timeout=6.0):
+    """Wait for a probe.log line after offset."""
     end = time.time() + timeout
     while time.time() < end:
-        if any(pred(r) for r in log_since(0)[-500:]):
+        if any(pred(r) for r in log_since(offset)):
             return
         time.sleep(0.1)
     raise Aborted(f"timed out waiting for {label}: is「キーの確認（keyprobe）」the input method there? "

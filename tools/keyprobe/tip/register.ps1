@@ -1,4 +1,4 @@
-﻿# キーの確認用の TIP を登録し、入力方式の一覧に「キーの確認（keyprobe）」を足す。-Remove で外す。どちらも UAC 1 回。
+﻿# キーの確認用の TIP を登録し、入力方式の一覧に「キーの確認（keyprobe）」を足す。-Remove で外し、probe.json と probe.log を消す。どちらも UAC 1 回。
 #
 #   powershell -ExecutionPolicy Bypass -File .\tools\keyprobe\tip\register.ps1
 #   powershell -ExecutionPolicy Bypass -File .\tools\keyprobe\tip\register.ps1 -Remove
@@ -25,7 +25,9 @@ function Invoke-Regsvr32([string[]]$arguments) {
 if ($Remove) {
     [void][YuragiKeyProbe.Input]::InstallLayoutOrTip($Layout, 1)  # ILOT_UNINSTALL
     if ($registered) { Invoke-Regsvr32 @('/s', '/u', "`"$registered`"") }
-    Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.yuragi-ime\probe.json') -ErrorAction SilentlyContinue
+    foreach ($name in 'probe.json', 'probe.log') {
+        Remove-Item -LiteralPath (Join-Path $env:USERPROFILE ".yuragi-ime\$name") -ErrorAction SilentlyContinue
+    }
     Write-Host '確認用の TIP を外しました。'
     return
 }

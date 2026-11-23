@@ -319,10 +319,6 @@ private:
         if (!hwnd_ || !tm_) return;
         WIN32_FILE_ATTRIBUTE_DATA a{};
         bool exists = GetFileAttributesExW(ProfilePath(L"probe.json").c_str(), GetFileExInfoStandard, &a) != 0;
-        if (exists && !watching_) {
-            watching_ = true;
-            ProbeLog(L"ActivateEx client=%u", (unsigned)client_);
-        }
         FILETIME stamp = exists ? a.ftLastWriteTime : FILETIME{};
         DWORD size = exists ? a.nFileSizeLow : 0;
         if (!loaded_ || CompareFileTime(&stamp, &stamp_) != 0 || size != size_) {
@@ -332,6 +328,9 @@ private:
             ProbeConfig old = config_;
             bool ok = exists && config_.Load();
             if (!exists) config_ = ProbeConfig();
+            // Log only while the probe is on: with no file or "on": false, nothing is written.
+            if (config_.on && !watching_) ProbeLog(L"ActivateEx client=%u", (unsigned)client_);
+            watching_ = config_.on;
             Apply(old, ok);
         }
         SetTimer(hwnd_, kTimer, 200, nullptr);
@@ -371,7 +370,7 @@ private:
     void Unpreserve(ITfKeystrokeMgr* km) {
         for (size_t i = 0; i < preserved_.size(); ++i) {
             HRESULT hr = km->UnpreserveKey(PreserveGuid(preserved_index_[i]), &preserved_[i]);
-            ProbeLog(L"UnpreserveKey index=%zu hr=0x%08lX", preserved_index_[i], (unsigned long)hr);
+            if (watching_) ProbeLog(L"UnpreserveKey index=%zu hr=0x%08lX", preserved_index_[i], (unsigned long)hr);
         }
         preserved_.clear();
         preserved_index_.clear();

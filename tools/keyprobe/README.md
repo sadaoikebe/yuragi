@@ -80,7 +80,7 @@ python -m tools.keyprobe.checks run codes kanji # 一部だけ
 
 - 実行中はキーボードとマウスに触らない。キーは前面の窓が試験の窓そのもののときだけ送り、違えばその場で止まる。
 - `OK` / `NG` の行は windows.md の該当の節と比べた結果、`--` の行は届いたものの記録（表と見比べる）。結果は `out/<確認>.txt` にも残る。
-- 終わると `probe.json` を消す。試験で変わりうる状態（押されたままの `VK_KANJI`、大文字とカナのロック）は、各確認の中で戻す。
+- 終わると `probe.json` と `probe.log` を消す。試験で変わりうる状態（押されたままの `VK_KANJI`、大文字とカナのロック）は、各確認の中で戻す。
 
 **本物のキーボードで押す**（繰り返しと、送ったキーとの差を見るとき）:
 
@@ -95,7 +95,7 @@ python -m tools.keyprobe.checks manual-report         # TIP とアプリに届�
 押し続け（2 秒ほど）も試す。Alt を使う順序では窓のメニューに入ることがあるので、1 回ごとに Esc を 2 回押す。
 Ctrl+Shift+CapsLock を押したらもう一度押して、カナのロックを戻す。
 
-**取り外す**: Win+Space でふだんの入力方式に戻し、`powershell -ExecutionPolicy Bypass -File .\tools\keyprobe\tip\register.ps1 -Remove`（UAC 1 回）。
+**取り外す**: Win+Space でふだんの入力方式に戻し、`powershell -ExecutionPolicy Bypass -File .\tools\keyprobe\tip\register.ps1 -Remove`（UAC 1 回）。`probe.json` と `probe.log` も消す。
 
 ## してはいけないこと
 
