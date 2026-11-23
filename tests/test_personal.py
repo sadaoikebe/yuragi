@@ -27,6 +27,7 @@ class PersonalFileTest(TempFile):
         add_word(self.path, "おやゆび", "親指")
         add_word(self.path, "やまだ", "山田", "姓")
         add_word(self.path, "おやゆび", "親指", "名詞", 1000)  # replaces, not duplicates
+        self.assertEqual(len(self.path.read_text(encoding="utf-8").splitlines()), 2)
         self.assertEqual([(w.reading, w.surface, w.pos, w.cost) for w in read_words(self.path)],
                          [("やまだ", "山田", "姓", DEFAULT_COST),
                           ("おやゆび", "親指", "名詞", 1000)])
