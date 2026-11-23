@@ -738,6 +738,22 @@ static tip_logic::Scope SelectionScope(ITfContext* ctx, TfEditCookie ec) {
 // -- composition and its edits ------------------------------------------------------
 
 struct CompositionState {
+    // What the last preedit write left on screen (Write): a reply that shows the same is
+    // not written again (the engine answers up and timeout with the same text).
+    struct Shown {
+        std::wstring text;
+        std::vector<tip_logic::Segment> segments;
+        int focus, caret;
+        bool converted, editing;
+        bool operator==(const Shown& o) const {
+            return text == o.text && focus == o.focus && caret == o.caret && converted == o.converted &&
+                   editing == o.editing &&
+                   std::equal(segments.begin(), segments.end(), o.segments.begin(), o.segments.end(),
+                              [](const tip_logic::Segment& a, const tip_logic::Segment& b) {
+                                  return a.display_start == b.display_start && a.display_end == b.display_end;
+                              });
+        }
+    };
     ITfContext* ctx;
     ITfComposition* composition = nullptr;
     ITfRange* commit_end = nullptr;
@@ -746,6 +762,7 @@ struct CompositionState {
     bool track_commit;
     bool disconnected = false;
     bool active = true, ending = false, position_pending = false, show_candidates = false;
+    std::optional<Shown> shown;  // while composition is set
     std::vector<Message> pending;
     CompositionState(ITfContext* c, bool track)
         : ctx(c), track_commit(track), disconnected(track) { ctx->AddRef(); }
@@ -880,6 +897,7 @@ private:
         state->ending = true;
         ITfComposition* comp = state->composition;
         state->composition = nullptr;
+        state->shown.reset();
         HRESULT hr = comp->EndComposition(ec);
         comp->Release();
         state->ending = false;
@@ -907,12 +925,19 @@ private:
     }
     HRESULT Write(TfEditCookie ec, const std::wstring& text, bool commit, const Message& reply) {
         if (commit) state_->BreakContinuity();
+        const bool editing = !commit && reply.phase == tip_logic::Phase::Editing &&
+                             reply.focus >= 0 && (size_t)reply.focus < reply.segments.size();
+        int caret_position = commit ? reply.commit_caret : reply.caret;
+        if (caret_position < 0 && editing) caret_position = reply.segments[reply.focus].display_end;
+        CompositionState::Shown shown{text, reply.segments, reply.focus, caret_position, reply.converted, editing};
+        // The same preedit again: no text, attribute or selection change reaches the application.
+        const bool unchanged = !commit && state_->composition && state_->shown == shown;
         ITfContext* ctx = state_->ctx;
         ITfRange* range = nullptr;
         HRESULT hr = S_OK;
         if (state_->composition) {
             hr = state_->composition->GetRange(&range);
-            if (SUCCEEDED(hr)) hr = range->SetText(ec, 0, text.data(), (LONG)text.size());
+            if (SUCCEEDED(hr) && !unchanged) hr = range->SetText(ec, 0, text.data(), (LONG)text.size());
         } else if (!text.empty()) {
             ITfInsertAtSelection* ins = nullptr;
             hr = ctx->QueryInterface(IID_ITfInsertAtSelection, (void**)&ins);
@@ -940,10 +965,8 @@ private:
             if (range) range->Release();
             return commit && SUCCEEDED(hr) ? E_FAIL : hr;
         }
-        const bool editing = !commit && reply.phase == tip_logic::Phase::Editing &&
-                             reply.focus >= 0 && (size_t)reply.focus < reply.segments.size();
         ITfProperty* prop = nullptr;
-        if (SUCCEEDED(ctx->GetProperty(GUID_PROP_ATTRIBUTE, &prop))) {
+        if (!unchanged && SUCCEEDED(ctx->GetProperty(GUID_PROP_ATTRIBUTE, &prop))) {
             prop->Clear(ec, range);
             if (!commit && !text.empty()) {
                 Attribute(ec, prop, range, atoms_[reply.converted ? 1 : 0]);
@@ -968,8 +991,6 @@ private:
         }
         ITfRange* caret = nullptr;
         HRESULT caret_hr = range->Clone(&caret);
-        int caret_position = commit ? reply.commit_caret : reply.caret;
-        if (caret_position < 0 && editing) caret_position = reply.segments[reply.focus].display_end;
         if (SUCCEEDED(caret_hr)) {
             caret_hr = caret->Collapse(ec, caret_position >= 0 ? TF_ANCHOR_START : TF_ANCHOR_END);
             if (SUCCEEDED(caret_hr) && caret_position > 0) {
@@ -980,13 +1001,17 @@ private:
             }
         }
         if (SUCCEEDED(caret_hr)) {
-            TF_SELECTION selection{};
-            selection.range = caret; selection.style.ase = TF_AE_NONE;
-            caret_hr = ctx->SetSelection(ec, 1, &selection);
+            if (!unchanged) {
+                TF_SELECTION selection{};
+                selection.range = caret; selection.style.ase = TF_AE_NONE;
+                caret_hr = ctx->SetSelection(ec, 1, &selection);
+            }
             if (!commit && reply.ShowsCandidates())
                 PlacePopup(ec, ctx, caret, candidate_, g_log);
         }
         if (commit || text.empty()) hr = End(ec, state_);
+        else if (SUCCEEDED(caret_hr)) state_->shown = std::move(shown);
+        else state_->shown.reset();
         if (FAILED(caret_hr)) {
             state_->BreakContinuity();
         } else if (commit && caret_position < 0 && SUCCEEDED(hr) && state_->active) {
@@ -1992,11 +2017,17 @@ private:
             FocusMoved();
             return;
         }
-        if (!state_) {
-            state_ = std::make_shared<CompositionState>(ctx, edit_cookie_ != TF_INVALID_COOKIE);
-            AdviseLayout(ctx);
-        }
+        if (!state_) state_ = std::make_shared<CompositionState>(ctx, edit_cookie_ != TF_INVALID_COOKIE);
         state_->show_candidates = r.ShowsCandidates();
+        if (r.commit.empty() && r.composition.empty() && !state_->composition && state_->pending.empty()) {
+            // Nothing to write and nothing on screen (the reply to a reset, a key in an empty
+            // field): no edit session. The reply is applied as it is.
+            ctx->Release();
+            state_->applied_seq = r.seq;
+            PostMessageW(hwnd_, kKeysMessage, 0, 0);
+            return;
+        }
+        if (!layout_ctx_) AdviseLayout(ctx);
         ctx->Release();
         state_->pending.push_back(r);
         RequestEdit(EditSession::Apply, state_, sync);
