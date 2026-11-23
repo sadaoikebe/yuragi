@@ -329,6 +329,8 @@ TIP はどちらのファイルも読まない（§8）。
 - Ctrl+Space でゆらぎのかな入力と直接入力を切り替える。Windows 用の Alt+`` ` `` と、JIS のかな・英数キー（`ImeOn` / `ImeOff`）でも切り替えられる。入力ソース自体の切り替えは Windows の Win+Space で行う。
 - IME に届く Ctrl 付きのキーは Mac の Control の割り当てに合わせた。たとえば入力中の Ctrl+A は半角英数への変換、Ctrl+S はカーソルを左へ動かす。Windows アプリの Ctrl ショートカットは入力を終えてから使う。
 - Option 単独の組み合わせは TSF で局面別に割り当てられない（§4.2）。Alt を押すとゆらぎの Windows 側の規則で確定する。
+  入力中の文字に空白を足す Option＋Space（全角）も同じ理由で無い。Control＋Option＋Space（半角）は Ctrl+Alt+Space として局面別に割り当てられるが、
+  Mac ではシステムの「次の入力ソースへ」のショートカットが有効なら IME に届かないキーなので（[macos.md](keybind/macos.md) §1・§6）、行を置かない。入力中の文字に空白を足したいときは、`insert_full_space`・`insert_half_space` を利用者が割り当てる（§5.3）。
 - 確定取り消し、再変換、候補の辞書情報やタブ、macOS のライブ変換は未対応。入力中の Ctrl+Q と、予測候補や変換候補の窓での Home / End は何もしない。
 
 ### 5.3 利用者の設定の形式（ユーザー定義）
