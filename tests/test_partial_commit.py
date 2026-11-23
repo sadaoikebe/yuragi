@@ -478,7 +478,9 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual((k.committed, done.get("global")), ("きaき", None))
 
     def test_shift_capslock_keeps_the_conversion_until_a_character(self):
-        k = self.typed("わたしはがっこうにいく")
+        k = Keys(self.session())
+        for letter in "RAGL":  # こうせい
+            k.plain(letter)
         k.convert()
         listed = k.convert()
         held = k.tap(VK_CAPITAL, ["shift"])
@@ -487,8 +489,9 @@ class PartialCommitTest(unittest.TestCase):
         ended = k.tap(ord("W"))  # MS-IME commits and drops the character
         self.assertEqual((ended["phase"], ended["composition"], ended.get("global")),
                          ("empty", "", "ime_off"))
-        self.assertEqual(k.committed, held["composition"].replace(
-            listed["segments"][0]["surface"], listed["candidates"][2], 1))
+        settled = k.idle()
+        self.assertEqual((settled["phase"], settled["composition"]), ("empty", ""))
+        self.assertEqual(k.committed, listed["candidates"][2])
 
         k = self.typed("わたしはがっこうにいく")
         k.convert()

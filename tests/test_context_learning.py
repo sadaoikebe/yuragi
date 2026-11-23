@@ -20,7 +20,7 @@ from yuragi.ime import learning_admin
 from yuragi.ime.bunsetsu import Bunsetsu, Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline
-from yuragi.ime.server import dispatch
+from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession, Literal
 from yuragi.ime.zenz import ZenzConverter, spell
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID
@@ -315,6 +315,35 @@ class ContextLearningTest(unittest.TestCase):
         self.learn(None, "構成")
         self.assertEqual(s._learning.snapshot().head(
             "こうせい", Bunsetsu("かいぎの", "会議の"), zenz="校正").surface, "校正")
+
+    def test_learning_off_ignores_history_and_does_not_record_a_choice(self):
+        parser = argument_parser()
+
+        def open_candidates(learning):
+            args = parser.parse_args([
+                "--learning", learning, "--learning-file", str(self.path),
+                "--personal-file", str(self.path.with_name("personal.jsonl")),
+                "--prediction", "off",
+            ])
+            session = load_session(args, with_lm=False, lex=self.lex)
+            keys = Keys(lambda msg: dispatch(session, msg))
+            for key in "RAGL":  # こうせい
+                keys.tap(key)
+            keys.tap(SPACE)
+            return keys, keys.tap(SPACE)["candidates"]
+
+        enabled, original = open_candidates("on")
+        enabled.tap("2")
+        self.assertEqual(enabled.tap(ENTER)["commit"], original[1])
+        recorded = self.path.read_bytes()
+        self.assertTrue(recorded)
+        self.assertEqual(open_candidates("on")[1][0], original[1])
+
+        disabled, candidates = open_candidates("off")
+        self.assertEqual(candidates[0], original[0])
+        disabled.tap("3")
+        self.assertEqual(disabled.tap(ENTER)["commit"], original[2])
+        self.assertEqual(self.path.read_bytes(), recorded)
 
     def test_far_learned_row_and_snapshot_until_next_conversion(self):
         self.learn("原稿の", "私製校正", cost=50_000)

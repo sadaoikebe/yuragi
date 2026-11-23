@@ -135,6 +135,13 @@ class AutomaticPredictionTest(Fixture):
     def suggest(self, t):
         return dispatch(self.s, {"op": "suggest", "t": t})
 
+    def test_prediction_off_keeps_tab_from_opening_candidates(self):
+        self.s.prediction = "off"
+        typed = self.type_prefix()
+        reply = self.tap(VK_TAB, 200)
+        self.assertEqual((reply["phase"], reply["composition"], reply["candidates"]),
+                         ("composing", typed["composition"], []))
+
     def test_preview_keeps_preedit_until_tab_and_enter_commits_the_first_row(self):
         typed = self.type_prefix()
         due = typed["suggest_at"]

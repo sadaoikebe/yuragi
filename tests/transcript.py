@@ -1,8 +1,8 @@
 """One JSON file = one timestamped IME protocol transcript.
 
 The recorded key events go through the same dispatch() as the engine. Checked:
-no event raises, and the document formed by concatenating commits is the
-recorded one. The steps are the key events only.
+no event raises, any recorded commit occurs at its stated key event, and the
+document formed by concatenating commits is the recorded one.
 """
 
 from __future__ import annotations
@@ -49,5 +49,8 @@ def run_transcript(test, path: Path, real_lex: MozcLex | None = None) -> None:
     session = make_session(case, real_lex)
     committed = ""
     for step in case["steps"]:
-        committed += dispatch(session, step["event"])["commit"]
+        commit = dispatch(session, step["event"])["commit"]
+        if "commit" in step:
+            test.assertEqual(commit, step["commit"], step["event"])
+        committed += commit
     test.assertEqual(committed, case["committed"])
