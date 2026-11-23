@@ -253,12 +253,14 @@ New-Shared $Runtime {
     $py = Join-Path $dir "python.exe"
     $getPip = Join-Path $Download "get-pip.py"
     Invoke-WebRequest -UseBasicParsing "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
-    Invoke-Checked "pip のインストール" { & $py $getPip --no-warn-script-location }
+    # pip は利用者の設定 (pip.ini・PIP_* の環境変数) もキャッシュも使わない (--isolated --no-cache-dir)。
+    # PIP_REQUIRE_VIRTUALENV などがあると入らず、PIP_INDEX_URL などがあると取得先が変わるため。
+    Invoke-Checked "pip のインストール" { & $py $getPip --isolated --no-cache-dir --no-warn-script-location }
     Invoke-Checked "PyTorch $TorchVersion ($TorchVariant) のインストール" {
-        & $py -m pip install --no-warn-script-location --no-cache-dir --index-url $TorchIndex "torch==$TorchVersion"
+        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --index-url $TorchIndex "torch==$TorchVersion"
     }
     Invoke-Checked "依存パッケージのインストール" {
-        & $py -m pip install --no-warn-script-location -r $requirements
+        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location -r $requirements
     }
     Invoke-Checked "インポートの確認" {
         & $py -c "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"

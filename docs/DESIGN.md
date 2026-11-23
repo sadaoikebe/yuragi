@@ -466,6 +466,7 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
   - `get-pip.py` は `bootstrap.pypa.io` から取得し、pip を PyPI から入れる。どちらも版とハッシュの指定は無い。
   - torch は PyTorch から、transformers は PyPI から指定の版を入れる。pip が間接依存の版を解決し、
     インストーラは wheel のハッシュを指定しない。
+  - pip は利用者の pip の設定（`pip.ini`・`PIP_*` の環境変数）もキャッシュも使わない（`--isolated --no-cache-dir`）。
   - 言語モデルは Hugging Face のリビジョンを指定する。ゆらぎの側でのファイル単位のハッシュ照合は無い。
   - 版と出典の一覧は [NOTICE.md](../NOTICE.md) を参照。
 - **README の 1 行の形**: 「前回の残り（`%TEMP%\yuragi-setup.ps1`）を消す → 取得 → 取得できたとき（`$?`）だけ実行」。
