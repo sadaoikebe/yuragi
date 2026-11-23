@@ -127,7 +127,7 @@
 | `mode_hiragana` / `mode_katakana` / `mode_full_alnum` | global | ○ | ひらがな／全角カタカナ／全角英数の入力モードにする。直接入力ならオンにする。TIP が実行 |
 | `open_settings` / `open_word_register` | global（`open_word_register` は empty にも割り当て可） | ○ / ○ | 設定ウィンドウを開く（後者は単語登録のタブ）。TIP が実行 |
 | `open_menu` | empty | ○ | タスクバーの右クリックと同じ IME メニューを開く。TIP が実行 |
-| `insert_space` | empty, composing | ○ | 全角の空白を入れる |
+| `insert_space` | empty | ○ | 全角の空白を入れる（入力中の空白は `insert_full_space`・`insert_half_space`） |
 | `insert_alt_space` | empty | ○ | 半角の空白を入れる |
 | `insert_full_space` / `insert_half_space` | empty 以降 | ○ | 幅を決めた空白。入力なしでは文書に入れ、入力中では入力中の文字に足す。変換中より先では、確定してから空白で次の入力を始める |
 | `undo_commit` | empty | × | 直前の確定を取り消す |
