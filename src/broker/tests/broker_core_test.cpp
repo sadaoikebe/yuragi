@@ -178,6 +178,19 @@ void ExitWhileReadyResetsAndRestarts() {
     assert(f.Client(2).back().find("\"keymap\":" + changed_table) != std::string::npos);
 }
 
+// DESIGN「見張り」: an exit is logged with the fatal line of that engine, not of an earlier one.
+void ExitIsLoggedWithItsOwnFatalLine() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    b.OnEngineStderrLine("fatal dictionary-unreadable");
+    b.OnEngineExit(3);
+    assert(Contains(f.log, "engine exited with code 3 before ready (fatal dictionary-unreadable)"));
+    Ready(b);
+    b.OnEngineExit(9);
+    assert(Contains(f.log, "engine exited with code 9") && !Contains(f.log, "code 9 ("));
+}
+
 // Three exits within ten minutes: down, told once; "もう一度試す" starts it again.
 void ThreeExitsStopThenRetry() {
     Fake f;
@@ -310,6 +323,7 @@ int main() {
     ReplyOnlyAnswersTheMatchingSession();
     OldTipIsToldToLetKeysThrough();
     ExitWhileReadyResetsAndRestarts();
+    ExitIsLoggedWithItsOwnFatalLine();
     ThreeExitsStopThenRetry();
     ExitAtWindowBoundaryDoesNotCount();
     StartFailuresStopAndAllowRetry();

@@ -79,6 +79,7 @@ void Broker::StartEngine() {
     killing_ = false;
     kill_reason_ = Stop::None;
     warnings_.clear();  // a new engine tells its own
+    last_fatal_.clear();  // so is its fatal line
     SetState(EngineState::Starting);
     Log("starting the engine (" + std::to_string(exits_.size()) +
         " exit(s) in the last 10 minutes)");
@@ -278,7 +279,6 @@ void Broker::EngineGone(int code) {
 void Broker::Retry() {
     Log("retry requested");
     exits_.clear();
-    last_fatal_.clear();
     if (state_ == EngineState::Failed) {
         platform_.ClearStopped();
         StartEngine();
