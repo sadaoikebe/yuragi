@@ -90,7 +90,7 @@ def check_apps():
 def check_test_only():
     """§1.1: in an app that calls OnTestKeyDown first (Tk), TRUE there and FALSE in OnKeyDown loses the key."""
     L.probe()
-    tk = L.TkTarget("keyprobe-test-only")
+    tk = L.tk_target("keyprobe-test-only")
     try:
         for key in ((ord("A"), CTRL), (0x74, 0), (ord("K"), 0)):
             L.probe(test_only=[key], exe=EXE)
@@ -107,14 +107,14 @@ def check_test_only():
 def check_alt():
     """Alt+F in both release orders: not registered, and as a PreservedKey. Menu state and where the next letter goes."""
     L.probe()
-    tk = L.TkTarget("keyprobe-alt", menu=True)
+    tk = L.tk_target("keyprobe-alt", menu=True)
     try:
         for preserve in ([], [(ord("F"), ALT)]):
             L.probe(preserve=preserve, exe=EXE)
             for order in ORDERS:
                 off, toff = L.log_size(), tk.size()
                 L.chord(ord("F"), ALT, order=order, settle=0.6)
-                rows, app = L.key_rows(off, EXE), tk.text(toff)
+                rows, app = L.key_rows(off, EXE), L.tk_text(tk, toff)
                 menu = L.menu_state(tk.hwnd)
                 zoff = tk.size()
                 L.chord(ord("Z"), settle=0.3)
@@ -137,7 +137,7 @@ def check_alt():
 def check_preserve():
     """§1.4: 40 PreservedKeys, re-register while active, replace the list."""
     L.probe()
-    tk = L.TkTarget("keyprobe-preserve")
+    tk = L.tk_target("keyprobe-preserve")
     try:
         f = [0x70 + i for i in range(12)]
         many = ([(k, CTRL | SHIFT) for k in f] + [(k, CTRL | ALT) for k in f] + [(k, CTRL | SHIFT | ALT) for k in f]
@@ -166,7 +166,7 @@ def check_preserve():
 def check_repeat():
     """§1.5: lParam bit 30 on downs without an up (SendInput cannot auto-repeat; a person must hold a key for that)."""
     L.probe()
-    tk = L.TkTarget("keyprobe-repeat")
+    tk = L.tk_target("keyprobe-repeat")
     try:
         L.probe(exe=EXE)
         off = L.log_size()
@@ -180,7 +180,7 @@ def check_repeat():
 def check_capture():
     """Tk (the settings window) gets exactly the keys the TIP passes."""
     L.probe()
-    tk = L.TkTarget("keyprobe-capture")
+    tk = L.tk_target("keyprobe-capture")
     try:
         for eat in ([], [(ord("A"), CTRL)]):
             L.probe(eat=eat, exe=EXE)
@@ -207,7 +207,7 @@ CODES_PRESERVE = [(vk, m) for m in (ALT, ALT | SHIFT, ALT | CTRL)
 def check_codes():
     """§3.2: what each ` / CapsLock chord delivers on down and up, in both release orders (compare by eye with the table)."""
     L.probe()
-    tk = L.TkTarget("keyprobe-codes")
+    tk = L.tk_target("keyprobe-codes")
     try:
         L.probe(preserve=CODES_PRESERVE, exe=EXE)
         L.restore_state(EXE)
@@ -217,7 +217,7 @@ def check_codes():
                 L.chord(0, mods, scan=SC[key], order=order, settle=0.4)
                 rows = L.key_rows(off, EXE, scan=SC[key])
                 st = L.key_state(EXE)
-                say(f"-- [§3.2] {name:20} {order:10}: {L.describe(rows, CODES_PRESERVE)} | app: {tk.text(toff)} | "
+                say(f"-- [§3.2] {name:20} {order:10}: {L.describe(rows, CODES_PRESERVE)} | app: {L.tk_text(tk, toff)} | "
                     f"VK_KANJI held={bool(st.get('ks_kanji', 0) & 0x8000)}")
                 L.restore_state(EXE)
     finally:
@@ -229,7 +229,7 @@ def check_kanji():
     """§3.6: which PreservedKey form catches Alt+`, in both release orders."""
     forms = {"{VK_KANJI, any}": [(0x19, ANY)], "{VK_KANJI, Alt}": [(0x19, ALT)], "{VK_OEM_3, Alt}": [(0xC0, ALT)]}
     L.probe()
-    tk = L.TkTarget("keyprobe-kanji")
+    tk = L.tk_target("keyprobe-kanji")
     try:
         for name, keys in forms.items():
             L.probe(preserve=keys, exe=EXE)
@@ -248,7 +248,7 @@ def check_kanji():
 def check_toggle():
     """§3.2: after Shift+Ctrl+CapsLock (the only entry with the key-up switch), CapsLock alone is VK_CAPITAL again."""
     L.probe()
-    tk = L.TkTarget("keyprobe-toggle")
+    tk = L.tk_target("keyprobe-toggle")
     try:
         L.probe(exe=EXE)
         for order in ORDERS:
@@ -288,7 +288,7 @@ def _late(scan, mods, order):
 def check_late(only=None):
     """§3.2: the modifier pressed after the key (orders C, D). Alt cases enter the window menu (§1.3)."""
     L.probe()
-    tk = L.TkTarget("keyprobe-late")
+    tk = L.tk_target("keyprobe-late")
     try:
         L.probe(preserve=LATE_PRESERVE, exe=EXE)
         L.restore_state(EXE)
@@ -303,7 +303,7 @@ def check_late(only=None):
                 for _ in range(2):  # an Alt released with no key down in between enters the window menu
                     L.chord(L.VK_ESCAPE, settle=0.2)
                 st = L.key_state(EXE)
-                say(f"-- [§3.2] {name:15} {order}: {L.describe(rows, LATE_PRESERVE)} | app: {tk.text(toff)} | menu={menu} | "
+                say(f"-- [§3.2] {name:15} {order}: {L.describe(rows, LATE_PRESERVE)} | app: {L.tk_text(tk, toff)} | menu={menu} | "
                     f"held: oem3={bool(st.get('ks_oem3', 0) & 0x8000)} kanji={bool(st.get('ks_kanji', 0) & 0x8000)} "
                     f"capital={bool(st.get('ks_capital', 0) & 0x8000)}")
                 _unstick_late(st)
@@ -360,7 +360,7 @@ def check_hold():
              ("Alt+F held (3 downs)", [("alt", 0), ("f", 0), ("f", 0), ("f", 0), ("f", 1), ("alt", 1)], 3),
              ("Alt+F pressed twice", [("alt", 0), ("f", 0), ("f", 1), ("f", 0), ("f", 1), ("alt", 1)], 2)]
     L.probe()
-    tk = L.TkTarget("keyprobe-hold", menu=True)
+    tk = L.tk_target("keyprobe-hold", menu=True)
     try:
         L.probe(preserve=HOLD_KEYS, exe=EXE)
         for name, seq, fires in cases:

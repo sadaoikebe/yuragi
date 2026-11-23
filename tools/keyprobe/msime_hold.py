@@ -7,7 +7,7 @@ import os
 import time
 
 from . import lib
-from .msime import ImmTarget, press, summarize, tokens
+from .msime import hiragana, press, status, summarize, tokens
 
 G, CAPS, ALT, CTRL, SHIFT = lib.SC["grave"], lib.SC["caps"], lib.SC["alt"], lib.SC["ctrl"], lib.SC["shift"]
 
@@ -41,16 +41,12 @@ SETUPS = {"入力なし": "", "入力中": "kanji", "変換済み": "kanji {Spac
 
 
 def run(name, seq, setup):
-    t = ImmTarget("ms-ime-hold")
+    t = lib.Target("target_imm.py", "ms-ime-hold")
     out = [f"== {name} / {setup_name(setup)}"]
     try:
         time.sleep(0.3)
         if setup is not None:
-            press("Alt+`")
-            if status(t).get("conv") != "0x9":
-                press("Ctrl+CapsLock")
-            if status(t).get("conv") != "0x9" or not status(t).get("open"):
-                raise lib.Aborted(f"could not get MS-IME into hiragana: {status(t)}")
+            hiragana(t)
             for tok in tokens(setup):
                 press(tok, settle=0.06 if len(tok) == 1 else 0.3)
         time.sleep(0.4)
@@ -75,17 +71,12 @@ def run(name, seq, setup):
             lib.send(lib.VK_OEM_3, True)  # a stuck VK_OEM_3 from order C
             for _ in range(3):
                 lib.chord(lib.VK_ESCAPE, settle=0.05)
-            if status(t).get("caps"):
+            if status(t.rows()).get("caps"):
                 press("CapsLock")
         except lib.Aborted:
             pass
         t.close()
     return "\n".join(out)
-
-
-def status(t):
-    st = [r for r in t.rows() if r["ev"] in ("status", "ready")]
-    return st[-1] if st else {}
 
 
 def setup_name(s):

@@ -8,7 +8,6 @@ import ctypes.wintypes as wt
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 
@@ -173,37 +172,15 @@ def describe(rows, preserved=()):
 
 # -- the Tk target ---------------------------------------------------------------------------------
 
-class TkTarget:
+def tk_target(title, menu=False):
     """A Tk window that logs every key event it receives (target_tk.py)."""
+    return Target("target_tk.py", title, *(["--menu"] if menu else []))
 
-    def __init__(self, title, menu=False):
-        os.makedirs(WORK, exist_ok=True)
-        self.log = os.path.join(WORK, f"{title}.log")
-        open(self.log, "w").close()
-        args = [sys.executable, os.path.join(HERE, "target_tk.py"), title, self.log] + (["--menu"] if menu else [])
-        self.proc = subprocess.Popen(args)
-        self.hwnd, pid = find_window(title)
-        bring_front(self.hwnd, pid)
-        time.sleep(0.8)
 
-    def size(self):
-        return os.path.getsize(self.log)
-
-    def rows(self, offset):
-        with open(self.log, encoding="utf-8") as f:
-            f.seek(offset)
-            return [json.loads(x) for x in f.read().splitlines() if x.strip()]
-
-    def text(self, offset):
-        return " ".join(f"{r['ev']}:{r.get('keysym', '')}" for r in self.rows(offset)
-                        if r["ev"] == "menu" or r.get("keycode") not in (16, 17, 18)) or "(nothing)"
-
-    def close(self):
-        close(self.hwnd)
-        try:
-            self.proc.wait(10)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
+def tk_text(tk, offset):
+    """What the Tk window received after offset, without the modifier keys."""
+    return " ".join(f"{r['ev']}:{r.get('keysym', '')}" for r in tk.rows(offset)
+                    if r["ev"] == "menu" or r.get("keycode") not in (16, 17, 18)) or "(nothing)"
 
 
 def key_state(exe):

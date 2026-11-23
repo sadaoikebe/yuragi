@@ -3,7 +3,8 @@
     python -m tools.keyprobe.msime_table [state ...]
 
 Writes out/msime_table.jsonl (one line per state x key) and prints a compact table.
-Keys that open windows, toggle persistent settings, delete learning or go to the web are left out (UNSAFE).
+Keys that open windows, toggle persistent settings, delete learning or go to the web (F5, Ctrl+F7 and the
+like) are not in the lists; UNSAFE drops the ones the combined lists would make.
 """
 import json
 import os
@@ -11,7 +12,7 @@ import sys
 import time
 
 from . import lib
-from .msime import ImmTarget, press, summarize, tokens
+from .msime import hiragana, press, status, summarize, tokens
 
 STATES = {
     "empty": "{Alt+`}",
@@ -34,8 +35,7 @@ WITH_CTRL = ["Space", "Enter", "Esc", "Backspace", "Delete", "Tab", "Left", "Rig
              "PageUp", "PageDown", "F6", "F10", "CapsLock", "`"] + list("ACDEFGHIJKLMNOPQRSTUVWXZ")
 WITH_CTRL_SHIFT = ["Space", "Enter", "Left", "Right", "Up", "Down"]
 WITH_ALT = ["`", "CapsLock", "Enter", "Left", "Right", "Up", "Down", "Space"]
-UNSAFE = {"Ctrl+B", "Ctrl+Y", "Ctrl+F7", "Ctrl+F8", "Ctrl+F9", "Ctrl+F10", "Ctrl+Shift+F10", "F5", "Ctrl+Delete",
-          "Alt+Space", "Ctrl+Shift+CapsLock", "Ctrl+Esc"}
+UNSAFE = {"Ctrl+Delete", "Ctrl+F10", "Alt+Space", "Ctrl+Esc"}
 
 
 def keys():
@@ -48,10 +48,8 @@ def keys():
 
 
 def state_now(t):
-    for r in reversed(t.rows()):
-        if r["ev"] in ("status", "ready") and "open" in r:
-            return r["open"], r["conv"]
-    return None, None
+    st = status(t.rows())
+    return st.get("open"), st.get("conv")
 
 
 def caps_on(t):
@@ -76,7 +74,7 @@ _win = [None]
 
 def target():
     if _win[0] is None:
-        _win[0] = ImmTarget("ms-ime-table")
+        _win[0] = lib.Target("target_imm.py", "ms-ime-table")
         time.sleep(0.3)
     return _win[0]
 
@@ -90,14 +88,9 @@ def drop():
 def one(state, key):
     t = target()
     try:
-        if not state_now(t)[0]:
-            press("Alt+`")
-        if state_now(t)[1] != "0x9":
-            press("Ctrl+CapsLock")
+        hiragana(t)
         if caps_on(t):
             raise lib.Aborted("caps lock is on")
-        if state_now(t) != (True, "0x9"):
-            raise lib.Aborted(f"could not get MS-IME into hiragana: {state_now(t)}")
         if last_comp(t.rows()) is not None:
             raise lib.Aborted("composition left over")
         for tok in list(tokens(STATES[state]))[1:]:

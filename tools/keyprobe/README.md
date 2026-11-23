@@ -10,7 +10,7 @@ TSF が TIP をどう呼ぶか（[docs/keybind/windows.md](../../docs/keybind/wi
 
 | ファイル | 中身 |
 |---|---|
-| `lib.py` | `SendInput`（仮想キーコード、スキャンコード、Unicode）、前面の窓の確認、窓を探す・前に出す・閉じる |
+| `lib.py` | `SendInput`（仮想キーコード、スキャンコード、Unicode）、前面の窓の確認、窓を探す・前に出す・閉じる、試験の窓（`target_*.py`）を開いて記録を読む `Target` |
 | `target_tsf.py` | TSF の RichEdit（`SES_USECTF`。メモ帳と同じ）の窓。届いたキーのメッセージ、文字（変換中の文字を含む）、IME の開閉と入力モードを JSON の行で書く |
 | `target_imm.py` | IMM の窓。届いたキー、変換中の文字列と属性、確定した文字、候補ウィンドウの通知を書く |
 | `msime.py` | キーの書き方（下）と、IMM の窓にキーの列を送って記録を出すコマンド |
@@ -35,7 +35,7 @@ python -m tools.keyprobe.msime_tsf_table composing converted
 
 - **キーの書き方:** 空白で区切る。`{Name}`・`{Ctrl+Shift+Name}` が和音 1 つ、ほかの語は 1 字ずつ打つ（ローマ字）。`{Wait}` は何も押さずに記録だけする（`msime_tsf_seq.py`）。
   名前は `msime.py` の `NAMES`（`Space`、`Left`、`` ` ``、`CapsLock`、`F1`〜`F24`、`Numpad0` など）。`` ` `` と CapsLock はスキャンコードで送る（配列が仮想キーコードを決める）。
-- 状態の名前と作り方、キーの一覧は `msime_table.py` の `STATES` と `keys()`。危ないキー（単語登録や IME パッドを開くもの、Ctrl+Esc など）は `UNSAFE` で除く。
+- 状態の名前と作り方、キーの一覧は `msime_table.py` の `STATES` と `keys()`。危ないキー（単語登録や IME パッドを開くもの、Ctrl+Esc など）は一覧に入れない（修飾との組み合わせで生じるものは `UNSAFE` で除く）。
 - 表の 1 件ごとに、大文字のロックが切れていること、MS-IME がひらがなであること、文書が空であることを確かめ、違えば止まる。
 - 新 MS-IME の候補ウィンドウは「Windows Input Experience」の全画面の窓に描かれるので、窓の一覧からは開いているか分からない。画面を撮って見る。
 - 結果は `out/`（git に入れない）。作業の窓の記録は一時フォルダの `yuragi-keyprobe`。

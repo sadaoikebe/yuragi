@@ -6,9 +6,7 @@ Keys are space separated: a word of lower-case letters/digits/punct is typed key
 {Name} or {Ctrl+Shift+Name} is one chord. Each argument runs in a fresh window.
 MS-IME must be the input method; it starts in the mode the window gets (turned on with {Alt+`} if off).
 """
-import json
 import os
-import subprocess
 import sys
 import time
 
@@ -57,26 +55,23 @@ def tokens(seq):
                 yield ch
 
 
-class ImmTarget:
-    def __init__(self, title):
-        os.makedirs(lib.WORK, exist_ok=True)
-        self.log = os.path.join(lib.WORK, f"{title}.log")
-        open(self.log, "w").close()
-        self.proc = subprocess.Popen([sys.executable, os.path.join(lib.HERE, "target_imm.py"), title, self.log])
-        self.hwnd, pid = lib.find_window(title)
-        lib.bring_front(self.hwnd, pid)
-        time.sleep(0.8)
+def status(rows):
+    """The IME state (open, conv, caps) last logged by target_imm.py or target_tsf.py."""
+    for r in reversed(rows):
+        if r["ev"] in ("status", "ready") and "open" in r:
+            return r
+    return {}
 
-    def rows(self):
-        with open(self.log, encoding="utf-8") as f:
-            return [json.loads(x) for x in f.read().splitlines() if x.strip()]
 
-    def close(self):
-        lib.close(self.hwnd)
-        try:
-            self.proc.wait(10)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
+def hiragana(t):
+    """Turn MS-IME on in hiragana in the target t; stop when it does not get there."""
+    if not status(t.rows()).get("open"):
+        press("Alt+`")
+    if status(t.rows()).get("conv") != "0x9":
+        press("Ctrl+CapsLock")
+    st = status(t.rows())
+    if (st.get("open"), st.get("conv")) != (True, "0x9"):
+        raise lib.Aborted(f"could not get MS-IME into hiragana: {st}")
 
 
 def summarize(rows):
@@ -120,7 +115,7 @@ def summarize(rows):
 
 
 def run(seq, title="ms-ime-watch"):
-    t = ImmTarget(title)
+    t = lib.Target("target_imm.py", title)
     lines = [f"== {seq}"]
     try:
         r0 = t.rows()

@@ -1,10 +1,13 @@
-"""Shared parts of the key tools: SendInput, the foreground guard, windows.
+"""Shared parts of the key tools: SendInput, the foreground guard, windows, the target windows.
 
 Everything here only sends keys to the exact window under test.
 """
 import ctypes
 import ctypes.wintypes as wt
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 
@@ -194,3 +197,31 @@ def bring_front(hwnd, pid):
 def close(hwnd):
     user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
     TARGET["pid"] = TARGET["hwnd"] = None
+
+
+class Target:
+    """A target window (target_imm.py, target_tsf.py, target_tk.py) in front, and the JSON lines it logs."""
+
+    def __init__(self, script, title, *args):
+        os.makedirs(WORK, exist_ok=True)
+        self.log = os.path.join(WORK, f"{title}.log")
+        open(self.log, "w").close()
+        self.proc = subprocess.Popen([sys.executable, os.path.join(HERE, script), title, self.log, *args])
+        self.hwnd, pid = find_window(title)
+        bring_front(self.hwnd, pid)
+        time.sleep(0.8)
+
+    def size(self):
+        return os.path.getsize(self.log)
+
+    def rows(self, offset=0):
+        with open(self.log, encoding="utf-8") as f:
+            f.seek(offset)
+            return [json.loads(x) for x in f.read().splitlines() if x.strip()]
+
+    def close(self):
+        close(self.hwnd)
+        try:
+            self.proc.wait(10)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()

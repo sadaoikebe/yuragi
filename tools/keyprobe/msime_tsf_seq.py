@@ -17,8 +17,8 @@ import time
 import zlib
 
 from . import lib
-from .msime import press, tokens
-from .msime_tsf_table import TsfTarget, status, text
+from .msime import hiragana, press, status, tokens
+from .msime_tsf_table import text
 
 user32 = ctypes.WinDLL("user32")
 gdi32 = ctypes.WinDLL("gdi32")
@@ -71,13 +71,10 @@ def grab(area, path, zoom=1):
 
 
 def run(seq, tag, shots):
-    t = TsfTarget("msime-tsf-seq")
+    t = lib.Target("target_tsf.py", "msime-tsf-seq")
     out = [f"== {seq}"]
     try:
-        if not status(t.rows()).get("open"):
-            press("Alt+`")
-        if status(t.rows()).get("conv") != "0x9":
-            press("Ctrl+CapsLock")
+        hiragana(t)
         out.append(f"  start {status(t.rows())}")
         mark, n = len(t.rows()), 0
         for tok in tokens(seq):

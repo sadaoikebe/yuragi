@@ -10,44 +10,14 @@ Writes out/msime_tsf_table.jsonl.
 """
 import json
 import os
-import subprocess
 import sys
 import time
 
 from . import lib
-from .msime import press, tokens
+from .msime import hiragana, press, status, tokens
 from .msime_table import STATES, keys
 
 MODVK = {"0x10", "0x11", "0x12"}
-
-
-class TsfTarget:
-    def __init__(self, title):
-        os.makedirs(lib.WORK, exist_ok=True)
-        self.log = os.path.join(lib.WORK, f"{title}.log")
-        open(self.log, "w").close()
-        self.proc = subprocess.Popen([sys.executable, os.path.join(lib.HERE, "target_tsf.py"), title, self.log])
-        self.hwnd, pid = lib.find_window(title)
-        lib.bring_front(self.hwnd, pid)
-        time.sleep(0.8)
-
-    def rows(self):
-        with open(self.log, encoding="utf-8") as f:
-            return [json.loads(x) for x in f.read().splitlines() if x.strip()]
-
-    def close(self):
-        lib.close(self.hwnd)
-        try:
-            self.proc.wait(10)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-
-
-def status(rows):
-    for r in reversed(rows):
-        if r["ev"] == "status" and "open" in r:
-            return r
-    return {}
 
 
 def text(rows):
@@ -62,7 +32,7 @@ _win = [None]
 
 def target():
     if _win[0] is None:
-        _win[0] = TsfTarget("ms-ime-tsf")
+        _win[0] = lib.Target("target_tsf.py", "ms-ime-tsf")
         time.sleep(0.3)
     return _win[0]
 
@@ -85,12 +55,7 @@ def one(state, key):
         st = status(t.rows())
         if st.get("caps"):
             raise lib.Aborted("caps lock is on")
-        if not st.get("open"):
-            press("Alt+`")
-        if status(t.rows()).get("conv") != "0x9":
-            press("Ctrl+CapsLock")
-        if (status(t.rows()).get("open"), status(t.rows()).get("conv")) != (True, "0x9"):
-            raise lib.Aborted(f"could not get MS-IME into hiragana: {status(t.rows())}")
+        hiragana(t)
         if text(t.rows()):
             raise lib.Aborted("document not empty")
         for tok in list(tokens(STATES[state]))[1:]:
