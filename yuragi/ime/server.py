@@ -26,6 +26,7 @@ pending: the conversion awaits the LM (engine); poll with timeout at "timer".
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import gc
 import json
 import sys
@@ -291,10 +292,22 @@ def build_converter(args, *, warm_conversion=None, calibration=None, log=None):
     raise LmTooSlow("no device and model within the calibration limit", fastest)
 
 
-def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
+@contextmanager
+def freeze_after_dictionary_load():
+    """Skip automatic collections during startup, then freeze the long-lived dictionary."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+        gc.freeze()
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def load_session(args, *, lex=None) -> ImeSession:
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
-    with_lm=False leaves sess.lm unset (the engine loads it on a worker).
     lex: an already loaded lexicon (the engine loads it itself).
     """
     store = LearningStore(args.learning_file) if args.learning == "on" else None
@@ -305,15 +318,6 @@ def load_session(args, with_lm: bool = True, *, lex=None) -> ImeSession:
         # Sort the base readings once. Personal additions have their own small index.
         sess.predict_index.keys(sess._lex)
         sess._sync_personal()
-    if with_lm and args.lm_rescore:
-        # The LM is optional equipment: a machine without torch/transformers
-        # (e.g. a fresh install) still gets a working IME, without the LM.
-        try:
-            sess.lm = build_converter(args)
-        except Exception as exc:
-            print(f"LM unavailable ({type(exc).__name__}); continuing without it",
-                  file=sys.stderr, flush=True)
-            sess.lm = None
     return sess
 
 
@@ -339,9 +343,17 @@ def main() -> None:
     # Pipes default to cp1252 on Windows; Japanese composition must be UTF-8.
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
-    sess = load_session(args)
-    # The long-lived dictionary must not be traversed by full GC during typing.
-    gc.freeze()
+    with freeze_after_dictionary_load():
+        sess = load_session(args)
+    if args.lm_rescore:
+        # A machine without torch/transformers still gets a working IME.
+        try:
+            sess.lm = build_converter(args)
+        except Exception as exc:
+            print(f"LM unavailable ({type(exc).__name__}); continuing without it",
+                  file=sys.stderr, flush=True)
+        else:
+            gc.freeze()  # keep the model out of full collections too
     print(json.dumps({"ok": True, "msg": "ready"}, ensure_ascii=True), flush=True)
     for line in sys.stdin:
         line = line.strip()

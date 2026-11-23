@@ -325,7 +325,7 @@ class ContextLearningTest(unittest.TestCase):
                 "--personal-file", str(self.path.with_name("personal.jsonl")),
                 "--prediction", "off",
             ])
-            session = load_session(args, with_lm=False, lex=self.lex)
+            session = load_session(args, lex=self.lex)
             keys = Keys(lambda msg: dispatch(session, msg))
             for key in "RAGL":  # こうせい
                 keys.tap(key)

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-import gc
 import json
 import os
 from pathlib import Path
@@ -233,16 +232,16 @@ class Engine:
         settings = self.read_settings(args, config, server)
         self.settings = settings
 
-        try:
-            lex = mozc_dict.load_lex()
-        except (FileNotFoundError, mozc_dict.DictionaryFormatError) as exc:
-            log(where(exc))
-            fatal("dictionary-unreadable")
-        except mozc_dict.CacheWriteError as exc:
-            log(f"{where(exc)} (errno {exc.errno})")
-            fatal("cache-not-written")
-
-        loaded = server.load_session(settings, with_lm=False, lex=lex)
+        with server.freeze_after_dictionary_load():
+            try:
+                lex = mozc_dict.load_lex()
+            except (FileNotFoundError, mozc_dict.DictionaryFormatError) as exc:
+                log(where(exc))
+                fatal("dictionary-unreadable")
+            except mozc_dict.CacheWriteError as exc:
+                log(f"{where(exc)} (errno {exc.errno})")
+                fatal("cache-not-written")
+            loaded = server.load_session(settings, lex=lex)
         store = loaded._learning
         if store is not None:
             log(f"learning on: {store.lines} lines, "
@@ -495,7 +494,6 @@ def main(argv=None) -> int:
     if args.require_lm and not engine.worker.wait_until_loaded():
         engine.worker.thread.join()
         fatal("lm-unavailable")
-    gc.freeze()  # the dictionary must not be traversed by full collections while typing
     channel.ready(engine.keymap.eat_table())
     log(f"ready in {time.perf_counter() - started:.2f} s")
     if engine.worker is not None and not args.require_lm:

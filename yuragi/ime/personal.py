@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 
 from yuragi.lattice.expand import is_literal_face
@@ -124,22 +125,29 @@ class PersonalLexicon:
         self.count = 0
         self.skipped = 0  # lines of the file that are not a valid word (shown to the user)
         self._signature: object = ()  # never equal to a stat signature or None
+        self._unreadable = False
         self._original: dict[str, list[Entry] | None] = {}  # reading -> list before overlay
         self.added_readings: tuple[str, ...] = ()  # sorted additions to the base reading index
         self._lock = threading.Lock()
 
     def sync(self, lex: MozcLex) -> None:
-        try:
-            st = self.path.stat()
-            signature = (st.st_ino, st.st_mtime_ns, st.st_size)
-        except OSError:
-            signature = None
-        if signature == self._signature:
-            return
         with self._lock:
-            if signature == self._signature:
+            try:
+                try:
+                    st = self.path.stat()
+                    signature = (st.st_ino, st.st_mtime_ns, st.st_size)
+                except FileNotFoundError:
+                    signature = None
+                if signature == self._signature and not self._unreadable:
+                    return
+                words, skipped = scan_words(self.path) if signature is not None else ([], 0)
+            except OSError as exc:
+                if not self._unreadable:
+                    print(f"personal lexicon unreadable ({type(exc).__name__}); keeping the current words",
+                          file=sys.stderr, flush=True)
+                self._unreadable = True
                 return
-            words, skipped = scan_words(self.path) if signature is not None else ([], 0)
+            self._unreadable = False
             by_reading: dict[str, list[Word]] = {}
             for w in words:
                 by_reading.setdefault(w.reading, []).append(w)

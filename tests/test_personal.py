@@ -8,7 +8,7 @@ import unittest
 
 from tests.test_document_context import ENTER, Keys, SPACE
 from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word
-from yuragi.ime.server import dispatch
+from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, MozcLex
 
@@ -52,6 +52,37 @@ class PersonalFileTest(TempFile):
         keys.tap("W")
         keys.tap("W")
         self.assertEqual(keys.tap(SPACE)["composition"], "かか")
+
+    def test_conversion_survives_an_unreadable_personal_dictionary(self):
+        size = DEFAULT_NOUN_ID + 1
+        lex = MozcLex({}, set(), array("h", [0]) * (size * size), size)
+        args = argument_parser().parse_args([
+            "--personal-file", str(self.path), "--learning", "off", "--prediction", "tab",
+        ])
+        self.path.mkdir()  # stat works, but the directory cannot be read as a file
+        session = load_session(args, lex=lex)
+        keys = Keys(lambda msg: dispatch(session, msg))
+
+        self.assertEqual(keys.tap("W")["composition"], "か")
+        self.assertEqual(keys.tap(ENTER)["commit"], "か")
+
+        def convert():
+            keys.tap("W")
+            keys.tap("W")
+            keys.tap(SPACE)
+            return keys.tap(ENTER)["commit"]
+
+        self.path.rmdir()
+        add_word(self.path, "かか", "花歌")
+        self.assertEqual(convert(), "花歌")
+
+        self.path.unlink()
+        self.path.mkdir()
+        self.assertEqual(convert(), "花歌")
+
+        self.path.rmdir()
+        add_word(self.path, "かか", "佳歌")
+        self.assertEqual(convert(), "佳歌")
 
 if __name__ == "__main__":
     unittest.main()
