@@ -34,13 +34,12 @@ import time
 import traceback
 import unicodedata
 
-from yuragi.ime.bunsetsu import PAGE_SIZE, candidates
+from yuragi.ime.bunsetsu import PAGE_SIZE, candidates, segments_from
 from yuragi.lattice import mozc_dict
 from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import (BOS_ID, CACHE_DIR, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
-                                       UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex,
-                                       apply_numerals, apply_user_lex)
+                                       UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex, finish_lex)
 from yuragi.lattice.table import DATA, load_table, reverse_table
 from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end_cost,
                                            nbest_tokens, word_cost)
@@ -102,7 +101,7 @@ def read_rows(path: Path) -> list[dict]:
 
 
 def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
-    """Reuse loader semantics without its cache-writing side effect."""
+    """The engine's lexicon (finish_lex), without load_lex's cache-writing side effect."""
     if cache is not None:
         lex = mozc_dict.load_cache(cache, allow_legacy=True)
     else:
@@ -115,16 +114,13 @@ def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
         finally:
             mozc_dict.DICT_DIR = original
         lex = MozcLex(by_reading, prefixes, connect, size)
-    mozc_dict.apply_numeral_context(lex)
-    apply_numerals(lex)
-    changed = set()
-    if user is not None:
-        # Only a changed/new effective entry is attributed to the overlay.
-        readings = {json.loads(line)["reading"] for line in user.read_text(encoding="utf-8").splitlines()
-                    if line.strip() and not line.lstrip().startswith("#")}
-        before = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])}
-        apply_user_lex(lex, user)
-        changed = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])} - before
+    # Only a changed/new effective entry is attributed to the overlay.
+    readings = set() if user is None else {
+        json.loads(line)["reading"] for line in user.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")}
+    before = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])}
+    finish_lex(lex, user)
+    changed = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])} - before
     names = {int(i): name for line in (dictionary_dir / "id.def").read_text(
         encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
     names.update({i: names[base] for i, (_, base) in enumerate(lex.numeral_pos, lex.pos_size)})
@@ -137,19 +133,6 @@ def entry_key(e: Entry) -> tuple:
 
 def plain_tokens(reading: str) -> list[dict]:
     return [{"kind": "plain", "key": "?", "kana": ch} for ch in reading]
-
-
-def ui_segments(pieces: list[Piece], names: dict[int, str]) -> list[tuple[int, int]]:
-    """Same POS grouping as bunsetsu.segments_from, with the selected id.def."""
-    groups = []
-    for p in pieces:
-        pos = names.get(p.lid, "").split(",")
-        content = ((pos[0] in ("名詞", "動詞", "形容詞") and pos[1] not in ("接尾", "非自立"))
-                   or pos[0] in ("副詞", "連体詞", "接続詞", "感動詞", "接頭詞"))
-        if not groups or p.literal or p.learned or groups[-1][-1].literal or content:
-            groups.append([])
-        groups[-1].append(p)
-    return [(g[0].start, g[-1].end) for g in groups]
 
 
 def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict) -> dict:
@@ -175,7 +158,7 @@ def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict
             "pieces": pieces, "word_cost": word_total, "connection_cost": connection_total + eos,
             "bos_cost": pieces[0]["connection_cost"] if pieces else 0, "eos_cost": eos,
             "word_boundaries": [p.end for p in decoded.pieces[:-1]],
-            "ui_segments": ui_segments(decoded.pieces, names)}
+            "ui_segments": [(g.start, g.end) for g in segments_from(decoded.pieces, 0, lex)]}
 
 
 def constrained_path(reading: str, surface: str, lex: MozcLex,

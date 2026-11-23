@@ -399,11 +399,21 @@ def load_lex(*, user_lexicon: bool = True) -> MozcLex:
             f"pos={pos_size} cache={cache}",
             file=sys.stderr,
         )
+    finish_lex(lex, USER_LEX if user_lexicon else None)
+    return lex
+
+
+def finish_lex(lex: MozcLex, user: Path | None) -> None:
+    """What every reader applies to the raw (cached) dictionary, in memory.
+
+    Numerals, the user lexicon `user` (None: without it) and the zero-row
+    penalty. load_lex and the evaluation tools both use this one function.
+    """
     apply_numeral_context(lex)
     apply_numerals(lex)
-    n = apply_user_lex(lex) if user_lexicon else 0
+    n = apply_user_lex(lex, user) if user is not None else 0
     if n:
-        print(f"  user lexicon: {n} entries from {USER_LEX.name}", file=sys.stderr)
+        print(f"  user lexicon: {n} entries from {user.name}", file=sys.stderr)
     # Apply only after saving/loading the raw cache. Include column 0 (EOS),
     # so a zero-row entry pays the same penalty even at the end of input.
     penalty = int(os.environ.get("ZERO_ROW_PENALTY", "3000"))
@@ -412,4 +422,3 @@ def load_lex(*, user_lexicon: bool = True) -> MozcLex:
             end = start + lex.pos_size
             if not any(lex.connect[start:end]):
                 lex.connect[start:end] = array("h", [penalty]) * lex.pos_size
-    return lex
