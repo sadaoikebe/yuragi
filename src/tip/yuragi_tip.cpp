@@ -359,6 +359,33 @@ static bool SpawnBroker() {
 
 // -- the connection (DESIGN「接続」) ----------------------------------------------------------
 
+static std::wstring ParentDir(const std::wstring& path) {
+    size_t slash = path.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
+}
+static bool SamePath(const std::wstring& a, const std::wstring& b) {
+    return CompareStringOrdinal(a.c_str(), (int)a.size(), b.c_str(), (int)b.size(), TRUE) == CSTR_EQUAL;
+}
+
+// DESIGN「通信」: the pipe's server is a broker of this installation, not whoever made a
+// pipe of that name while there was no broker. Its executable is yuragi-broker.exe beside
+// this DLL, or in another version's folder beside this one's (an application that stays
+// open across an update keeps the old DLL, DESIGN「インストールと更新」).
+static bool ServedByBroker(HANDLE pipe) {
+    ULONG pid = 0;
+    if (!GetNamedPipeServerProcessId(pipe, &pid)) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    wchar_t path[MAX_PATH];
+    DWORD size = MAX_PATH;
+    bool named = QueryFullProcessImageNameW(process, 0, path, &size);
+    CloseHandle(process);
+    if (!named) return false;
+    const std::wstring exe(path, size), dir = ParentDir(exe), mine = DllDir();
+    return SamePath(exe, dir + L"\\yuragi-broker.exe") &&
+           (SamePath(dir, mine) || SamePath(ParentDir(dir), ParentDir(mine)));
+}
+
 // One pipe and one reader thread per Tip. The thread waits for the pipe, the
 // stop signal and the connect signal, and polls only while it waits for a pipe
 // to appear (Open). Each line read is queued and the TIP's window is told;
@@ -497,9 +524,18 @@ private:
         bool spawned = false;
         ULONGLONG deadline = 0;
         for (;;) {
+            // The server may only identify this client, never act as it.
             HANDLE pipe = CreateFileW(name_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                                      OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-            if (pipe != INVALID_HANDLE_VALUE) return pipe;
+                                      OPEN_EXISTING,
+                                      FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                                      nullptr);
+            if (pipe != INVALID_HANDLE_VALUE) {
+                if (ServedByBroker(pipe)) return pipe;
+                CloseHandle(pipe);
+                Log(L"pipe refused: its server is not the broker");
+                why = Link::NotAllowed;
+                return INVALID_HANDLE_VALUE;
+            }
             DWORD error = GetLastError();
             if (error == ERROR_ACCESS_DENIED) {
                 why = Link::NotAllowed;  // e.g. a sandbox the pipe does not admit (DESIGN「通信」)

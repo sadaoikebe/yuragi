@@ -291,7 +291,7 @@ enum class Link { Connected, Connecting, Unreachable, NotAllowed };
 //   Connecting   waiting for the pipe (a broker was just started)
 //   Unreachable  no broker, and starting one did not give a pipe in time
 //   NotAllowed   this process must not start one (DESIGN「ブローカーを起動する条件」: another version, maintenance,
-//                sandboxed or elevated): it only ever connects
+//                sandboxed or elevated): it only ever connects; or the pipe's server is not the broker
 
 inline Mode ModeFor(Link link, const std::string& state) {
     switch (link) {
