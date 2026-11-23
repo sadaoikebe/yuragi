@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from array import array
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -11,12 +12,13 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[2]
 DICT_DIR = ROOT / "third_party" / "mozc_oss_dict"
 MANIFEST = ROOT / "data" / "dictionary-manifest.json"
-CACHE_FORMAT = "mozc_lex_v5"
+CACHE_FORMAT = "mozc_lex_v6"
 
 
 def cache_name(manifest: Path = MANIFEST) -> str:
@@ -304,37 +306,66 @@ def read_cache(cache: Path) -> MozcLex | None:
     format), the answer is the same: build it again from the text (DESIGN「起動時の読み込み」).
     """
     try:
-        data = cache.read_bytes()
+        with cache.open("rb") as f:
+            readings, counts, surfaces, lids, rids, costs, extra_prefixes, connect, pos_size = (
+                pickle.load(f))
+        if (not isinstance(connect, array) or connect.typecode != "h"
+                or pos_size <= 0 or len(connect) != pos_size * pos_size):
+            raise ValueError("dictionary cache has an invalid connection matrix")
+        numbers: dict[int, int] = {}
+        rows = zip(surfaces, lids, rids, costs, strict=True)
+        by_reading: dict[str, list[Entry]] = {}
+        for reading, count in zip(readings, counts, strict=True):
+            bucket = []
+            for _ in range(count):
+                surface, lid, rid, cost = next(rows)
+                bucket.append(Entry(surface, reading, numbers.setdefault(lid, lid),
+                                    numbers.setdefault(rid, rid), numbers.setdefault(cost, cost)))
+            by_reading[reading] = bucket
+        if next(rows, None) is not None:
+            raise ValueError("dictionary cache has extra entries")
+        prefixes = set(extra_prefixes)
+        prefixes.update(by_reading)
+        return MozcLex(by_reading, prefixes, connect, pos_size)
     except FileNotFoundError:
         return None
-    except OSError as exc:
+    except Exception as exc:  # any decoding failure: the cache is rebuilt
         print(f"dictionary cache unreadable ({type(exc).__name__}); rebuilding",
               file=sys.stderr, flush=True)
         return None
-    try:
-        lex = pickle.loads(data)
-        if not isinstance(lex, MozcLex):
-            raise TypeError(type(lex).__name__)
-    except Exception as exc:  # any unpickling failure: the cache is rebuilt
-        print(f"dictionary cache unreadable ({type(exc).__name__}); rebuilding",
-              file=sys.stderr, flush=True)
-        return None
-    return lex
 
 
 def write_cache(cache: Path, lex: MozcLex) -> None:
-    """Write beside the cache, then take its name: never a half-written cache."""
-    tmp = cache.with_name(f"{cache.name}.{os.getpid()}.tmp")
+    """Write the raw dictionary in columns, then atomically replace the cache."""
+    readings = list(lex.by_reading)
+    counts = array("I")
+    surfaces = []
+    lids, rids, costs = array("H"), array("H"), array("i")
+    for bucket in lex.by_reading.values():
+        counts.append(len(bucket))
+        for entry in bucket:
+            surfaces.append(entry.surface)
+            lids.append(entry.lid)
+            rids.append(entry.rid)
+            costs.append(entry.cost)
+    extra_prefixes = [p for p in lex.prefixes if p not in lex.by_reading]
+    tmp = None
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(pickle.dumps(lex, protocol=5))
+        with NamedTemporaryFile(dir=cache.parent, prefix=f"{cache.name}.", suffix=".tmp",
+                                delete=False) as f:
+            tmp = Path(f.name)
+            pickle.dump((readings, counts, surfaces, lids, rids, costs, extra_prefixes,
+                         lex.connect, lex.pos_size), f, protocol=5)
         os.replace(tmp, cache)
+        tmp = None
     except OSError as exc:
-        try:
-            tmp.unlink(missing_ok=True)
-        finally:
-            raise CacheWriteError(exc.errno, f"cannot write the dictionary cache {cache}: "
-                                             f"{exc.strerror}") from exc
+        raise CacheWriteError(exc.errno, f"cannot write the dictionary cache {cache}: "
+                                         f"{exc.strerror}") from exc
+    finally:
+        if tmp is not None:
+            with suppress(OSError):
+                tmp.unlink(missing_ok=True)
 
 
 def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:

@@ -57,7 +57,6 @@ class _St:
     rid: int
     word_i: int
     prev: int  # index in states[word.start]
-    reading: str
     side: str | None = None  # direction of the press open here (alternation.py)
 
 
@@ -84,18 +83,13 @@ def spans_from(tokens: list[dict], i: int, lex: MozcLex, learning=None,
     return out
 
 
-def _prune(sts: list[_St], *, mode: Literal["rid", "reading"]) -> list[_St]:
-    """Keep the cheapest path per mode key, capped at POS_KEEP.
-
-    RID pruning preserves POS alternatives for 1-best accuracy.
-    Reading-prefix pruning preserves L/R pairs such as 既読/記憶 for
-    future n-best context rescoring, at a cost to 1-best accuracy.
-    """
+def _prune(sts: list[_St]) -> list[_St]:
+    """Keep the cheapest path per RID and side, capped at POS_KEEP per side."""
     sts.sort(key=lambda s: s.score)
-    best: dict[tuple[int, str | None] | str, _St] = {}
+    best: dict[tuple[int, str | None], _St] = {}
     kept: Counter[str | None] = Counter()  # the cap applies per open-press direction
     for s in sts:
-        key = (s.rid, s.side) if mode == "rid" else s.reading
+        key = (s.rid, s.side)
         if key not in best and kept[s.side] < POS_KEEP:
             best[key] = s
             kept[s.side] += 1
@@ -114,7 +108,7 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
     t0 = time.perf_counter()
     plan = Plan(tokens)
     states: list[list[_St]] = [[] for _ in range(n + 1)]
-    states[0] = [_St(0, BOUNDARY_RID if left_id == BOS_ID else left_id, -1, -1, "")]
+    states[0] = [_St(0, BOUNDARY_RID if left_id == BOS_ID else left_id, -1, -1)]
     words: list[Word] = []
     n_spans = 0
 
@@ -122,25 +116,48 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
         if not states[i]:
             continue
         if len(states[i]) > POS_KEEP:
-            states[i] = _prune(states[i], mode="rid")
+            states[i] = _prune(states[i])
         spans = spans_from(tokens, i, lex, learning, plan)
         n_spans += len(spans)
+        predecessors: dict[tuple[int, Sides], list[tuple[int, int, str | None]]] = {}
         for w in spans:
             wi = len(words)
             words.append(w)
-            # admits()/after() inlined: this loop runs once per (state, word).
+            target = states[w.end]
+            rid = w.rid
             bound, enter, exit = w.sides.bound, w.sides.enter, w.sides.exit
-            for si, st in enumerate(states[i]):
-                if bound and enter is not None and enter != st.side:
-                    continue
-                states[w.end].append(
-                    _St(st.score + word_cost(lex, st.rid, w), w.rid, wi, si,
-                        st.reading + w.entry.reading, exit if bound else st.side)
-                )
+            # Leave small lists intact, as they may bypass pruning. Once the
+            # target will be pruned, only the best path per outgoing side matters.
+            if len(target) <= POS_KEEP:
+                for si, st in enumerate(states[i]):
+                    if bound and enter is not None and enter != st.side:
+                        continue
+                    score = st.score + word_cost(lex, st.rid, w)
+                    side = exit if bound else st.side
+                    target.append(_St(score, rid, wi, si, side))
+                continue
+            # Words with the same left POS and sides share the search.
+            cost = w.entry.cost
+            key = (BOUNDARY_RID if w.literal else w.entry.lid, w.sides)
+            if key not in predecessors:
+                best: dict[str | None, tuple[int, int]] = {}
+                for si, st in enumerate(states[i]):
+                    if bound and enter is not None and enter != st.side:
+                        continue
+                    score = st.score + word_cost(lex, st.rid, w) - cost
+                    side = exit if bound else st.side
+                    previous = best.get(side)
+                    if previous is None or score < previous[1]:
+                        best[side] = (si, score)
+                # Preserve the arrival order of equal scores across distinct sides.
+                predecessors[key] = sorted((si, score, side)
+                                           for side, (si, score) in best.items())
+            for si, score, side in predecessors[key]:
+                target.append(_St(score + cost, rid, wi, si, side))
 
     if not states[n]:
         raise RuntimeError("no path")
-    states[n] = _prune(states[n], mode="rid")
+    states[n] = _prune(states[n])
 
     best_i = 0
     best_score = 10**18
@@ -240,7 +257,7 @@ def decode_prefix(tokens: list[dict], lex: MozcLex, prefix: bytes, *, exact: boo
 
 
 def _prune_prefix(sts: list[_PrefixSt]) -> list[_PrefixSt]:
-    """_prune(mode="rid") separately for each number of matched bytes."""
+    """_prune separately for each number of matched bytes."""
     sts.sort(key=lambda s: s.score)
     best: set[tuple[int, int, str | None]] = set()
     kept: Counter[tuple[int, str | None]] = Counter()
