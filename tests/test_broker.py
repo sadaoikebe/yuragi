@@ -236,8 +236,10 @@ class ProcessTest(BrokerCase):
         tip = self.tip()
         tip.hello()
         tip.wait_state("ready")  # the first broker's engine has started and is counted
+        # The same pipe: a broker for it is already running (one broker per pipe, so that
+        # the tests run beside the installed broker).
         second = subprocess.run([str(broker_binary()), "--data-dir", str(self.data),
-                                 "--pipe", self.address + "-other",
+                                 "--pipe", self.address,
                                  "--engine-json", str(self.engine_json)], timeout=WAIT)
         self.assertEqual(second.returncode, 0)
         self.assertEqual(self.starts(), 1)

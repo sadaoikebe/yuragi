@@ -1,6 +1,6 @@
 // yuragi-broker.exe: the broker on Windows (DESIGN「ブローカー」).
 //
-// One per sign-in (Local\yuragi-ime-broker). No console; its only window is
+// One per sign-in (Local\yuragi-ime-broker; one per pipe with --pipe). No console; its only window is
 // a hidden one for the notification icon. Everything else happens on one
 // thread around an I/O completion port: the TIPs' named pipe, the engine's
 // output (read by two threads that post each line), the engine's exit, the
@@ -903,7 +903,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
 
     // DESIGN「起動と終了」: one broker per sign-in; a second one leaves without a word.
-    HANDLE single = CreateMutexW(nullptr, TRUE, BROKER_MUTEX);
+    // A broker on another pipe (the tests) is apart from the installed one.
+    std::wstring mutex_name = BROKER_MUTEX;
+    if (!pipe_name.empty()) {
+        std::wstring suffix = pipe_name;
+        std::replace(suffix.begin(), suffix.end(), L'\\', L'/');  // not allowed in a mutex name
+        mutex_name += L"-" + suffix;
+    }
+    HANDLE single = CreateMutexW(nullptr, TRUE, mutex_name.c_str());
     if (!single || GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     if (engine_json.empty()) {
         // DESIGN「起動と終了」: only the version this user has installed runs.
