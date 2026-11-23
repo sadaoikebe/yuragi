@@ -29,6 +29,14 @@ class CandidateRowsTest(unittest.TestCase):
         self.assertEqual(rows_of(keys),
                          ["１２３４", "1234", "一二三四", "千二百三十四", "1,234", "１，２３４"])
 
+    def test_numpad_digits_make_one_number_clause(self):
+        keys = Keys(kana_session())
+        for vk in (0x61, 0x62):  # Numpad 1, 2: half-width digits
+            keys.tap(vk)
+        self.assertEqual(len(keys.s.segments), 1)
+        self.assertEqual(keys.s.segments[0].selected.kind, "number")
+        self.assertIn("十二", rows_of(keys))
+
     def test_relative_dates_follow_the_clock(self):
         lex = MozcLex({"あした": [Entry("明日", "あした", 1, 1, 100)],
                        "ことし": [Entry("今年", "ことし", 1, 1, 100)]},

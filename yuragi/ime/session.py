@@ -214,16 +214,18 @@ def display_segments(parts: list, picks: list[KanaRun] | None) -> list[Segment]:
     for part in parts:
         if isinstance(part, str):
             last = segments[-1] if segments else None
-            if (half_width_ascii(part) and last is not None and last.literal
+            if is_digit(part) and last is not None and last.selected.kind == "number":
+                # Digits stay a number run before the half-width check below, so
+                # numpad digits (half-width literals) keep the number candidates.
+                digits = last.selected.reading + part
+                last.end += 1
+                last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
+            elif (half_width_ascii(part) and last is not None and last.literal
                     and half_width_ascii(last.selected.reading)):
                 # 英数の続き: the half-width run is one clause, as digits are.
                 text = last.selected.reading + part
                 last.end += 1
                 last.selected = Candidate(text, text, 0, BOS_ID, BOS_ID, "literal")
-            elif is_digit(part) and last is not None and last.selected.kind == "number":
-                digits = last.selected.reading + part
-                last.end += 1
-                last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
             elif isinstance(part, FrozenText) and isinstance(previous, FrozenText):
                 # The spelling NonConvert left before more input: one clause, as typed.
                 text = last.selected.reading + part
