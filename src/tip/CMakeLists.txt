@@ -57,9 +57,9 @@ if(WIN32)
   )
 endif()
 
-# Also buildable on Linux: this executable has no Win32/TSF dependencies.
-option(TIP_BUILD_JSON_TESTS "Build standalone JSON parser checks" ON)
-if(TIP_BUILD_JSON_TESTS)
+# Also buildable on Linux: these executables have no Win32/TSF dependencies.
+option(TIP_BUILD_TESTS "Build the TIP's JSON and decision checks (tip_json, tip_logic, keymap round trip)" ON)
+if(TIP_BUILD_TESTS)
   enable_testing()
   add_executable(tip_json_test tests/tip_json_test.cpp tip_json.h)
   target_compile_features(tip_json_test PRIVATE cxx_std_17)
