@@ -125,6 +125,7 @@
     ["converting", "Ctrl+F9", "noop"],
     ["converting", "Ctrl+Shift+F10", "noop"],
     ["converting", "Ctrl+Delete", "noop"],
+    ["converting", "Shift+Tab", "noop"],
     ["converting", "Ctrl+Space", "insert_half_space"],
     ["converting", "Ctrl+Shift+Space", "insert_full_space"],
     ["converting", "F6", "to_hiragana"],
