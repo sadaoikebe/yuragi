@@ -66,17 +66,22 @@ class ChordJudgmentTest(unittest.TestCase):
             # S4, character up: an overlap under 20 ms is a plain character.
             ("w+0 O+50 w-69 O-150", [P("w"), T()]),
             ("w+0 O+50 w-70 O-150", [A("w")]),
+            # ... and only if it is shorter than the gap between the downs: a tie is a chord (NICOLA 5.5.2).
+            ("w+0 O+10 w-19 O-150", [P("w"), T()]),
+            ("w+0 O+10 w-20 O-150", [A("w")]),
             # S4, Space up first: a chord.
             ("w+0 O+30 O-60 w-90", [A("w")]),
-            # S4, next character: a chord if Space came nearer the next character.
-            ("w+0 O+30 e+61 e-100 O-120", [A("w"), A("e")]),
-            ("w+0 O+30 e+60 e-100 O-120", [P("w"), A("e")]),
+            # S4, next character: Space goes with the nearer character; a tie, the first (NICOLA 5.4.2).
+            ("w+0 O+30 e+60 e-100 O-120", [A("w"), A("e")]),
+            ("w+0 O+30 e+59 e-100 O-120", [P("w"), A("e")]),
             # S4/S5 deadline: a chord.
             ("w+0 O+30 O-500 w-510", [A("w")]),
             ("O+0 w+10 O-500 w-510", [A("w")]),
             # S5, Space up: an overlap under 20 ms is a lone Space, the character pending.
             ("O+0 w+50 O-69 w-100", [T(), P("w")]),
             ("O+0 w+50 O-70 w-100", [A("w")]),
+            ("O+0 w+10 O-19 w-100", [T(), P("w")]),
+            ("O+0 w+10 O-20 w-100", [A("w")]),
             # S5, next character: a chord.
             ("O+0 w+10 e+30 w-50 e-60 O-100", [A("w"), A("e")]),
             # S7 (last 50 ms), Space up: a chord if cover >= last - cover.

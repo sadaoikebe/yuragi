@@ -185,7 +185,7 @@ class ChordFsm:
         elif st == "S4":
             t1 = self.o_time - self.m_time
             t2 = now - self.o_time
-            if t1 < t2:
+            if t1 <= t2:  # a tie goes to the first character (NICOLA 5.4.2)
                 out = self._shift()
                 self.state = "S7"
             else:
@@ -222,7 +222,7 @@ class ChordFsm:
         if st == "S4":
             t1 = self.o_time - self.m_time
             t2 = now - self.o_time
-            if t1 >= t2 and t2 < self.overlap_ms:
+            if t1 > t2 and t2 < self.overlap_ms:  # a tie is a chord (NICOLA 5.5.2, n = 1)
                 self.state = "S3"
                 self.timer_deadline = self.o_time + self.timeout_ms
                 return self._plain()
@@ -252,7 +252,7 @@ class ChordFsm:
         if st == "S5":
             t1 = self.m_time - self.o_time
             t2 = now - self.m_time
-            if t1 >= t2 and t2 < self.overlap_ms:
+            if t1 > t2 and t2 < self.overlap_ms:
                 self.state = "S2"
                 self.timer_deadline = self.m_time + self.timeout_ms
                 return [ThumbTap()]
