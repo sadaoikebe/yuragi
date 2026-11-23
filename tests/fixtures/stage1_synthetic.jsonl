@@ -30,8 +30,8 @@
 {"type": "key", "ms": 2110, "id": "overlap", "vk": 74, "action": "down"}
 {"type": "key", "ms": 2140, "id": "overlap", "vk": 74, "action": "up"}
 {"type": "key", "ms": 2150, "id": "overlap", "vk": 75, "action": "down"}
-{"type": "key", "ms": 2170, "id": "overlap", "vk": 75, "action": "up"}
-{"type": "key", "ms": 2175, "id": "overlap", "vk": 32, "action": "up"}
+{"type": "key", "ms": 2160, "id": "overlap", "vk": 32, "action": "up"}
+{"type": "key", "ms": 2190, "id": "overlap", "vk": 75, "action": "up"}
 {"type": "key", "ms": 3300, "id": "overlap", "vk": 123, "action": "down"}
 {"type": "key", "ms": 3330, "id": "overlap", "vk": 123, "action": "up"}
 {"type": "prompt_end", "ms": 3330, "id": "overlap", "status": "complete", "event_count": 8, "held_vks": []}

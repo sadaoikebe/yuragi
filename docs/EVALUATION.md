@@ -100,6 +100,8 @@ python3 -m tools.replay_stage1 data/recordings/stage1-YYYYMMDD-HHMMSS.jsonl --re
 python3 -m tools.replay_stage1 tests/fixtures/stage1_synthetic.jsonl --json   # 機械可読のレポートを標準出力へ
 ```
 
+- `tests/fixtures/stage1_synthetic.jsonl` は手で書いた合成の記録。1 文に 1 つずつ、誤りの無い打鍵、下の表の
+  失敗の型、余分・欠落、Backspace と Enter を入れてある（文の id がその名前）。
 - 完了した文ごとに新しい `ChordFsm` へキーを時刻順に渡す。各イベントの前に期限の来たタイマーを発火し、
   **期限と同じ時刻のキーよりタイマーを先に処理する**。仮想時計による決定的な再生で、Win32 のタイマー配送の
   遅れは再現しない。
