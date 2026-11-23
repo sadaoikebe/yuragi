@@ -221,7 +221,7 @@ class ContextLearningTest(unittest.TestCase):
         keys, shown = convert("げんこうこうせいを", "原稿構成を")
         self.pick(keys, shown, "原稿校正を")
         keys.commit()
-        self.assertEqual([(p.reading, p.surface) for p in learning_admin.pairs(self.path)],
+        self.assertEqual([(p.reading, p.surface) for p in learning_admin.pairs(LearningStore(self.path))],
                          [("こうせい", "校正")])
 
         keys, other = convert("しりょうこうせいが", "資料構成が")
@@ -498,7 +498,7 @@ class ContextLearningTest(unittest.TestCase):
         def view():
             snap = store.snapshot()
             paths = [{"kind": "plain", "kana": c} for c in "こうせい"]
-            return (learning_admin.pairs(self.path), list(snap.learned()),
+            return (learning_admin.pairs(LearningStore(self.path)), list(snap.learned()),
                     list(snap.spans(paths, 0, self.lex)),
                     [getattr(snap.head("こうせい", prev, zenz="公正"), "surface", None)
                      for prev in contexts])

@@ -682,7 +682,7 @@ MS-IME では A は次の欄に入る（キーを 1 打ずつその場で処理�
 | 向き | 項目 | 中身 |
 |---|---|---|
 | TIP → ブローカー | `{"op":"set_mode","mode":"katakana"}` | 入力モード（`hiragana`・`katakana`・`full_alnum`）。`mode_hiragana`・`mode_katakana`・`mode_full_alnum`（§7.5） |
-| TIP → ブローカー | `{"op":"open_admin","tab":"words"}` | 開くタブ。無ければ既定のタブ |
+| TIP → ブローカー | `{"op":"open_admin"}` | 設定ウィンドウを開く。`open_settings`・`open_word_register` のどちらも、最初のタブ（単語登録）で開く |
 | エンジン → ブローカー | `ready` に `"keymap":{…}` | 食べる表（§7.1） |
 | エンジン → ブローカー | `{"event":"keymap","keymap":{…}}` | 読み直したあとの表 |
 | ブローカー → エンジン | `{"op":"reload_keymap","sid":3,"seq":1}` | 設定ファイルを読み直す |

@@ -138,7 +138,7 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
     }
     if (op == "open_admin") {
         Log("opening the management window");
-        platform_.OpenAdmin(msg.Get("tab").text == "words");
+        platform_.OpenAdmin();
         return;
     }
     if (op == "quit") {

@@ -22,17 +22,12 @@ class LearnedPair:
     user_word: bool  # created from a kana spelling absent from the dictionary
 
 
-def pairs(path: Path) -> list[LearnedPair]:
-    """Surviving (reading, surface) pairs, most recent first."""
-    store = LearningStore(path)
+def pairs(store: LearningStore) -> list[LearnedPair]:
+    """The surviving (reading, surface) pairs of a history read once, most recent first."""
     out = []
     for row in store.records():
         out.append(LearnedPair(row.reading, row.surface, row.timestamp, row.user_word))
     return sorted(out, key=lambda p: -p.last)
-
-
-def search(path: Path, query: str) -> list[LearnedPair]:
-    return [p for p in pairs(path) if query in p.reading or query in p.surface]
 
 
 def forget(path: Path, reading: str, surface: str) -> bool:

@@ -20,7 +20,7 @@ struct Fake : Platform {
     std::vector<std::string> to_engine;
     std::vector<std::pair<ClientId, std::string>> to_client;
     std::vector<Stop> stops;
-    std::vector<bool> admin;  // OpenAdmin(words)
+    int admin = 0;  // OpenAdmin calls
     std::vector<std::string> log;
 
     int64_t Now() override { return now; }
@@ -34,7 +34,7 @@ struct Fake : Platform {
     void WriteClient(ClientId c, const std::string& line) override { to_client.push_back({c, line}); }
     void NotifyStopped(Stop reason) override { stops.push_back(reason); }
     void ClearStopped() override { ++cleared; }
-    void OpenAdmin(bool words) override { admin.push_back(words); }
+    void OpenAdmin() override { ++admin; }
     void Log(const std::string& line) override { log.push_back(line); }
     void Quit() override { ++quits; }
 
@@ -118,14 +118,13 @@ void SessionsOpenOnlyAfterHello() {
 }
 
 // DESIGN「メニュー」: the TIP's settings and word-registration commands.
-void ManagementWindowOpensOnTheAskedTab() {
+void ManagementWindowOpensOnRequest() {
     Fake f;
     Broker b(f);
     b.Start();
     Hello(b, 1);
     b.OnClientLine(1, R"({"op":"open_admin"})");
-    b.OnClientLine(1, R"({"op":"open_admin","tab":"words"})");
-    assert((f.admin == std::vector<bool>{false, true}));
+    assert(f.admin == 1);
 }
 
 void ReplyOnlyAnswersTheMatchingSession() {
@@ -386,7 +385,7 @@ void RetryWhileRunningRestartsWithoutCounting() {
 int main() {
     KeysPassWhileStartingThenGoToTheEngine();
     SessionsOpenOnlyAfterHello();
-    ManagementWindowOpensOnTheAskedTab();
+    ManagementWindowOpensOnRequest();
     ReplyOnlyAnswersTheMatchingSession();
     AnAppPackageCannotQuit();
     OldTipIsToldToLetKeysThrough();

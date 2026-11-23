@@ -48,7 +48,7 @@ public:
     virtual void WriteClient(ClientId client, const std::string& line) = 0;
     virtual void NotifyStopped(Stop reason) = 0;  // the one notice (DESIGN「通知」), once per stop
     virtual void ClearStopped() = 0;  // the stop the user was told about is over
-    virtual void OpenAdmin(bool words) = 0;
+    virtual void OpenAdmin() = 0;
     virtual void Log(const std::string& line) = 0;
     virtual void Quit() = 0;
 };

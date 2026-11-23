@@ -2473,8 +2473,8 @@ private:
             return true;
         }
         if (command == GlobalCommand::Settings || command == GlobalCommand::Words) {
-            OpenAdmin(command == GlobalCommand::Settings ? R"({"op":"open_admin"})"
-                                                         : R"({"op":"open_admin","tab":"words"})");
+            // The window opens on 単語登録, its first tab: both commands open it as it is.
+            OpenAdmin(R"({"op":"open_admin"})");
             return true;
         }
         if (!tip_logic::Toggles(CurrentMode())) return false;

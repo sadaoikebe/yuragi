@@ -100,7 +100,7 @@ TIP → ブローカー（プロトコル 1）:
 {"op":"hello","proto":1,"passes":true}
 {"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest/reload_keymap
 {"op":"retry"}                                              ← 利用者が「もう一度試す」を選んだ
-{"op":"open_admin"}                                         ← 設定ウィンドウを開く（`"tab":"words"` で単語登録のタブ）
+{"op":"open_admin"}                                         ← 設定ウィンドウを開く（最初のタブの単語登録で開く）
 {"op":"quit"}                                               ← インストーラだけが使う（アプリパッケージからは受け付けない）
 ```
 

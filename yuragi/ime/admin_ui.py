@@ -145,12 +145,16 @@ class AdminModel:
     def learning_state(self) -> str:
         return self._values()["learning"]
 
-    def learned(self, query: str = "") -> list[learning_admin.LearnedPair]:
-        if not self.learning_file.exists():
+    def learning_store(self) -> LearningStore | None:
+        """The history read once: what one refresh of the window shows comes from it."""
+        return LearningStore(self.learning_file) if self.learning_file.exists() else None
+
+    def learned(self, query: str = "", store: LearningStore | None = None
+                ) -> list[learning_admin.LearnedPair]:
+        if store is None and (store := self.learning_store()) is None:
             return []
         query = query.strip()
-        return (learning_admin.search(self.learning_file, query) if query
-                else learning_admin.pairs(self.learning_file))
+        return [p for p in learning_admin.pairs(store) if query in p.reading or query in p.surface]
 
     @staticmethod
     def learned_row(pair: learning_admin.LearnedPair) -> tuple[str, str, str, str]:
@@ -158,8 +162,8 @@ class AdminModel:
         when = datetime.fromtimestamp(pair.last).strftime("%Y-%m-%d %H:%M")
         return (pair.reading, pair.surface, when, "○" if pair.user_word else "")
 
-    def learning_counts(self) -> str:
-        pairs = self.learned()
+    def learning_counts(self, store: LearningStore | None = None) -> str:
+        pairs = self.learned(store=store)
         words = sum(p.user_word for p in pairs)
         return (f"学習: {LEARNING_STATES[self.learning_state()]} ・ 学習した変換 {len(pairs)} 件"
                 f"（うち単語として覚えたもの {words} 件） ・ 登録した単語 {len(self.words())} 件")
@@ -241,7 +245,7 @@ class AdminModel:
 
     # -- status ----------------------------------------------------------------
 
-    def status_rows(self) -> list[tuple[str, str]]:
+    def status_rows(self, store: LearningStore | None = None) -> list[tuple[str, str]]:
         """What the 状態 tab shows (DESIGN「メニュー」), in Japanese."""
         from yuragi.lattice import dict_manifest
         rows = []
@@ -268,9 +272,10 @@ class AdminModel:
             rows.append(("辞書", "照合の記録（マニフェスト）がありません"))
 
         rows.append(("学習", LEARNING_STATES[self.learning_state()]))
-        if self.learning_file.exists():
-            store = LearningStore(self.learning_file)
-            pairs = learning_admin.pairs(self.learning_file)
+        if store is None:
+            store = self.learning_store()
+        if store is not None:
+            pairs = learning_admin.pairs(store)
             rows += [("学習した変換", f"{len(pairs)} 件"),
                      ("　うち単語として覚えたもの", f"{sum(p.user_word for p in pairs)} 件"),
                      ("学習履歴の行数", f"{store.lines} 行"),
@@ -551,20 +556,22 @@ class AdminWindow:
 
     def refresh(self):
         m = self.model
+        store = m.learning_store()
         self._fill(self.words_tree, [(w.reading, w.surface, w.pos, w.cost) for w in m.words()])
-        self._fill(self.learning_tree, [m.learned_row(p) for p in m.learned(self.l_query.get())])
-        self.l_counts.set(m.learning_counts())
+        self._fill(self.learning_tree,
+                   [m.learned_row(p) for p in m.learned(self.l_query.get(), store)])
+        self.l_counts.set(m.learning_counts(store))
         rows = m.setting_rows()
         self._fill(self.settings_tree, [(r.label, r.value, r.help) for r in rows])
         self._setting_rows = {str(i): r for i, r in enumerate(rows)}
         if self.notebook.select() == str(self.status_frame):
-            self._refresh_status()
+            self._refresh_status(store)
         elif self.notebook.select() == str(self.keys_frame):
             self.keys_tab.open()
 
-    def _refresh_status(self):
+    def _refresh_status(self, store=None):
         # Hashes the dictionary files and asks the broker: only when looked at.
-        self._fill(self.status_tree, self.model.status_rows())
+        self._fill(self.status_tree, self.model.status_rows(store))
 
 
 def main(argv=None) -> int:
@@ -572,7 +579,6 @@ def main(argv=None) -> int:
     parser.add_argument("--runtime-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--dict-dir", type=Path, default=None)
-    parser.add_argument("--tab", choices=("words",), default=None)
     args = parser.parse_args(argv)
     if args.dict_dir is not None:
         from yuragi.lattice import mozc_dict
@@ -584,9 +590,7 @@ def main(argv=None) -> int:
         return 1
     declare_dpi_aware()
     root = tk.Tk()
-    window = AdminWindow(root, AdminModel(args.runtime_dir, args.config))
-    if args.tab == "words":
-        window.notebook.select(0)
+    AdminWindow(root, AdminModel(args.runtime_dir, args.config))  # opens on 単語登録
     root.mainloop()
     return 0
 
