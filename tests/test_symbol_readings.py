@@ -10,11 +10,22 @@ from yuragi.ime.bunsetsu import SYMBOL_HEAD, SYMBOL_OFFSET
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
-from yuragi.ime.symbol_readings import load_symbols
+from yuragi.ime.symbol_readings import load_symbols, parse
 from tests.real_dictionary import real_lex
 from tests.support import type_plain
 
 VK_RETURN, VK_DELETE = 0x0D, 0x2E
+
+
+class ParseTest(unittest.TestCase):
+    def test_rows_and_readings_left_out(self):
+        tsv = ("POS\tCHAR\tReading (space separated)\tdescription\n"
+               "句読点\t、\tとうてん , 、 ， てん\t読点\n"      # one-character readings
+               "記号\t乙\tぶしゅ おつにょう\t部首\n"           # a radical
+               "記号\t\U0001B001\tへんたいがな\t\n"           # outside the BMP
+               "記号\t・\tてん なかぐろ\t中点\n"
+               "記号\t、\tてん\t\n")                          # 、 again
+        self.assertEqual(parse(tsv), {"とうてん": ("、",), "てん": ("、", "・"), "なかぐろ": ("・",)})
 
 
 class SymbolConversionTest(unittest.TestCase):
