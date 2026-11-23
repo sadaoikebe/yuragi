@@ -3,12 +3,14 @@
 # Linux ではブローカーの中核を偽の土台で試し、Windows では MSVC で本物の
 # yuragi-broker.exe を作って、偽エンジン・偽 TIP と名前付きパイプで動かす。
 # Windows では、torch を入れて、エンジンの標準入力の試験 (DESIGN「エンジン」の注意) も回す。
+# リリース (release.yml) も、公開の前にこのワークフローをタグのコミットで呼ぶ。
 name: ci
 
 on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
