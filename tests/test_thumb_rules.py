@@ -6,6 +6,9 @@ import unittest
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap
 from yuragi.ime.session import load_table, to_lattice_token
 from yuragi.lattice.alternation import Plan
+from yuragi.lattice.mozc_dict import Entry, MozcLex
+
+from tests.support import Keys, kana_session
 
 
 def tokens(events):
@@ -120,6 +123,29 @@ class AlternationTest(unittest.TestCase):
         self.assertEqual(self.readings([("w", 1, 1), ("w", 2, 1)]),
                          ["ええ", "えが", "がえ", "がが"])
 
+    def test_a_reading_that_breaks_the_rule_has_no_sides(self):
+        lattice = [to_lattice_token(AmbShift("w", 1, turn), self.table) for turn in (1, 2)]
+        plan = Plan(lattice)
+        self.assertIsNone(plan.read(0, 2, "ええ"))
+        self.assertIsNotNone(plan.read(0, 2, "えが"))
+
+    def test_a_press_split_between_words_still_alternates(self):
+        """絵 is much cheaper than 蛾, but one press cannot give え twice."""
+        lex = MozcLex({"え": [Entry("絵", "え", 1, 1, 100)], "が": [Entry("蛾", "が", 1, 1, 3000)]},
+                      {"え", "が"}, [0] * 4, 2)
+        keys = Keys(kana_session(lex))
+        keys.chords("w", "w")
+        self.assertEqual(keys.convert()["composition"], "絵蛾")
+        self.assertEqual(keys.tap(0x20)["candidates"], ["蛾絵", "絵蛾", "がえ", "ガエ", "えが", "エガ"])
+
+        keys = Keys(kana_session(lex))
+        keys.chords("w", "w")
+        keys.convert()
+        keys.tap(0x25, ["shift"])  # え | が
+        keys.tap(0x20)
+        keys.tap(0x27)  # the second segment: its press is pinned by え
+        keys.tap(0x20)
+        self.assertEqual(keys.tap(0x20)["candidates"], ["蛾", "が", "ガ"])
 
 if __name__ == "__main__":
     unittest.main()
