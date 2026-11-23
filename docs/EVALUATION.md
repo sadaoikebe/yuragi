@@ -39,6 +39,7 @@ Mozc OSS 辞書に付く `evaluation.tsv` を使う。
     引数の全文があるか（省略時 N=1）。文全体の候補による**近似**で、Mozc 本来の文節候補の順位和とは異なる。
   - `Conversion Match`: 1-best に引数の部分文字列があるか。`Not` は判定を反転する。
   - `Suggestion` などは対象外として件数を出す。入力できない読みも別に出す。
+- 読みのかなは NICOLA の表で、「。」「！」など IME が 1 字の記号として打つものはその記号のまま入れる。半角の英数字を含む読みは入力できない読み。
 - `--details` は入力できる各行の `PASS` / `FAIL` / `SKIP` を JSONL に出す。
 
 単語の全候補を調べるときは `nbest_tokens(..., k=十分大きな値)`（CONVERSION.md の「n-best」）。

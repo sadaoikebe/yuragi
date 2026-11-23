@@ -12,11 +12,30 @@ import csv
 import json
 from pathlib import Path
 import re
+import string
 import time
 
+from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import DICT_DIR, load_lex
 from yuragi.lattice.table import load_table, reverse_table
 from yuragi.lattice.token_viterbi import decode_tokens, nbest_tokens
+from yuragi.text import to_full_width
+
+
+def typing_table(table: dict) -> dict[str, dict]:
+    """The token that types each character: kana through reverse_table, and a symbol
+    the IME types as one literal (USAGE「記号」): the table's non-kana faces (、。「 …)
+    and Shift+ASCII symbols in full width (！ …). Anything else cannot be typed."""
+    symbols = {face for faces in table["keys"].values() for face in faces.values()
+               if face and is_literal_face(face)}
+    symbols.update(to_full_width(string.punctuation))
+    return {**{s: {"kind": "literal", "text": s} for s in symbols}, **reverse_table(table)}
+
+
+def typed_tokens(reading: str, typing: dict, unambiguous: bool = False) -> list[dict]:
+    """The tokens for reading; unambiguous: every kana as the known kana (una)."""
+    return [typing[ch] if not unambiguous or typing[ch]["kind"] == "literal"
+            else {"kind": "plain", "key": "?", "kana": ch} for ch in reading]
 
 
 def parse_criterion(command: str) -> tuple[str, bool, int] | None:
@@ -50,7 +69,7 @@ def main() -> None:
     args = parser.parse_args()
 
     lex = load_lex(user_lexicon=not args.no_user_lexicon)
-    reverse = reverse_table(load_table())
+    typing = typing_table(load_table())
     total = evaluated = skipped = reading_matches = surface_matches = 0
     criteria = Counter()
     groups: dict[str, Counter] = {}
@@ -64,11 +83,10 @@ def main() -> None:
                 raise ValueError(f"Malformed evaluation row {total + 1}: {row!r}")
             total += 1
             reading, expected = row[1:3]
-            if any(kana not in reverse for kana in reading):
+            if any(ch not in typing for ch in reading):
                 skipped += 1
                 continue
-            tokens = ([{"kind": "plain", "key": "?", "kana": kana} for kana in reading]
-                      if args.unambiguous else [reverse[kana] for kana in reading])
+            tokens = typed_tokens(reading, typing, args.unambiguous)
             start = time.perf_counter()
             decoded = decode_tokens(tokens, lex)
             elapsed += time.perf_counter() - start

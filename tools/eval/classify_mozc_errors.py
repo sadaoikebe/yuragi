@@ -20,6 +20,7 @@ import csv
 from dataclasses import asdict
 import difflib
 import hashlib
+from itertools import groupby
 import json
 import multiprocessing as mp
 from pathlib import Path
@@ -40,10 +41,10 @@ from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import (BOS_ID, CACHE_DIR, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
                                        UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex, finish_lex)
-from yuragi.lattice.table import DATA, load_table, reverse_table
+from yuragi.lattice.table import DATA, load_table
 from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end_cost,
                                            nbest_tokens, word_cost)
-from .run_mozc_eval import criterion_passes, parse_criterion
+from .run_mozc_eval import criterion_passes, parse_criterion, typed_tokens, typing_table
 
 
 # The primary class is a cause. criterion_review (the command does not
@@ -132,8 +133,14 @@ def entry_key(e: Entry) -> tuple:
     return e.reading, e.surface, e.lid, e.rid, e.cost
 
 
-def plain_tokens(reading: str) -> list[dict]:
-    return [{"kind": "plain", "key": "?", "kana": ch} for ch in reading]
+def ui_segments(pieces: list[Piece], lex: MozcLex) -> list[tuple[int, int]]:
+    """The IME's clauses (session.display_segments): a literal alone, segments_from per kana run."""
+    spans = []
+    for literal, run in groupby(pieces, key=lambda p: p.literal):
+        run = list(run)
+        spans += ([(p.start, p.end) for p in run] if literal
+                  else [(s.start, s.end) for s in segments_from(run, 0, lex)])
+    return spans
 
 
 def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict) -> dict:
@@ -159,7 +166,7 @@ def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict
             "pieces": pieces, "word_cost": word_total, "connection_cost": connection_total + eos,
             "bos_cost": pieces[0]["connection_cost"] if pieces else 0, "eos_cost": eos,
             "word_boundaries": [p.end for p in decoded.pieces[:-1]],
-            "ui_segments": [(g.start, g.end) for g in segments_from(decoded.pieces, 0, lex)]}
+            "ui_segments": ui_segments(decoded.pieces, lex)}
 
 
 def constrained_path(reading: str, surface: str, lex: MozcLex,
@@ -172,29 +179,32 @@ def constrained_path(reading: str, surface: str, lex: MozcLex,
     No path here means only failure under this explicit policy.
     """
     states = [dict() for _ in range(len(reading) + 1)]
-    states[0][(0, BOS_ID)] = (0, None, None)
+    states[0][(0, BOUNDARY_RID)] = (0, None, None)
     for i, layer in enumerate(states[:-1]):
         arcs = []
+        ch = reading[i]
+        if is_literal_face(ch):
+            # A typed symbol is one literal; it closes the kana run, as in the engine.
+            arcs.append(Word(i, i + 1, Entry(ch, ch, BOS_ID, BOS_ID, 0), literal=True))
         end_limit = len(reading) if policy == "unrestricted" else min(len(reading), i + MAX_WORD_MORA)
         for end in range(i + 1, end_limit + 1):
             part = reading[i:end]
-            if any(is_literal_face(ch) for ch in part):
+            if any(is_literal_face(c) for c in part):
                 break  # Dictionary arcs cannot cross a literal boundary.
             for e in lex.by_reading.get(part, ()):
                 if policy != "nbest" or e.cost < UNK_COST:
-                    arcs.append((end, e))
-        if policy == "backoff" and not lex.by_reading.get(reading[i]):
-            ch = reading[i]
-            arcs.append((i + 1, Entry(ch, ch, UNK_LID, UNK_LID, UNK_COST)))
+                    arcs.append(Word(i, end, e))
+        if policy == "backoff" and not is_literal_face(ch) and not lex.by_reading.get(ch):
+            arcs.append(Word(i, i + 1, Entry(ch, ch, UNK_LID, UNK_LID, UNK_COST), unknown=True))
         for (out, rid), (cost, _, _) in list(layer.items()):
-            for end, e in arcs:
-                if not surface.startswith(e.surface, out):
+            for w in arcs:
+                if not surface.startswith(w.entry.surface, out):
                     continue
-                key = out + len(e.surface), e.rid
-                score = cost + lex.transition(rid, e.lid) + e.cost
-                if key not in states[end] or score < states[end][key][0]:
-                    states[end][key] = (score, (i, out, rid), e)
-    finals = [(cost + lex.transition(rid, BOS_ID), rid) for (out, rid), (cost, _, _) in states[-1].items()
+                key = out + len(w.entry.surface), w.rid
+                score = cost + word_cost(lex, rid, w)
+                if key not in states[w.end] or score < states[w.end][key][0]:
+                    states[w.end][key] = (score, (i, out, rid), w)
+    finals = [(cost + end_cost(lex, rid), rid) for (out, rid), (cost, _, _) in states[-1].items()
               if out == len(surface)]
     if not finals:
         return None
@@ -202,9 +212,10 @@ def constrained_path(reading: str, surface: str, lex: MozcLex,
     i, out = len(reading), len(surface)
     pieces = []
     while i:
-        _, previous, e = states[i][(out, rid)]
+        _, previous, w = states[i][(out, rid)]
         start, old_out, old_rid = previous
-        pieces.append(Piece(e.surface, e.reading, e.lid, e.cost, start, i, e.rid))
+        e = w.entry
+        pieces.append(Piece(e.surface, e.reading, e.lid, e.cost, start, i, e.rid, w.literal))
         i, out, rid = start, old_out, old_rid
     return DecodeResult(reading, surface, score, list(reversed(pieces)))
 
@@ -317,7 +328,7 @@ def target_diagnostic(reading: str, target: str, decoded: DecodeResult, tokens: 
 def diagnose_condition(row: dict, mode: str, reverse: dict, lex: MozcLex,
                        overlay: set, names: dict, emit) -> dict:
     reading = row["input_reading"]
-    tokens = plain_tokens(reading) if mode == "una" else [reverse[ch] for ch in reading]
+    tokens = typed_tokens(reading, reverse, mode == "una")
     best = decode_tokens(tokens, lex)
     criterion = parse_criterion(row["command"])
     result = {"status": "partial", **describe_path(best, lex, overlay, names),
@@ -710,7 +721,7 @@ def main():
     if args.limit:
         rows = rows[:args.limit]
     lex, overlay, names = load_snapshot(args.dictionary_dir, cache, user)
-    reverse = reverse_table(load_table(args.table))
+    reverse = typing_table(load_table(args.table))
     results = []
     for i, row in enumerate(run_rows(rows, lex, overlay, names, reverse, args.row_timeout, args.memory_mb), 1):
         results.append(row)
