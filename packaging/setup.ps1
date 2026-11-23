@@ -330,7 +330,6 @@ New-Shared $script:Dict {
 # 言語モデル (CONVERSION「装置とモデル」): CPU 用の small は常に、GPU 版 PyTorch なら GPU 用の medium も。
 # どれを使うかは、エンジンが起動のたびに実測して決める。
 # 引数名は $modelName: 中で呼ぶ Invoke-Checked の $name に隠されないように。
-# 引数名は $modelName: 中で呼ぶ Invoke-Checked の $name に隠されないように。
 function Get-Model([string]$modelName) {
     $line = Select-String -LiteralPath (Join-Path $StageApp "packaging\fetch_model.py") -Pattern "^MODEL_$modelName = \(`"([^`"]+)`", `"([0-9a-f]+)`"\)"
     if (-not $line) { Fail "packaging\fetch_model.py に MODEL_$modelName がありません。" }
@@ -552,6 +551,8 @@ foreach ($kind in @("runtime", "dict", "model")) {
 }
 if ($cacheName) { $cleanup += @(Get-ChildItem -LiteralPath $script:Cache -File | Where-Object { $_.Name -ne $cacheName }) }
 if (Test-Path -LiteralPath $StagingRoot) { $cleanup += @(Get-Item -LiteralPath $StagingRoot) }
+# この版の取得物 (DLL・ブローカー・zip など。段 5 のあとは使わない) と試運転の出力。
+$cleanup += @(Get-Item -LiteralPath (Join-Path $Version "download"), (Join-Path $Version "selftest.txt") -ErrorAction SilentlyContinue)
 $left = @()
 foreach ($item in $cleanup) {
     try { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop } catch { $left += $item.FullName }
