@@ -33,23 +33,26 @@ channel.input.read(1)  # waits on the pipe, as Engine.serve does
 @unittest.skipUnless(importlib.util.find_spec("torch"), "needs torch")
 class IdleInputTest(unittest.TestCase):
     def test_torch_loads_while_the_input_is_idle(self):
-        child = subprocess.Popen([sys.executable, "-c", CHILD], cwd=ROOT,
-                                 stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-        lines = queue.Queue()
-        threading.Thread(target=lambda: [lines.put(line) for line in child.stderr],
-                         daemon=True).start()
-        try:
-            # stdin stays open and silent the whole time, as when nobody types.
-            while True:
-                try:
-                    line = lines.get(timeout=60)
-                except queue.Empty:
-                    self.fail("torch did not load while the engine waited on its input")
-                if line.strip() == b"loaded":
-                    break
-        finally:
-            child.kill()
-            child.wait()
+        # Leaving the with block closes the pipes (after the reader has seen their end).
+        with subprocess.Popen([sys.executable, "-c", CHILD], cwd=ROOT,
+                              stdin=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+            lines = queue.Queue()
+            reader = threading.Thread(target=lambda: [lines.put(line) for line in child.stderr],
+                                      daemon=True)
+            reader.start()
+            try:
+                # stdin stays open and silent the whole time, as when nobody types.
+                while True:
+                    try:
+                        line = lines.get(timeout=60)
+                    except queue.Empty:
+                        self.fail("torch did not load while the engine waited on its input")
+                    if line.strip() == b"loaded":
+                        break
+            finally:
+                child.kill()
+                child.wait()
+                reader.join(timeout=10)
 
 
 if __name__ == "__main__":
