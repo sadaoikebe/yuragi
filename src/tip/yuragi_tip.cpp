@@ -1283,18 +1283,32 @@ public:
 
     // -- focus ------------------------------------------------------------------------
     HRESULT STDMETHODCALLTYPE OnSetFocus(ITfDocumentMgr*, ITfDocumentMgr*) override {
+        Budget budget(this);
         FocusMoved();
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnInitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE OnUninitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnPushContext(ITfContext*) override { FocusMoved(); return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnPopContext(ITfContext*) override { FocusMoved(); return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnSetFocus(BOOL) override { FocusMoved(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPushContext(ITfContext*) override {
+        Budget budget(this);
+        FocusMoved();
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnPopContext(ITfContext*) override {
+        Budget budget(this);
+        FocusMoved();
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnSetFocus(BOOL) override {
+        Budget budget(this);
+        FocusMoved();
+        return S_OK;
+    }
 
     // The application ended the composition (focus moved, etc.): its text is the app's now.
     HRESULT STDMETHODCALLTYPE OnCompositionTerminated(TfEditCookie, ITfComposition* c) override {
         if (state_ && !state_->ending && state_->composition == c) {
+            Budget budget(this);
             state_->composition->Release();
             state_->composition = nullptr;
             FinishLocal();
@@ -1361,6 +1375,7 @@ public:
     HRESULT STDMETHODCALLTYPE OnKeyDown(ITfContext* ctx, WPARAM w, LPARAM l, BOOL* e) override {
         if (!e) return E_INVALIDARG;
         *e = FALSE;
+        Budget budget(this);
         auto key = ReadStroke(w, l);
         if (IsReplay(key)) return S_OK;
         auto tested = SameTest(key) ? tested_ : std::nullopt;
@@ -1421,6 +1436,7 @@ public:
         if (!e) return E_INVALIDARG;
         *e = FALSE;
         if (!tm_ || HeldMods().win) return S_OK;
+        Budget budget(this);
         for (const auto& key : preserved_) {
             if (key.guid != guid) continue;
             auto event = ReadStroke(key.key.uVKey, 0);
@@ -1500,7 +1516,10 @@ public:
         return L"";
     }
     HRESULT STDMETHODCALLTYPE OnClick(TfLBIClick click, POINT pt, const RECT*) override {
-        if (click == TF_LBI_CLK_LEFT && tip_logic::Toggles(CurrentMode()) && Eligible()) Toggle();
+        if (click == TF_LBI_CLK_LEFT && tip_logic::Toggles(CurrentMode()) && Eligible()) {
+            Budget budget(this);
+            Toggle();
+        }
         // The taskbar input indicator hands a right click over as OnClick and never
         // calls InitMenu, so the menu is shown here (owned by this thread's focus window).
         if (click == TF_LBI_CLK_RIGHT) ShowMenu(GetFocus(), pt, TPM_BOTTOMALIGN);
@@ -1517,6 +1536,7 @@ public:
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnMenuSelect(UINT id) override {
+        Budget budget(this);
         switch (id) {
             case tip_logic::MENU_TOGGLE:
                 if (Eligible()) Toggle();
@@ -1526,7 +1546,7 @@ public:
                 OpenAdmin(R"({"op":"open_admin"})");
                 break;
             case tip_logic::MENU_RETRY:
-                if (link_.Connected()) link_.Write(R"({"op":"retry"})", tip_logic::KEY_BUDGET_MS);
+                if (link_.Connected()) link_.Write(R"({"op":"retry"})", Remaining());
                 else TryConnect(true);
                 break;
         }
@@ -1586,14 +1606,16 @@ private:
     static LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         auto* self = (Tip*)GetWindowLongPtrW(h, GWLP_USERDATA);
         if (self && m == kLinkMessage) {
+            Budget budget(self);
             self->Drain(false, 0);
             return 0;
         }
         if (self && m == kKeysMessage) {
+            Budget budget(self);
             self->PumpKeys();
             return 0;
         }
-        if (self && m == kMenuMessage) {
+        if (self && m == kMenuMessage) {  // no budget around the menu's own message loop
             self->AddRef();
             self->ShowKeyboardMenu();
             self->Release();
@@ -1601,6 +1623,7 @@ private:
         }
         if (self && m == WM_TIMER) {
             KillTimer(h, w);  // every timer here rings once
+            Budget budget(self);
             self->OnTimer((UINT_PTR)w);
             return 0;
         }
@@ -1662,6 +1685,31 @@ private:
         ArmTimer(reply_timer_, at);
     }
 
+    // -- the time budget ---------------------------------------------------------------------
+    // DESIGN「守ること」5: one call from Windows (a key, a focus change, a message to the
+    // TIP's window) holds the UI thread for at most KEY_BUDGET_MS, however many writes and
+    // waits it makes. Each such call opens one; a nested one shares the outer deadline.
+    class Budget {
+    public:
+        explicit Budget(Tip* tip) : tip_(tip), outer_(!tip->deadline_) {
+            if (outer_) tip_->deadline_ = NowMs() + tip_logic::KEY_BUDGET_MS;
+        }
+        ~Budget() {
+            if (outer_) tip_->deadline_.reset();
+        }
+        Budget(const Budget&) = delete;
+        Budget& operator=(const Budget&) = delete;
+
+    private:
+        Tip* tip_;
+        bool outer_;
+    };
+    DWORD Remaining() const {
+        if (!deadline_) return tip_logic::KEY_BUDGET_MS;
+        const ULONGLONG now = NowMs();
+        return now < *deadline_ ? (DWORD)(*deadline_ - now) : 0;
+    }
+
     // -- connection -------------------------------------------------------------------------
     void TryConnect(bool user = false) {
         if (!link_.Idle()) return;
@@ -1687,7 +1735,7 @@ private:
     // connection the user's action starts, and goes when it is made (DESIGN「接続」).
     void OpenAdmin(const char* request) {
         if (link_.Connected()) {
-            link_.Write(request, tip_logic::KEY_BUDGET_MS);
+            link_.Write(request, Remaining());
             return;
         }
         admin_request_ = request;
@@ -1705,7 +1753,7 @@ private:
                     link_state_ = Link::Connected;
                     broker_state_.clear();
                     in_flight_.Clear();
-                    if (admin_request_) link_.Write(admin_request_, tip_logic::KEY_BUDGET_MS);
+                    if (admin_request_) link_.Write(admin_request_, Remaining());
                     admin_request_ = nullptr;
                     break;
                 case BrokerLink::Item::Connecting:
@@ -1818,7 +1866,7 @@ private:
     long long SendRequest(const std::string& op, const std::string& extra = "", bool blocking = true) {
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return 0;
         long long seq = in_flight_.Next(blocking);
-        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), blocking ? tip_logic::KEY_BUDGET_MS : 0)) {
+        if (!link_.Write(tip_logic::OpRequest(seq, op, extra), blocking ? Remaining() : 0)) {
             in_flight_.Answer(seq);
             return 0;
         }
@@ -1827,7 +1875,6 @@ private:
 
     SendResult SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return SendResult::Unavailable;
-        const ULONGLONG start = NowMs(), deadline = start + tip_logic::KEY_BUDGET_MS;
         std::optional<tip_logic::KeyContext> context;
         bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
         if (settings_.document_context && key.down && tip_logic::Typing(key.chord)
@@ -1852,9 +1899,7 @@ private:
         long long seq = in_flight_.Next();
         auto request = tip_logic::KeyRequest(seq, key.down, key.chord.vk, key.time, key.chord.mods,
                                             context ? &*context : nullptr);
-        ULONGLONG now = NowMs();
-        DWORD budget = now < deadline ? (DWORD)(deadline - now) : 0;
-        if (!link_.Write(request, budget)) {
+        if (!link_.Write(request, Remaining())) {
             in_flight_.Answer(seq);
             return SendResult::Unavailable;
         }
@@ -1862,9 +1907,9 @@ private:
         if (key.down && capture) down_sent_[key.raw] = key.chord;
         if (sync) {
             while (in_flight_.Waiting(seq) && !Drain(true, seq)) {
-                now = NowMs();
-                if (now >= deadline || !in_flight_.Waiting(seq)) break;
-                WaitForSingleObject(link_.Arrived(), (DWORD)(deadline - now));
+                const DWORD left = Remaining();
+                if (!left || !in_flight_.Waiting(seq)) break;
+                WaitForSingleObject(link_.Arrived(), left);
             }
         }
         return SendResult::Sent;
@@ -2553,6 +2598,7 @@ private:
     std::vector<Registration> preserved_;
     long long pending_mode_seq_ = 0, mode_edit_seq_ = 0;
     std::optional<uint64_t> menu_generation_;
+    std::optional<ULONGLONG> deadline_;  // of the call from Windows being handled (Budget)
     bool langbar_ = false;
     ITfLangBarItemSink* lb_sink_ = nullptr;
 };
