@@ -9,7 +9,6 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from yuragi.chord.fsm import Plain
 from yuragi.ime import predict as P
 from yuragi.ime.personal import PersonalLexicon, add_word, remove_word
 from yuragi.ime.server import dispatch
@@ -17,16 +16,10 @@ from yuragi.ime.session import ConversionRequest, ImeSession
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
+from tests.support import type_plain
 
 VK_TAB, VK_RETURN = 0x09, 0x0D
 VK_SPACE, VK_ESCAPE = 0x20, 0x1B
-
-
-def type_reading(s, reading):
-    # Unambiguous faces, no FSM.
-    s._table = {"keys": {c: {"plain": c} for c in reading}}
-    s.tokens = [Plain(c) for c in reading]
-    s._refresh()
 
 
 def press(s, vk, mods=None):
@@ -52,14 +45,14 @@ class Fixture(unittest.TestCase):
 class TabGestureTest(Fixture):
     def test_tab_predicts_operator_with_internal_pos(self):
         s = self.session()
-        type_reading(s, "まいな")
+        type_plain(s, "まいな")
         reply = press(s, VK_TAB)
         self.assertTrue(reply["predicting"])
         self.assertIn("マイナス", reply["candidates"])
 
     def test_tab_opens_predictions_and_enter_commits(self):
         s = self.session()
-        type_reading(s, "とうきょ")
+        type_plain(s, "とうきょ")
         reply = press(s, VK_TAB)
         self.assertTrue(reply["predicting"])
         self.assertTrue(reply["converted"])
@@ -73,7 +66,7 @@ class TabGestureTest(Fixture):
 
     def test_tab_can_start_a_prediction_inside_a_clause(self):
         s = self.session()
-        type_reading(s, "そらのてん")
+        type_plain(s, "そらのてん")
         tokens = s.tokens
         self.assertEqual([(segment.start, segment.end) for segment in s.segments], [(0, 5)])
 
@@ -87,7 +80,7 @@ class TabGestureTest(Fixture):
 
     def test_no_prediction_keeps_the_original_clauses(self):
         s = self.session()
-        type_reading(s, "このてん")
+        type_plain(s, "このてん")
         original = s.segments
         with patch("yuragi.ime.session.predict", return_value=[]) as predict:
             reply = press(s, VK_TAB)
@@ -98,7 +91,7 @@ class TabGestureTest(Fixture):
 
     def test_failure_to_decode_the_head_keeps_the_input(self):
         s = self.session()
-        type_reading(s, "このてん")
+        type_plain(s, "このてん")
         tokens = list(s.tokens)
         original = s.segments
         composition = s.composition

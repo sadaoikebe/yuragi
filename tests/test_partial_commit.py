@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from unittest.mock import ANY, Mock
 
-from yuragi.chord.fsm import Plain
 from yuragi.ime.keymap import load_keymap
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
@@ -16,59 +15,11 @@ from yuragi.ime.zenz import ZenzConverter
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
+from tests.support import Keys, type_plain
 
 VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
 VK_CAPITAL = 0x14
-
-
-class Keys:
-    """A session driven through dispatch() with a running clock."""
-
-    def __init__(self, session):
-        self.s = session
-        self.t = 1000
-        self.committed = ""
-
-    def send(self, op, vk, mods=None, *, step=30):
-        self.t += step
-        msg = {"op": op, "vk": vk, "t": self.t}
-        if mods is not None:
-            msg["mods"] = mods
-        reply = dispatch(self.s, msg)
-        self.committed += reply["commit"]
-        return reply
-
-    def tap(self, vk, mods=None, *, step=100):
-        """Down and up; the reply after the down, with both events' commits."""
-        reply = self.send("down", vk, mods, step=step)
-        commit = self.send("up", vk, mods)["commit"]
-        return {**reply, "commit": reply["commit"] + commit}
-
-    def ctrl_down(self):
-        return self.tap(VK_DOWN, ["ctrl"])
-
-    def convert(self):
-        self.send("down", VK_SPACE, step=200)
-        return self.send("up", VK_SPACE)
-
-    def plain(self, letter):
-        self.send("down", ord(letter.upper()), step=200)
-        return self.send("up", ord(letter.upper()))
-
-    def chords(self, *letters):
-        """One Space press with these keys typed inside it (turn 1, 2, ...)."""
-        self.send("down", VK_SPACE, step=200)
-        for letter in letters:
-            self.send("down", ord(letter.upper()), step=20)
-            self.send("up", ord(letter.upper()), step=40)
-        return self.send("up", VK_SPACE, step=20)
-
-    def idle(self):
-        self.t += 300
-        reply = dispatch(self.s, {"op": "timeout", "t": self.t})
-        self.committed += reply["commit"]
-        return reply
 
 
 class PartialCommitTest(unittest.TestCase):
@@ -89,10 +40,8 @@ class PartialCommitTest(unittest.TestCase):
 
     def typed(self, reading, *, learning=False):
         """Keys over input set to these readings (every character a plain face)."""
-        s = self.session(learning=learning,
-                         table={"keys": {c: {"plain": c} for c in reading}})
-        s.tokens = [Plain(c) for c in reading]
-        s._refresh()
+        s = self.session(learning=learning)
+        type_plain(s, reading)
         return Keys(s)
 
     def rows(self):
@@ -113,30 +62,30 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく")
         k.s.keymap = self.macos_keymap()
         converted = k.convert()
-        opened = k.tap(VK_DOWN)
+        opened = k.press(VK_DOWN)
         self.assertEqual((opened["phase"], opened["composition"]),
                          ("selecting", converted["composition"]))
-        first = k.tap(ord("2"))
+        first = k.press(ord("2"))
         self.assertEqual((first["phase"], first["commit"], first["segments"][0]["surface"]),
                          ("converting", "", opened["candidates"][1]))
-        opened = k.tap(VK_DOWN)
-        accepted = k.tap(VK_RETURN)
+        opened = k.press(VK_DOWN)
+        accepted = k.press(VK_RETURN)
         self.assertEqual((accepted["phase"], accepted["commit"], accepted["focus"]),
                          ("converting", "", 1))
-        self.assertEqual(k.tap(VK_RETURN)["commit"], opened["composition"])
+        self.assertEqual(k.press(VK_RETURN)["commit"], opened["composition"])
 
     def test_macos_shrink_reconverts_and_escape_restores_all_readings(self):
         reading = "わたしはがっこうにいく"
         k = self.typed(reading)
         k.s.keymap = self.macos_keymap()
         k.convert()
-        shrunk = k.tap(ord("I"), ["ctrl"])
+        shrunk = k.press(ord("I"), ["ctrl"])
         self.assertEqual((shrunk["phase"], self.surfaces(shrunk)),
                          ("converting", ["私", "は", "学校に", "行く"]))
-        ignored = k.tap(ord("C"), ["ctrl"])
+        ignored = k.press(ord("C"), ["ctrl"])
         self.assertEqual((ignored["eat"], ignored["commit"], ignored["composition"]),
                          (True, "", shrunk["composition"]))
-        reverted = k.tap(VK_ESC)
+        reverted = k.press(VK_ESC)
         self.assertEqual((reverted["phase"], reverted["composition"]), ("composing", reading))
 
     def test_macos_prediction_space_converts_but_a_number_starts_new_input(self):
@@ -144,12 +93,12 @@ class PartialCommitTest(unittest.TestCase):
         k.s.keymap = self.macos_keymap()
         for key in "JAK":  # とうき
             k.plain(key)
-        prediction = k.tap(ord("N"), ["ctrl"])
+        prediction = k.press(ord("N"), ["ctrl"])
         self.assertEqual(prediction["phase"], "predicting")
         converted = k.convert()
         self.assertEqual((converted["phase"], converted["commit"]), ("converting", ""))
-        k.tap(VK_ESC)
-        prediction = k.tap(ord("N"), ["ctrl"])
+        k.press(VK_ESC)
+        prediction = k.press(ord("N"), ["ctrl"])
         self.assertEqual(prediction["phase"], "predicting")
         typed = k.plain("2")
         self.assertEqual((k.committed, typed["phase"], typed["composition"]),
@@ -162,8 +111,8 @@ class PartialCommitTest(unittest.TestCase):
                 self.assertEqual([seg["reading"] for seg in reply["segments"]], [reading])
         k = self.typed("れんらくする")
         k.convert()
-        k.tap(VK_LEFT, ["shift"])
-        k.tap(VK_LEFT, ["shift"])
+        k.press(VK_LEFT, ["shift"])
+        k.press(VK_LEFT, ["shift"])
         k.convert()
         self.assertEqual(k.ctrl_down()["commit"], "連絡")
 
@@ -171,11 +120,11 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく")
         k.convert()
         listed = k.convert()["candidates"]
-        k.tap(VK_UP)  # back to the first row, the window still open
-        shrunk = k.tap(VK_LEFT, ["shift"])
+        k.press(VK_UP)  # back to the first row, the window still open
+        shrunk = k.press(VK_LEFT, ["shift"])
         self.assertEqual((shrunk["phase"], shrunk["candidates"]), ("resizing", []))
         self.assertEqual(self.surfaces(shrunk), ["わたし", "は", "学校に", "行く"])
-        expanded = k.tap(VK_DOWN)
+        expanded = k.press(VK_DOWN)
         self.assertEqual(expanded["phase"], "resizing")
         self.assertEqual(self.surfaces(expanded), ["わたしは", "学校に", "行く"])
 
@@ -184,16 +133,16 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(self.surfaces(converted), ["私は", "学校に", "行く"])
         self.assertEqual([(g["start"], g["end"]) for g in converted["segments"]],
                          [(0, 4), (4, 9), (9, 11)])
-        for reply, index in ((k.convert(), 1), (k.tap(VK_DOWN), 2)):
+        for reply, index in ((k.convert(), 1), (k.press(VK_DOWN), 2)):
             self.assertEqual((reply["phase"], reply["cand_index"]), ("selecting", index))
             self.assertEqual(reply["segments"][0]["surface"], listed[index])
 
     def test_expand_displays_both_changed_readings_and_preserves_new_boundaries(self):
         k = self.typed("わたしはがっこうにいく")
         k.convert()
-        expanded = k.tap(VK_RIGHT, ["shift"])
+        expanded = k.press(VK_RIGHT, ["shift"])
         self.assertEqual(self.surfaces(expanded), ["わたしはが", "っこうに", "行く"])
-        converted = k.tap(VK_SPACE, ["shift"])
+        converted = k.press(VK_SPACE, ["shift"])
         self.assertEqual((converted["phase"], converted["candidates"]), ("converting", []))
         self.assertEqual([(g["start"], g["end"]) for g in converted["segments"]],
                          [(0, 5), (5, 9), (9, 11)])
@@ -204,15 +153,15 @@ class PartialCommitTest(unittest.TestCase):
             with self.subTest(partial=partial):
                 k = self.typed("わたしはがっこうにいく", learning=True)
                 k.convert()
-                k.tap(VK_LEFT, ["shift"])
+                k.press(VK_LEFT, ["shift"])
                 if partial:
                     reply = k.ctrl_down()
                     self.assertEqual((reply["phase"], reply["commit"], reply["composition"]),
                                      ("converting", "わたし", "は学校に行く"))
                 else:
-                    moved = k.tap(VK_RIGHT)
+                    moved = k.press(VK_RIGHT)
                     self.assertEqual((moved["phase"], moved["focus"]), ("converting", 1))
-                self.assertEqual(k.tap(VK_RETURN)["phase"], "empty")
+                self.assertEqual(k.press(VK_RETURN)["phase"], "empty")
                 self.assertEqual(k.committed, "わたしは学校に行く")
                 self.assertEqual(self.rows(), [])
 
@@ -224,12 +173,12 @@ class PartialCommitTest(unittest.TestCase):
             with self.subTest(key=key):
                 k = self.typed("わたしはがっこうにいく")
                 k.convert()
-                k.tap(VK_LEFT, ["shift"])
+                k.press(VK_LEFT, ["shift"])
                 if key == ord("W"):
                     k.s._table["keys"]["w"] = {"plain": "か"}
                     reply = k.plain("w")
                 else:
-                    reply = k.tap(key)
+                    reply = k.press(key)
                 self.assertEqual((reply["phase"], reply["composition"], k.committed,
                                   reply["candidates"]), (phase, text, commit, []))
 
@@ -237,31 +186,31 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく")
         original = k.convert()
         k.convert()  # the second Space opens the window
-        last = k.tap(VK_END)
+        last = k.press(VK_END)
         self.assertEqual((last["phase"], last["focus"], last["has_next_page"]),
                          ("selecting", 0, False))
         self.assertEqual(last["cand_index"], len(last["candidates"]) - 1)
-        self.assertEqual(k.tap(VK_HOME)["composition"], original["composition"])
+        self.assertEqual(k.press(VK_HOME)["composition"], original["composition"])
 
-        moved = k.tap(VK_RIGHT)
+        moved = k.press(VK_RIGHT)
         self.assertEqual((moved["phase"], moved["focus"], moved["candidates"]), ("converting", 1, []))
-        self.assertEqual(k.tap(VK_END)["focus"], 2)
+        self.assertEqual(k.press(VK_END)["focus"], 2)
         k.convert()
-        blocked = k.tap(VK_RIGHT, ["shift"])
+        blocked = k.press(VK_RIGHT, ["shift"])
         self.assertEqual((blocked["phase"], blocked["candidates"]), ("converting", []))
-        k.tap(VK_LEFT, ["shift"])
-        resized = k.tap(VK_DOWN)
+        k.press(VK_LEFT, ["shift"])
+        resized = k.press(VK_DOWN)
         for key, mods in ((VK_RIGHT, ["shift"]), (VK_HOME, []), (VK_END, []),
                           (0x08, []), (ord("H"), ["ctrl"])):
-            unchanged = k.tap(key, mods)
+            unchanged = k.press(key, mods)
             self.assertEqual((unchanged["phase"], unchanged["focus"], unchanged["segments"]),
                              ("resizing", 2, resized["segments"]))
         k.convert()
-        self.assertEqual(k.tap(VK_HOME)["focus"], 0)
+        self.assertEqual(k.press(VK_HOME)["focus"], 0)
 
-        k.tap(VK_LEFT, ["shift"])
-        k.tap(VK_RIGHT)
-        k.tap(VK_LEFT)
+        k.press(VK_LEFT, ["shift"])
+        k.press(VK_RIGHT)
+        k.press(VK_LEFT)
         selected = k.convert()
         self.assertEqual((selected["phase"], selected["cand_index"], selected["candidates"][0]),
                          ("selecting", 1, "私"))
@@ -269,19 +218,19 @@ class PartialCommitTest(unittest.TestCase):
     def test_fixed_width_spaces_follow_the_phase(self):
         k = self.typed("わたし")
         k.s._table["keys"]["w"] = {"plain": "か"}
-        added = k.tap(VK_SPACE, ["ctrl"])
+        added = k.press(VK_SPACE, ["ctrl"])
         self.assertEqual((added["phase"], added["eat"], added["commit"]), ("composing", True, ""))
         k.plain("w")
-        k.tap(VK_RETURN)
+        k.press(VK_RETURN)
         head, space, tail = k.committed.partition(" ")
         self.assertEqual((bool(head), space, tail.count(" "), bool(tail)), (True, " ", 0, True))
 
-        empty = k.tap(VK_SPACE, ["ctrl", "shift"])
+        empty = k.press(VK_SPACE, ["ctrl", "shift"])
         self.assertEqual((empty["phase"], empty["eat"], empty["commit"]), ("empty", True, "　"))
 
         k = self.typed("わたし")
         converted = k.convert()["composition"]
-        reply = k.tap(VK_SPACE, ["ctrl", "shift"])
+        reply = k.press(VK_SPACE, ["ctrl", "shift"])
         self.assertEqual((reply["phase"], reply["commit"], reply["composition"]),
                          ("composing", converted, "　"))
 
@@ -292,11 +241,11 @@ class PartialCommitTest(unittest.TestCase):
                 k = self.typed("わたしはがっこうにいく")
                 k.convert()
                 chosen = k.convert()  # the window opens on the next row
-                closed = k.tap(key, mods)
+                closed = k.press(key, mods)
                 self.assertEqual((closed["phase"], closed["candidates"], closed["composition"],
                                   closed["focus"]),
                                  ("converting", [], chosen["composition"], 0))
-                reverted = k.tap(VK_ESC)
+                reverted = k.press(VK_ESC)
                 self.assertEqual((reverted["phase"], reverted["focus"],
                                   self.surfaces(reverted)[1:]),
                                  ("editing", 0, self.surfaces(chosen)[1:]))
@@ -304,29 +253,29 @@ class PartialCommitTest(unittest.TestCase):
     def test_backspace_deletes_the_display_tail_then_edits_the_previous_clause(self):
         k = self.typed("わたしはがっこうにいく", learning=True)
         k.convert()
-        deleted = k.tap(0x08)
+        deleted = k.press(0x08)
         self.assertEqual((deleted["phase"], deleted["focus"], self.surfaces(deleted)),
                          ("editing", 2, ["私は", "学校に", "行"]))
         self.assertEqual(deleted["commit"], "")
-        again = k.tap(ord("H"), ["ctrl"])
+        again = k.press(ord("H"), ["ctrl"])
         self.assertEqual((again["phase"], again["focus"], self.surfaces(again)),
                          ("editing", 1, ["私は", "学校に"]))
-        self.assertEqual(k.tap(VK_RETURN)["commit"], "私は学校に")
+        self.assertEqual(k.press(VK_RETURN)["commit"], "私は学校に")
         self.assertEqual(self.rows(), [])
 
     def test_reverted_middle_clause_accepts_input_without_changing_its_neighbors(self):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}
         k.convert()
-        k.tap(VK_RIGHT)
-        reverted = k.tap(VK_ESC)
+        k.press(VK_RIGHT)
+        reverted = k.press(VK_ESC)
         self.assertEqual((reverted["phase"], reverted["focus"], self.surfaces(reverted)),
                          ("editing", 1, ["私は", "がっこうに", "行く"]))
         typed = k.plain("w")
         self.assertEqual((typed["commit"], self.surfaces(typed)),
                          ("", ["私は", "がっこうには", "行く"]))
         self.assertEqual(typed["segments"][2]["start"], reverted["segments"][2]["start"] + 1)
-        self.assertEqual(self.surfaces(k.tap(0x08)), self.surfaces(reverted))
+        self.assertEqual(self.surfaces(k.press(0x08)), self.surfaces(reverted))
         converted = k.convert()
         self.assertEqual((converted["phase"], converted["focus"],
                           self.surfaces(converted), converted["candidates"]),
@@ -336,17 +285,17 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("がっこう")
         k.s.max_tokens = 5
         k.s._table["keys"].update(w={"plain": "っ"}, a={"plain": "が"})
-        moved = k.tap(VK_HOME)
+        moved = k.press(VK_HOME)
         self.assertEqual((moved["composition"], moved["caret"]), ("がっこう", 0))
-        k.tap(VK_RIGHT)
+        k.press(VK_RIGHT)
         k.send("down", ord("W"))  # unresolved thumb chord at position 1
-        moved = k.tap(VK_LEFT, step=10)
+        moved = k.press(VK_LEFT, step=10)
         self.assertEqual((moved["composition"], moved["caret"], moved["commit"]), ("がっっこう", 1, ""))
         k.send("up", ord("W"))
         full = k.plain("w")
         self.assertEqual((full["composition"], full["caret"]), ("がっっこう", 1))
-        self.assertEqual(k.tap(0x2E)["composition"], "がっこう")
-        deleted = k.tap(0x08)
+        self.assertEqual(k.press(0x2E)["composition"], "がっこう")
+        deleted = k.press(0x08)
         self.assertEqual((deleted["composition"], deleted["caret"]), ("っこう", 0))
         typed = k.plain("a")
         self.assertEqual((typed["composition"], typed["caret"]), ("がっこう", 1))
@@ -358,7 +307,7 @@ class PartialCommitTest(unittest.TestCase):
         lex = MozcLex({"え": [Entry("絵", "え", 1, 1, -10000)]}, {"え"}, [0] * 4, 2)
         k = Keys(ImeSession(_table=load_table(), _lex=lex))
         k.chords("q", "w")  # q has only a left face, so w must be its right face (が)
-        moved = k.tap(VK_LEFT)
+        moved = k.press(VK_LEFT)
         self.assertEqual((moved["composition"], moved["caret"]), ("ぁが", 1))
         inserted = k.chords("q", "w")
         self.assertEqual((inserted["composition"], inserted["caret"]), ("ぁぁがが", 3))
@@ -368,33 +317,33 @@ class PartialCommitTest(unittest.TestCase):
             with self.subTest(vk=vk):
                 k = self.typed("がっこう")
                 if vk == 0x2E:
-                    end = k.tap(vk, ["ctrl"])
+                    end = k.press(vk, ["ctrl"])
                     self.assertEqual((end["eat"], end["phase"], end["commit"]), (False, "composing", ""))
-                k.tap(VK_LEFT)
-                reply = k.tap(vk, ["ctrl"])
+                k.press(VK_LEFT)
+                reply = k.press(vk, ["ctrl"])
                 self.assertEqual((reply["eat"], reply["commit"], reply["commit_caret"]), (False, "がっこう", 3))
 
     def test_mixed_input_moves_to_the_next_clause_and_passes_the_outer_arrow(self):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}
         k.convert()
-        k.tap(VK_RIGHT)
-        k.tap(VK_ESC)
-        k.tap(VK_LEFT)
+        k.press(VK_RIGHT)
+        k.press(VK_ESC)
+        k.press(VK_LEFT)
         inserted = k.plain("w")
         self.assertEqual((self.surfaces(inserted), inserted["caret"]),
                          (["私は", "がっこうはに", "行く"], 7))
-        deleted = k.tap(0x2E)
+        deleted = k.press(0x2E)
         self.assertEqual((self.surfaces(deleted), deleted["caret"]),
                          (["私は", "がっこうは", "行く"], 7))
-        moved = k.tap(VK_RIGHT)
+        moved = k.press(VK_RIGHT)
         self.assertEqual((moved["phase"], moved["focus"], moved["eat"], moved["commit"]),
                          ("converting", 2, True, ""))
-        tail = k.tap(VK_ESC)
+        tail = k.press(VK_ESC)
         self.assertEqual((tail["phase"], tail["caret"]), ("editing", 9))
-        clamped = k.tap(VK_RIGHT, ["shift"])
+        clamped = k.press(VK_RIGHT, ["shift"])
         self.assertEqual((clamped["phase"], clamped["eat"], clamped["commit"]), ("editing", True, ""))
-        passed = k.tap(VK_RIGHT)
+        passed = k.press(VK_RIGHT)
         self.assertEqual((passed["phase"], passed["eat"], passed["commit"]),
                          ("empty", False, "私はがっこうはいく"))
 
@@ -402,36 +351,36 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}
         k.convert()
-        k.tap(0x08)  # 行く → 行
+        k.press(0x08)  # 行く → 行
         self.assertEqual(k.plain("w")["composition"], "私は学校に行は")
         converted = k.convert()
         self.assertEqual((converted["phase"], converted["composition"], converted["commit"]),
                          ("converting", "私は学校に行は", ""))
-        self.assertEqual(k.tap(VK_RETURN)["commit"], "私は学校に行は")
+        self.assertEqual(k.press(VK_RETURN)["commit"], "私は学校に行は")
 
     def test_selected_clause_revert_and_all_revert_are_distinct(self):
         k = self.typed("わたしはがっこうにいく")
         initial = k.convert()
-        k.tap(VK_RIGHT)
+        k.press(VK_RIGHT)
         self.assertEqual(k.convert()["phase"], "selecting")
-        reverted = k.tap(ord("Z"), ["ctrl"])
+        reverted = k.press(ord("Z"), ["ctrl"])
         self.assertEqual((reverted["phase"], reverted["focus"], reverted["candidates"],
                           self.surfaces(reverted)),
                          ("editing", 1, [], ["私は", "がっこうに", "行く"]))
-        all_reverted = k.tap(VK_ESC, ["shift"])
+        all_reverted = k.press(VK_ESC, ["shift"])
         self.assertEqual((all_reverted["phase"], all_reverted["composition"]),
                          ("composing", initial["composition"]))
-        self.assertEqual(k.tap(VK_ESC)["phase"], "empty")
+        self.assertEqual(k.press(VK_ESC)["phase"], "empty")
 
     def test_cancel_resize_restores_boundaries_and_selected_spelling(self):
         k = self.typed("わたしはがっこうにいく")
         k.convert()
-        k.tap(VK_RIGHT)
+        k.press(VK_RIGHT)
         selected = k.convert()
         self.assertEqual(selected["phase"], "selecting")
-        k.tap(VK_LEFT, ["shift"])
-        self.assertEqual(k.tap(VK_LEFT, ["shift"])["phase"], "resizing")
-        restored = k.tap(ord("Z"), ["ctrl"])
+        k.press(VK_LEFT, ["shift"])
+        self.assertEqual(k.press(VK_LEFT, ["shift"])["phase"], "resizing")
+        restored = k.press(ord("Z"), ["ctrl"])
         self.assertEqual((restored["phase"], restored["focus"], restored["candidates"],
                           restored["segments"]),
                          ("converting", selected["focus"], [], selected["segments"]))
@@ -442,39 +391,39 @@ class PartialCommitTest(unittest.TestCase):
         reply = k.send("down", 0x79, ["ctrl"])
         self.assertEqual((reply["commit"], reply["eat"], reply.get("global")), ("き", False, None))
         k.send("up", ord("K"))
-        self.assertEqual(k.tap(0x79, ["ctrl"]).get("global"), "open_menu")
+        self.assertEqual(k.press(0x79, ["ctrl"]).get("global"), "open_menu")
 
     # Shift+CapsLock with input is MS-IME's 英数 mode (ms-ime.md §1.5): the input
     # stays, later keys type half-width, and the IME is off once the input ends.
     def test_shift_capslock_types_alphanumerics_and_the_end_turns_the_ime_off(self):
         k = Keys(self.session())
         k.send("down", ord("K"))  # awaiting the chord decision
-        held = k.tap(VK_CAPITAL, ["shift"])
+        held = k.press(VK_CAPITAL, ["shift"])
         k.send("up", ord("K"))
         self.assertEqual((held["phase"], held["eat"], held["composition"]),
                          ("composing", True, "き"))
         k.plain("a")
         spaced = k.convert()  # a half-width space, not a conversion
         self.assertEqual((spaced["phase"], spaced["composition"]), ("composing", "きa "))
-        done = k.tap(VK_RETURN)
+        done = k.press(VK_RETURN)
         self.assertEqual((k.committed, done["eat"], done.get("global")), ("きa ", True, "ime_off"))
-        self.assertIsNone(k.tap(VK_RETURN).get("global"))
+        self.assertIsNone(k.press(VK_RETURN).get("global"))
 
     def test_shift_capslock_ends_when_backspace_empties_the_input(self):
         k = self.typed("きし")
-        k.tap(VK_CAPITAL, ["shift"])
-        self.assertEqual([k.tap(0x08).get("global") for _ in range(2)], [None, "ime_off"])
+        k.press(VK_CAPITAL, ["shift"])
+        self.assertEqual([k.press(0x08).get("global") for _ in range(2)], [None, "ime_off"])
         self.assertEqual(k.committed, "")
 
     def test_ctrl_capslock_after_shift_capslock_types_kana_again(self):
         k = Keys(self.session())
         k.plain("k")
-        k.tap(VK_CAPITAL, ["shift"])
+        k.press(VK_CAPITAL, ["shift"])
         k.plain("a")
         dispatch(k.s, {"op": "set_mode", "mode": "hiragana"})  # the TIP's Ctrl+CapsLock
         k.plain("k")
         k.idle()
-        done = k.tap(VK_RETURN)
+        done = k.press(VK_RETURN)
         self.assertEqual((k.committed, done.get("global")), ("きaき", None))
 
     def test_shift_capslock_keeps_the_conversion_until_a_character(self):
@@ -483,10 +432,10 @@ class PartialCommitTest(unittest.TestCase):
             k.plain(letter)
         k.convert()
         listed = k.convert()
-        held = k.tap(VK_CAPITAL, ["shift"])
+        held = k.press(VK_CAPITAL, ["shift"])
         self.assertEqual((held["phase"], held["composition"]), ("selecting", listed["composition"]))
         self.assertEqual(k.convert()["cand_index"], 2)  # the candidate keys still work
-        ended = k.tap(ord("W"))  # MS-IME commits and drops the character
+        ended = k.press(ord("W"))  # MS-IME commits and drops the character
         self.assertEqual((ended["phase"], ended["composition"], ended.get("global")),
                          ("empty", "", "ime_off"))
         settled = k.idle()
@@ -495,8 +444,8 @@ class PartialCommitTest(unittest.TestCase):
 
         k = self.typed("わたしはがっこうにいく")
         k.convert()
-        k.tap(VK_LEFT, ["shift"])
-        self.assertEqual(k.tap(VK_CAPITAL, ["shift"])["phase"], "resizing")
+        k.press(VK_LEFT, ["shift"])
+        self.assertEqual(k.press(VK_CAPITAL, ["shift"])["phase"], "resizing")
         self.assertEqual(k.convert()["phase"], "converting")
 
     # Shift+↓ before conversion commits the first press: MS-IME commits the
@@ -505,13 +454,13 @@ class PartialCommitTest(unittest.TestCase):
         k = Keys(self.session())
         for letter in "kan":
             k.plain(letter)
-        replies = [k.tap(VK_DOWN, ["shift"]) for _ in range(3)]
+        replies = [k.press(VK_DOWN, ["shift"]) for _ in range(3)]
         self.assertEqual([(r["commit"], r["phase"]) for r in replies],
                          [("き", "composing"), ("う", "composing"), ("め", "empty")])
         k.s.input_mode = "katakana"
         k.plain("k")
         k.plain("a")
-        self.assertEqual(k.tap(VK_DOWN, ["shift"])["commit"], "キ")
+        self.assertEqual(k.press(VK_DOWN, ["shift"])["commit"], "キ")
 
     def test_shift_down_keeps_the_direction_of_the_rest_of_the_press(self):
         words = {"えでる": [Entry("江出る", "えでる", 1, 1, 0)],
@@ -522,22 +471,22 @@ class PartialCommitTest(unittest.TestCase):
         k.chords("w", "d")  # え・で (left) or が・な (right)
         k.chords("i")
         k.idle()
-        reply = k.tap(VK_DOWN, ["shift"])
+        reply = k.press(VK_DOWN, ["shift"])
         self.assertEqual((reply["commit"], reply["composition"]), ("え", "出る"))
 
     def test_shift_down_ends_alphanumerics(self):
         k = Keys(self.session())
         k.plain("k")
-        k.tap(ord("A"), ["shift"])
-        self.assertEqual(k.tap(VK_DOWN, ["shift"])["commit"], "き")
+        k.press(ord("A"), ["shift"])
+        self.assertEqual(k.press(VK_DOWN, ["shift"])["commit"], "き")
         k.plain("k")  # Shift+letter's 英数の続き ended: kana again
         self.assertEqual(k.s.composition[1:], "き")
 
         k = Keys(self.session())
         k.plain("k")
-        k.tap(VK_CAPITAL, ["shift"])
+        k.press(VK_CAPITAL, ["shift"])
         k.plain("b")
-        done = k.tap(VK_DOWN, ["shift"])  # under Shift+CapsLock: all of it, then off
+        done = k.press(VK_DOWN, ["shift"])  # under Shift+CapsLock: all of it, then off
         self.assertEqual((done["commit"], done.get("global")), ("きb", "ime_off"))
 
     def test_commits_clause_by_clause_up_to_the_enter_result(self):
@@ -546,7 +495,7 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(self.surfaces(reply), ["私は", "学校に", "行く"])
         enter = self.typed("わたしはがっこうにいく")
         enter.convert()
-        whole = enter.tap(VK_RETURN)["commit"]
+        whole = enter.press(VK_RETURN)["commit"]
 
         reply = k.ctrl_down()
         self.assertEqual(reply["commit"], "私は")
@@ -581,7 +530,7 @@ class PartialCommitTest(unittest.TestCase):
         k.convert()
         k.ctrl_down()  # 私は, as shown: not learned, but the next clause's left
         k.convert()
-        reply = k.tap(ord("2"))
+        reply = k.press(ord("2"))
         chosen = reply["segments"][reply["focus"]]["surface"]
         k.ctrl_down()
         self.assertEqual([(r["reading"], r["surface"], r["prev"]) for r in self.rows()],
@@ -606,7 +555,7 @@ class PartialCommitTest(unittest.TestCase):
         model.reading_nll.return_value = [0.0, 10.0]
         model.review.return_value = None
         k.s.lm = ZenzConverter(model)
-        k.tap(0x1B)  # cancel conversion and decode the remaining chords again
+        k.press(0x1B)  # cancel conversion and decode the remaining chords again
         reply = k.convert()
         self.assertEqual(reply["segments"][0]["reading"], "でる")
         model.reading_nll.assert_called_once_with("家", ["でる", "でぐ"])

@@ -12,6 +12,7 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
+from tests.support import type_plain
 
 VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE, VK_F7 = 0x0D, 0x20, 0x26, 0x28, 0x2E, 0x76
 
@@ -33,9 +34,7 @@ class LearningTest(unittest.TestCase):
     @staticmethod
     def convert(s, reading):
         """Type the reading (unambiguous faces, no FSM) and convert it."""
-        s._table = {"keys": {c: {"plain": c} for c in reading}}
-        s.tokens = [Plain(c) for c in reading]
-        s._refresh()
+        type_plain(s, reading)
         s.converted = True
         s._open_cands()
         return s.segments[s.focus]
@@ -110,11 +109,9 @@ class LearningTest(unittest.TestCase):
         dispatch(earlier, {"op": "down", "vk": VK_RETURN})
         learned = self.path.read_bytes()
         s = self.session()
-        s._table = {"keys": {c: {"plain": c} for c in text}}
 
         def show(convert):
-            s.tokens = [Plain(c) for c in text]
-            s._refresh()
+            type_plain(s, text)
             if convert:
                 for op in ("down", "up"):  # a lone thumb key converts on its release
                     dispatch(s, {"op": op, "vk": VK_SPACE})

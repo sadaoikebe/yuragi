@@ -6,13 +6,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from yuragi.chord.fsm import Plain
 from yuragi.ime.bunsetsu import SYMBOL_HEAD, SYMBOL_OFFSET
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.ime.symbol_readings import load_symbols
 from tests.real_dictionary import real_lex
+from tests.support import type_plain
 
 VK_RETURN, VK_DELETE = 0x0D, 0x2E
 
@@ -34,9 +34,7 @@ class SymbolConversionTest(unittest.TestCase):
     def session(self, reading, *, learning=False):
         s = ImeSession(_lex=self.lex, _symbols=self.symbols,
                        _learning=LearningStore(self.path) if learning else None)
-        s._table = {"keys": {c: {"plain": c} for c in reading}}
-        s.tokens = [Plain(c) for c in reading]
-        s._refresh()
+        type_plain(s, reading)
         return s
 
     def rows(self, s, count=40):

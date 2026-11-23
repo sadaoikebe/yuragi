@@ -9,16 +9,9 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
-from tests.test_alnum_continuation import Keys
+from tests.support import Keys, kana_session, type_plain
 
 VK_F7, VK_F10 = 0x76, 0x79
-
-
-def type_reading(s, reading):
-    # Unambiguous faces, no FSM.
-    s._table = {"keys": {c: {"plain": c} for c in reading}}
-    s.tokens = [Plain(c) for c in reading]
-    s._refresh()
 
 
 def type_keys(s, keys):
@@ -45,7 +38,7 @@ class KanaKeyTest(unittest.TestCase):
 
     def test_f7_converts_unconverted_input_to_katakana(self):
         s = self.session()
-        type_reading(s, "きょう")
+        type_plain(s, "きょう")
         reply = dispatch(s, {"op": "down", "vk": VK_F7})
         self.assertEqual(reply["composition"], "キョウ")
         self.assertTrue(s.converted)
@@ -62,8 +55,7 @@ class KanaKeyTest(unittest.TestCase):
 
 class JisKeyTest(unittest.TestCase):
     def test_convert_starts_conversion_and_shift_convert_opens_its_candidates(self):
-        k = Keys()
-        k.s._lex = real_lex()
+        k = Keys(kana_session(real_lex()))
         input_text = k.letters("jak")["composition"]
         passed = k.down(VK_CONVERT, ["shift"])
         k.up(VK_CONVERT, ["shift"])
@@ -77,7 +69,7 @@ class JisKeyTest(unittest.TestCase):
         self.assertIn(opened["composition"], opened["candidates"])
 
     def test_nonconvert_cycles_kana_and_keeps_the_reading_for_space(self):
-        k = Keys()
+        k = Keys(kana_session())
         k.letters("jak")
         changed = [k.tap(VK_NONCONVERT) for _ in range(4)]
         self.assertEqual([r["composition"] for r in changed],
@@ -87,7 +79,7 @@ class JisKeyTest(unittest.TestCase):
         self.assertEqual(k.tap(VK_SPACE)["composition"], "とうき")
 
     def test_width_changes_leave_the_input_uncommitted_and_keep_it_when_typing(self):
-        k = Keys()
+        k = Keys(kana_session())
         k.letters("jak")
         self.assertEqual(k.tap(VK_NONCONVERT, ["shift"])["composition"], "ｊａｋ")
         self.assertEqual(k.tap(VK_NONCONVERT, ["shift"])["composition"], "jak")
@@ -97,7 +89,7 @@ class JisKeyTest(unittest.TestCase):
         self.assertEqual(k.committed, "")
 
     def test_empty_mode_switches_affect_following_text(self):
-        k = Keys()
+        k = Keys(kana_session())
         k.tap(VK_NONCONVERT)
         self.assertEqual(k.letters("k")["composition"], "キ")
         k.tap(VK_ESCAPE)

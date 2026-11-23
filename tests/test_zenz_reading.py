@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
 from tests.real_dictionary import real_lex
-from tests.test_document_context import Keys, SPACE
+from tests.test_document_context import SPACE
+from tests.support import Keys
 from tests.test_lm_async import Clock, ManualWorker, TERMINAL, Typist
 from yuragi.ime.lm_async import ConnectionPipeline, LmWorker
 from yuragi.ime.server import dispatch

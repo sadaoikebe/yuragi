@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import unittest
 
 from tests.real_dictionary import real_lex
+from tests.support import ingest_plain
 from yuragi.ime.bunsetsu import Candidate
-from yuragi.ime.session import ImeSession, Literal
+from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import DEFAULT_MODEL, ZenzConverter, ZenzModel, prompt, spell
 from yuragi.lattice.table import load_table
-from yuragi.chord.fsm import Plain
 
 
 class Disagrees:
@@ -44,8 +44,7 @@ class ReviewBudgetTest(unittest.TestCase):
                        lm=ZenzConverter(model, review_budget_ms=0))
         text = "げんこうの、こうせい"
         s.start_input(None, None, disconnected=True)
-        s._table = {"keys": {c: {"plain": c} for c in text}}
-        s._ingest([Literal(c) if c == "、" else Plain(c) for c in text])
+        ingest_plain(s, text, literals="、")
         self.assertIsNotNone(s.conversion_request().decode(s._lex, s.lm))
         self.assertEqual(model.calls, ["げんこうの", "こうせい"])
         self.assertEqual(s.lm.last["cut"], 2)

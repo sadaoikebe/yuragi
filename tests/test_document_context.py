@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from tests.test_engine_sessions import EngineCase
 from tests.test_lm_async import ManualWorker
+from tests.support import Keys
 from yuragi.ime.lm_async import ConnectionPipeline
 from yuragi.ime.server import dispatch, process_request
 from yuragi.ime.session import ImeSession
@@ -45,30 +46,6 @@ class Reviewer:
     def review(self, context, reading, draft, accepted, reachable):
         self.calls.append((context, reading, draft))
         return None
-
-
-class Keys:
-    def __init__(self, handle):
-        self.handle = handle
-        self.t = 0
-        self.seq = 0
-
-    def send(self, op, key=None, **extra):
-        self.t += 30
-        self.seq += 1
-        msg = {"op": op, "t": self.t, "seq": self.seq, **extra}
-        if key is not None:
-            msg["vk"] = ord(key) if isinstance(key, str) else key
-        return self.handle(msg)
-
-    def tap(self, key, **extra):
-        down = self.send("down", key, **extra)
-        up = self.send("up", key)
-        return {**up, "commit": down["commit"] + up["commit"]}
-
-    def commit(self):
-        self.send("down", ENTER)
-        return self.seq
 
 
 class ContextCase(unittest.TestCase):

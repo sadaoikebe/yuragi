@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.test_document_context import ENTER, Keys, SPACE
+from tests.test_document_context import ENTER, SPACE
+from tests.support import Keys
 from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word
 from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession

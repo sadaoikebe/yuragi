@@ -12,16 +12,15 @@ import unittest
 from unittest.mock import patch
 
 from tests.real_dictionary import real_lex
-from tests.test_document_context import Keys
+from tests.support import Keys, ingest_plain
 from tests.test_engine_sessions import EngineCase
 from tests.test_lm_async import ManualWorker
-from yuragi.chord.fsm import Plain, ThumbTap
 from yuragi.ime import learning_admin
 from yuragi.ime.bunsetsu import Bunsetsu, Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline
 from yuragi.ime.server import argument_parser, dispatch, load_session
-from yuragi.ime.session import ImeSession, Literal
+from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter, spell
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID
 from yuragi.lattice.table import load_table
@@ -81,8 +80,7 @@ class ContextLearningTest(unittest.TestCase):
     def plain(s, reading, *, after=None):
         """Type reading, unambiguous; after: the commit it continues (TIP's seq)."""
         s.start_input(None, after, disconnected=after is None)
-        s._table = {"keys": {c: {"plain": c} for c in reading}}
-        s._ingest([Literal(c) if c in "１２、" else Plain(c) for c in reading])
+        ingest_plain(s, reading, literals="１２、")
 
     @staticmethod
     def pick(keys, reply, surface):
