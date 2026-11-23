@@ -475,7 +475,6 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
   - torch は PyTorch から、種類（`cpu`・`cu126`・`cu128`）ごとの wheel の SHA-256 を `setup.ps1` に固定して
     `--no-deps` で入れる。transformers と、torch と transformers が要るものはすべて、版と SHA-256 を
     `packaging/requirements.txt` に固定し、PyPI から `--require-hashes` で入れる（書いていないもの、ハッシュの違うものは入らない）。
-    リリースの前に、torch の 3 種類それぞれで、この固定どおりに入れて読み込めることを Windows で確かめる。
   - pip は利用者の pip の設定（`pip.ini`・`PIP_*` の環境変数）もキャッシュも使わない（`--isolated --no-cache-dir`）。
   - 言語モデルは Hugging Face のリビジョンを指定し、エンジンが読むファイルを、`packaging/fetch_model.py` に
     固定した大きさと SHA-256 と照合する。
