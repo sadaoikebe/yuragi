@@ -1,5 +1,8 @@
-"""A damaged bundled preset stops the engine through its startup error path."""
+"""Reading the key settings: a damaged bundled preset stops the engine through
+its startup error path; keymap.json rows and tip.json are checked row by row;
+the compiled map gives the TIP its eat table."""
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -7,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from yuragi.chord.keys import Chord
 from yuragi.ime import keymap
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,3 +64,49 @@ class BundledPresetTest(unittest.TestCase):
                     self.preset.write_bytes(data)
                     with self.assertRaises(ValueError):
                         keymap._read_preset(keymap.DEFAULT_PRESET)
+
+
+class KeymapFileTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+
+    def test_rows_that_cannot_work_are_skipped_with_a_note(self):
+        rows = [["composing", "Alt+F5", "commit"],                 # Alt chords are global only
+                ["global", "A", "ime_toggle"],                     # a typing key, everywhere
+                ["direct", "Shift+A", "reconvert"],
+                ["empty", "F5", "commit"],                         # nothing to commit
+                ["editing", "Space", "delete_before_or_pass"],     # Space cannot be passed on
+                ["typing", "F5", None],                            # no such phase
+                ["global", "Alt+F5", "ime_toggle"],
+                ["editing", "Space", "commit"]]
+        (self.dir / "keymap.json").write_text(json.dumps(
+            {"use": "custom", "custom": {"base": "ms-ime", "overrides": rows}}), encoding="utf-8")
+        settings = keymap.load_keymap(self.dir)
+        self.assertIsNone(settings.error)
+        self.assertEqual([note.split(":")[0] for note in settings.notes],
+                         [f"差分 {index} 行目" for index in range(1, 7)])
+        self.assertEqual(set(settings.overrides), {("global", Chord.parse("Alt+F5")),
+                                                   ("editing", Chord.parse("Space"))})
+
+    def test_unreadable_keymap_json_is_an_error(self):
+        (self.dir / "keymap.json").write_text('{"use": "custom",', encoding="utf-8")
+        self.assertIsNotNone(keymap.load_keymap(self.dir).error)
+
+    def test_a_previous_tip_toggle_that_types_is_not_carried(self):
+        (self.dir / "tip.json").write_text('{"toggle_vk": 32, "toggle_mods": []}', encoding="utf-8")
+        self.assertEqual(keymap.load_keymap(self.dir).legacy, {})  # Space would no longer type
+
+
+class EatTableTest(unittest.TestCase):
+    def test_typing_keys_stay_off_the_table_and_pass_keys_are_passed(self):
+        one, shift_f6, enter = (Chord.parse(k) for k in ("1", "Shift+F6", "Enter"))
+        phases = keymap.Keymap({("selecting", one): "select_candidate_1",
+                                ("composing", shift_f6): "pass_through",
+                                ("composing", enter): "commit"}).eat_table()["phases"]
+        self.assertNotIn(one.code, phases["selecting"]["eat"])  # the engine sees typing keys anyway
+        self.assertEqual((phases["composing"]["eat"], phases["composing"]["pass"]),
+                         ([enter.code], [shift_f6.code]))
+        self.assertEqual({phase for phase, row in phases.items() if row.get("rest") == "eat"},
+                         set(phases) - {"empty"})
