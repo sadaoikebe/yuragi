@@ -111,5 +111,15 @@ class ServerTest(unittest.TestCase):
         reply = self.send("down", vk=ord("K"), t=30)
         self.assertEqual((reply["eat"], reply["timer"]), (False, None))
 
+    def test_timeout_settles_a_held_key(self):
+        """The TIP sends timeout at the deadline while keys are still held."""
+        reply = self.send("down", vk=ord("K"), t=0)
+        self.assertEqual((reply["composition"], reply["timer"]), ("", 80))
+        self.assertEqual(self.send("timeout", t=80)["composition"], "き")
+        self.send("up", vk=ord("K"), t=200)
+        self.assertEqual(self.send("down", vk=0x20, t=300)["phase"], "composing")
+        self.assertEqual(self.send("timeout", t=380)["phase"], "converting")
+
+
 if __name__ == "__main__":
     unittest.main()
