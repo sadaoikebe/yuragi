@@ -82,8 +82,8 @@ void Broker::StartEngine() {
     last_fatal_.clear();  // so is its fatal line
     SetState(EngineState::Starting);
     started_ = platform_.Now();
-    Log("starting the engine (" + std::to_string(exits_.size()) +
-        " exit(s) in the last 10 minutes)");
+    Log("starting the engine (" + std::to_string(exits_.size()) + " exit(s) in the last " +
+        std::to_string(ENGINE_EXIT_WINDOW_MS / 60000) + " minutes)");
     std::string error;
     if (!platform_.StartEngine(error)) {
         Log("the engine could not be started: " + error);

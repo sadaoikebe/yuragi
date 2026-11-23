@@ -69,9 +69,7 @@ public:
     int64_t NextDeadline() const;
     void Retry();  // the user asked: "もう一度試す", or a settings restart (DESIGN「メニュー」)
 
-    // For the platform and the tests.
-    EngineState State() const { return state_; }
-    const char* ClientState() const;  // ready, starting, down
+    EngineState State() const { return state_; }  // for the tests
 
 private:
     struct Client {
@@ -88,6 +86,7 @@ private:
         int64_t sent;
     };
 
+    const char* ClientState() const;  // ready, starting, down
     void StartEngine();
     void EngineGone(int code);
     void SetState(EngineState state);

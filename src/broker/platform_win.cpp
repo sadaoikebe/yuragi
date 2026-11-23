@@ -53,7 +53,7 @@ constexpr UINT WM_APP_CLEAR = WM_APP + 2;
 constexpr UINT WM_APP_TRAY = WM_APP + 3;
 constexpr UINT WM_APP_EXIT = WM_APP + 4;
 constexpr ULONG_PTR KEY_IO = 1, KEY_ENGINE = 2, KEY_UI = 3;
-constexpr int UI_RETRY = 1;
+constexpr ULONG_PTR UI_RETRY = 1;  // carried in the OVERLAPPED pointer
 constexpr int BUTTON_RETRY = 101, BUTTON_LOGS = 102;
 
 std::wstring Wide(const std::string& s) {
@@ -679,7 +679,8 @@ public:
             if (overlapped) {
                 if (key == KEY_IO) Completed(static_cast<Op*>(overlapped), bytes, error);
                 else if (key == KEY_ENGINE) Engine(reinterpret_cast<EngineEvent*>(overlapped));
-                else if (key == KEY_UI && (INT_PTR)overlapped == UI_RETRY) retry_requested_ = true;
+                else if (key == KEY_UI && reinterpret_cast<ULONG_PTR>(overlapped) == UI_RETRY)
+                    retry_requested_ = true;
             }
             if (retry_requested_ && retry_) {
                 retry_requested_ = false;
