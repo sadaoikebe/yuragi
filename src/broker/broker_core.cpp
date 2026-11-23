@@ -90,7 +90,10 @@ void Broker::StartEngine() {
     }
 }
 
-void Broker::OnClientConnected(ClientId id) { clients_[id] = Client(); }
+void Broker::OnClientConnected(ClientId id, bool app_container) {
+    clients_[id] = Client();
+    clients_[id].app_container = app_container;
+}
 
 void Broker::OnClientClosed(ClientId id) {
     auto it = clients_.find(id);
@@ -138,6 +141,10 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
         return;
     }
     if (op == "quit") {
+        if (client.app_container) {  // a TIP never asks it
+            Log("asked to quit by an app package; ignored");
+            return;
+        }
         Log("asked to quit (installer)");
         platform_.Quit();
         return;

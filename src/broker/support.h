@@ -18,7 +18,7 @@ constexpr uintmax_t LOG_MAX_BYTES = 1024 * 1024;  // DESIGN「定数」: 1MB x 2
 class Handler {
 public:
     virtual ~Handler() = default;
-    virtual void OnClientConnected(ClientId) {}
+    virtual void OnClientConnected(ClientId, bool) {}
     virtual void OnClientLine(ClientId, const std::string&) {}
     virtual void OnClientClosed(ClientId) {}
     virtual void OnEngineLine(const std::string& line) = 0;
@@ -31,7 +31,9 @@ public:
 class BrokerHandler : public Handler {
 public:
     explicit BrokerHandler(Broker& broker) : broker_(broker) {}
-    void OnClientConnected(ClientId c) override { broker_.OnClientConnected(c); }
+    void OnClientConnected(ClientId c, bool app_container) override {
+        broker_.OnClientConnected(c, app_container);
+    }
     void OnClientLine(ClientId c, const std::string& l) override { broker_.OnClientLine(c, l); }
     void OnClientClosed(ClientId c) override { broker_.OnClientClosed(c); }
     void OnEngineLine(const std::string& l) override { broker_.OnEngineLine(l); }

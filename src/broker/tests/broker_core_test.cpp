@@ -15,6 +15,7 @@ struct Fake : Platform {
     int starts = 0;
     int kills = 0;
     int cleared = 0;
+    int quits = 0;
     bool can_start = true;
     std::vector<std::string> to_engine;
     std::vector<std::pair<ClientId, std::string>> to_client;
@@ -34,7 +35,7 @@ struct Fake : Platform {
     void ClearStopped() override { ++cleared; }
     void OpenAdmin(bool) override {}
     void Log(const std::string& line) override { log.push_back(line); }
-    void Quit() override {}
+    void Quit() override { ++quits; }
 
     std::vector<std::string> Client(ClientId c) {
         std::vector<std::string> out;
@@ -52,8 +53,8 @@ void Advance(Broker& b, Fake& f, int64_t ms) {
 
 void Ready(Broker& b) { b.OnEngineLine(R"({"ready":true,"proto":1,"warnings":[]})"); }
 
-void Hello(Broker& b, ClientId c) {
-    b.OnClientConnected(c);
+void Hello(Broker& b, ClientId c, bool app_container = false) {
+    b.OnClientConnected(c, app_container);
     b.OnClientLine(c, R"({"op":"hello","proto":1,"passes":true})");
 }
 
@@ -96,7 +97,7 @@ void SessionsOpenOnlyAfterHello() {
     Fake f;
     Broker b(f);
     b.Start();
-    b.OnClientConnected(1);
+    b.OnClientConnected(1, false);
     Ready(b);
     b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
     b.OnClientClosed(1);
@@ -135,13 +136,29 @@ void ReplyOnlyAnswersTheMatchingSession() {
     assert(!Contains(f.Client(2), R"({"seq":1,"state":"starting"})"));
 }
 
+// DESIGN「通信」: an app package (a sandboxed app's TIP) converts, but cannot end the broker.
+void AnAppPackageCannotQuit() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    Ready(b);
+    Hello(b, 1, /*app_container=*/true);
+    b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
+    assert(f.to_engine.back() == R"({"sid":1,"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
+    b.OnClientLine(1, R"({"op":"quit"})");
+    assert(f.quits == 0);
+    Hello(b, 2);  // the installer
+    b.OnClientLine(2, R"({"op":"quit"})");
+    assert(f.quits == 1);
+}
+
 // A v0.1.2 TIP (no "passes") eats a key answered with a state: it is told to let the key
 // through instead, in its own input mode.
 void OldTipIsToldToLetKeysThrough() {
     Fake f;
     Broker b(f);
     b.Start();
-    b.OnClientConnected(1);
+    b.OnClientConnected(1, false);
     b.OnClientLine(1, R"({"op":"hello","proto":1})");
     b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
     assert(f.Client(1).back() == R"({"seq":1,"pass_through":true,"direct":false})");
@@ -321,6 +338,7 @@ int main() {
     KeysPassWhileStartingThenGoToTheEngine();
     SessionsOpenOnlyAfterHello();
     ReplyOnlyAnswersTheMatchingSession();
+    AnAppPackageCannotQuit();
     OldTipIsToldToLetKeysThrough();
     ExitWhileReadyResetsAndRestarts();
     ExitIsLoggedWithItsOwnFatalLine();

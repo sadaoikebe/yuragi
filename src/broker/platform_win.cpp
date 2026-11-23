@@ -117,6 +117,24 @@ std::wstring UserSid() {
     return sid;
 }
 
+// DESIGN「通信」: whether the pipe's client runs in an app package (AppContainer). A client
+// that cannot be examined counts as one.
+bool InAppContainer(HANDLE pipe) {
+    ULONG pid = 0;
+    if (!GetNamedPipeClientProcessId(pipe, &pid)) return true;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return true;
+    DWORD contained = 1, size = 0;
+    HANDLE token = nullptr;
+    if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
+        if (!GetTokenInformation(token, TokenIsAppContainer, &contained, sizeof contained, &size))
+            contained = 1;
+        CloseHandle(token);
+    }
+    CloseHandle(process);
+    return contained != 0;
+}
+
 std::wstring DefaultPipeName() {
     DWORD session = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &session);
@@ -742,7 +760,7 @@ private:
             owned->id = next_client_++;
             Pipe* p = owned.get();
             pipes_[p->id] = std::move(owned);
-            handler_->OnClientConnected(p->id);
+            handler_->OnClientConnected(p->id, InAppContainer(p->handle));
             StartRead(*p);
             return;
         }
