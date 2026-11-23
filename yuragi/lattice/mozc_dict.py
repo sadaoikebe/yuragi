@@ -41,7 +41,6 @@ def cache_name(manifest: Path = MANIFEST) -> str:
 
 
 CACHE_DIR = ROOT / "data" / "cache"
-USER_LEX = ROOT / "data" / "user_lexicon.jsonl"
 
 
 class DictionaryFormatError(ValueError):
@@ -188,46 +187,6 @@ def _parse_connection() -> tuple[array, int]:
     if len(vals) != expected:
         raise DictionaryFormatError(f"connection size {len(vals)} != {pos_size}^2")
     return vals, pos_size
-
-
-def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
-    """Overlay the bundled corrections from data/user_lexicon.jsonl in memory.
-
-    A spelling already in the dictionary only gets the lower cost: the row's
-    lid/rid are not read. The file is part of the program, so a broken row
-    stops loading like a broken dictionary line (DESIGN「起動時の読み込み」).
-    """
-    p = path or USER_LEX
-    if not p.exists():
-        return 0
-    n = 0
-    for line_no, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        try:
-            row = json.loads(line)
-            reading = row["reading"]
-            surface = row["surface"]
-            cost = int(row["cost"])
-            lid = int(row.get("lid", DEFAULT_NOUN_ID))
-            rid = int(row.get("rid", lid))
-        except (ValueError, KeyError, TypeError):
-            raise DictionaryFormatError(f"{p.name}:{line_no}: not a user lexicon row") from None
-        bucket = lex.by_reading.setdefault(reading, [])
-        replaced = False
-        for e in bucket:
-            if e.surface == surface:
-                e.cost = min(e.cost, cost)
-                replaced = True
-                break
-        if not replaced:
-            bucket.append(Entry(surface, reading, lid, rid, cost))
-        bucket.sort(key=lambda e: e.cost)
-        for i in range(1, len(reading) + 1):
-            lex.prefixes.add(reading[:i])
-        n += 1
-    return n
 
 
 NUMERAL_MAX = 9999
@@ -383,7 +342,7 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
                 tmp.unlink(missing_ok=True)
 
 
-def load_lex(*, user_lexicon: bool = True) -> MozcLex:
+def load_lex() -> MozcLex:
     """The lexicon from the cache, or parsed from the text and cached."""
     cache = CACHE_DIR / cache_name()
     lex = read_cache(cache)
@@ -399,21 +358,17 @@ def load_lex(*, user_lexicon: bool = True) -> MozcLex:
             f"pos={pos_size} cache={cache}",
             file=sys.stderr,
         )
-    finish_lex(lex, USER_LEX if user_lexicon else None)
+    finish_lex(lex)
     return lex
 
 
-def finish_lex(lex: MozcLex, user: Path | None) -> None:
+def finish_lex(lex: MozcLex) -> None:
     """What every reader applies to the raw (cached) dictionary, in memory.
 
-    Numerals, the user lexicon `user` (None: without it) and the zero-row
-    penalty. load_lex and the evaluation tools both use this one function.
+    Numerals and the zero-row penalty. load_lex and the evaluation tools both use this one function.
     """
     apply_numeral_context(lex)
     apply_numerals(lex)
-    n = apply_user_lex(lex, user) if user is not None else 0
-    if n:
-        print(f"  user lexicon: {n} entries from {user.name}", file=sys.stderr)
     # Apply only after saving/loading the raw cache. Include column 0 (EOS),
     # so a zero-row entry pays the same penalty even at the end of input.
     penalty = int(os.environ.get("ZERO_ROW_PENALTY", "3000"))

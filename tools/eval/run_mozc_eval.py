@@ -1,7 +1,6 @@
 """Evaluate joint NICOLA decoding against Mozc's evaluation.tsv.
 
-Run with ``python3 -m tools.eval.run_mozc_eval``. Use
-``--no-user-lexicon`` to evaluate the unmodified Mozc cache.
+Run with ``python3 -m tools.eval.run_mozc_eval``.
 """
 
 from __future__ import annotations
@@ -61,14 +60,11 @@ def criterion_passes(criterion, argument: str, best: str, candidates: list[str])
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--no-user-lexicon", action="store_true", help="use the unmodified Mozc cache"
-    )
     parser.add_argument("--unambiguous", action="store_true", help="use known kana (una ceiling)")
     parser.add_argument("--details", type=Path, help="write per-row PASS/FAIL/SKIP as JSONL")
     args = parser.parse_args()
 
-    lex = load_lex(user_lexicon=not args.no_user_lexicon)
+    lex = load_lex()
     typing = typing_table(load_table())
     total = evaluated = skipped = reading_matches = surface_matches = 0
     criteria = Counter()
@@ -118,7 +114,6 @@ def main() -> None:
                               mozc_pass=mozc_passed)
             details.append(detail)
 
-    print(f"User lexicon: {'off' if args.no_user_lexicon else 'on'}")
     print(f"Tokens: {'una (known kana)' if args.unambiguous else 'amb (L/R ambiguous)'}")
     print(f"Total rows: {total}")
     print(f"Evaluated: {evaluated}")

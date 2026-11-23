@@ -1,4 +1,4 @@
-"""The user's own word list, separate from data/user_lexicon.jsonl.
+"""The user's own word list.
 
 Personal words live in their own JSONL file, are overlaid on the shared
 lexicon only by the running IME (never by the evaluation loaders), and take
@@ -21,7 +21,7 @@ from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 
 DEFAULT_PERSONAL_PATH = Path.home() / ".yuragi-ime" / "personal_lexicon.jsonl"
-# Based on the median cost of the hand-written entries in data/user_lexicon.jsonl.
+# The default cost of a registered word (CONVERSION「辞書の重ね方」).
 DEFAULT_COST = 2600
 # Mozc id.def; a short list of what a user registers, by name.
 POS_IDS = {
@@ -161,7 +161,7 @@ class PersonalLexicon:
                 continue
             merged = list(base or ())
             for w in by_reading[reading]:
-                # Like apply_user_lex: a known spelling keeps its POS and
+                # A known spelling keeps its POS and
                 # gets the cheaper cost; a new one gets the chosen POS.
                 # New Entry objects: the originals stay untouched for removal.
                 at = next((i for i, e in enumerate(merged) if e.surface == w.surface), None)

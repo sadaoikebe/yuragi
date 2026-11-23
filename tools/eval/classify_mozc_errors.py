@@ -1,13 +1,11 @@
 """Local, bounded Mozc evaluation diagnostics (learning/LM are always off).
 
 Run ``python3 -m tools.eval.classify_mozc_errors --output /tmp/mozc-errors``.
-The default cache and user overlay are the same as run_mozc_eval. No cache,
+The default cache is the same as run_mozc_eval. No cache,
 dictionary, learning file or existing report is rewritten. Use --from-text
 to diagnose a text snapshot instead; cache/text equivalence is NOT assumed.
 
-Only amb/una with the selected overlay setting are run, as requested for this
-implementation. Re-run with --no-user-lexicon in a different output directory
-for an overlay ablation. Linux fork workers enforce a wall deadline per row
+Only amb/una are run, as requested for this implementation. Linux fork workers enforce a wall deadline per row
 (both conditions together) and an address-space limit. Partial measurements
 survive worker termination. TSV output is a reference, never asserted truth.
 """
@@ -40,7 +38,7 @@ from yuragi.lattice import mozc_dict
 from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import (BOS_ID, CACHE_DIR, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
-                                       UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex, finish_lex)
+                                       UNK_COST, UNK_LID, Entry, MozcLex, finish_lex)
 from yuragi.lattice.table import DATA, load_table
 from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end_cost,
                                            nbest_tokens, word_cost)
@@ -102,7 +100,7 @@ def read_rows(path: Path) -> list[dict]:
     return rows
 
 
-def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
+def load_snapshot(dictionary_dir: Path, cache: Path | None):
     """The engine's lexicon (finish_lex), without load_lex's cache-writing side effect."""
     if cache is not None:
         lex = mozc_dict.load_cache(cache, allow_legacy=True)
@@ -116,17 +114,11 @@ def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
         finally:
             mozc_dict.DICT_DIR = original
         lex = MozcLex(by_reading, prefixes, connect, size)
-    # Only a changed/new effective entry is attributed to the overlay.
-    readings = set() if user is None else {
-        json.loads(line)["reading"] for line in user.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")}
-    before = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])}
-    finish_lex(lex, user)
-    changed = {entry_key(e) for reading in readings for e in lex.by_reading.get(reading, [])} - before
+    finish_lex(lex)
     names = {int(i): name for line in (dictionary_dir / "id.def").read_text(
         encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
     names.update({i: names[base] for i, (_, base) in enumerate(lex.numeral_pos, lex.pos_size)})
-    return lex, changed, names
+    return lex, names
 
 
 def entry_key(e: Entry) -> tuple:
@@ -143,7 +135,7 @@ def ui_segments(pieces: list[Piece], lex: MozcLex) -> list[tuple[int, int]]:
     return spans
 
 
-def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict) -> dict:
+def describe_path(decoded: DecodeResult, lex: MozcLex, names: dict) -> dict:
     pieces = []
     prev = BOUNDARY_RID
     word_total = connection_total = 0
@@ -159,7 +151,7 @@ def describe_path(decoded: DecodeResult, lex: MozcLex, overlay: set, names: dict
                        "rid_name": names.get(e.rid), "connection_from_rid": prev,
                        "connection_cost": connection, "unknown": w.unknown,
                        "source_layer": ("literal" if p.literal else "unknown_backoff" if w.unknown
-                                        else "user_overlay" if entry_key(e) in overlay else "mozc_base")})
+                                        else "mozc_base")})
         prev = w.rid
     eos = end_cost(lex, prev)
     return {"reading": decoded.reading, "surface": decoded.surface, "score": decoded.score,
@@ -245,7 +237,7 @@ def differences(actual: str, target: str, pieces: list[Piece]) -> list[dict]:
 
 
 def target_diagnostic(reading: str, target: str, decoded: DecodeResult, tokens: list[dict],
-                      exact: list[DecodeResult], lex: MozcLex, overlay: set, names: dict) -> dict:
+                      exact: list[DecodeResult], lex: MozcLex, names: dict) -> dict:
     surfaces = [d.surface for d in exact]
     rank = surfaces.index(target) + 1 if target in surfaces else None
     prepended = list(dict.fromkeys([decoded.surface] + surfaces))[:30]
@@ -283,8 +275,8 @@ def target_diagnostic(reading: str, target: str, decoded: DecodeResult, tokens: 
     }
     chosen = engine or unrestricted or backoff
     if chosen:
-        detail = describe_path(chosen, lex, overlay, names)
-        current = describe_path(decoded, lex, overlay, names)
+        detail = describe_path(chosen, lex, names)
+        current = describe_path(decoded, lex, names)
         info["target_path"] = detail
         info["cost_delta"] = {key: detail[key] - current[key]
                               for key in ("score", "word_cost", "connection_cost", "bos_cost", "eos_cost")}
@@ -326,12 +318,12 @@ def target_diagnostic(reading: str, target: str, decoded: DecodeResult, tokens: 
 
 
 def diagnose_condition(row: dict, mode: str, reverse: dict, lex: MozcLex,
-                       overlay: set, names: dict, emit) -> dict:
+                       names: dict, emit) -> dict:
     reading = row["input_reading"]
     tokens = typed_tokens(reading, reverse, mode == "una")
     best = decode_tokens(tokens, lex)
     criterion = parse_criterion(row["command"])
-    result = {"status": "partial", **describe_path(best, lex, overlay, names),
+    result = {"status": "partial", **describe_path(best, lex, names),
               "reading_match": best.reading == reading,
               "surface_match": best.surface == row["recorded_surface"], "command_pass": None,
               "command_status": "not_applicable" if criterion is None else "pending",
@@ -360,7 +352,7 @@ def diagnose_condition(row: dict, mode: str, reverse: dict, lex: MozcLex,
         # Reuse identical target diagnostics, preserving each source name.
         same = next((d for d in result["diagnostics"].values() if d["target"] == target), None)
         result["diagnostics"][source] = same or target_diagnostic(
-            reading, target, best, tokens, exact, lex, overlay, names)
+            reading, target, best, tokens, exact, lex, names)
         emit(mode, result)
     if criterion is not None and result["command_pass"] is None:
         # Evaluation's Expected 99/999 must not silently become Expected 30.
@@ -374,7 +366,7 @@ def diagnose_condition(row: dict, mode: str, reverse: dict, lex: MozcLex,
     return result
 
 
-def _worker(connection, lex, overlay, names, reverse, memory_mb):
+def _worker(connection, lex, names, reverse, memory_mb):
     if resource is not None:  # memory cap is unavailable on Windows
         resource.setrlimit(resource.RLIMIT_AS, (memory_mb * 1024 * 1024,) * 2)
     try:
@@ -385,7 +377,7 @@ def _worker(connection, lex, overlay, names, reverse, memory_mb):
                 return
             try:
                 for mode in ("amb", "una"):
-                    diagnose_condition(row, mode, reverse, lex, overlay, names,
+                    diagnose_condition(row, mode, reverse, lex, names,
                                        lambda key, value: connection.send(("progress", key, value)))
                 connection.send(("done",))
             except MemoryError:
@@ -465,7 +457,7 @@ def classify(row: dict) -> dict:
                                 una.get("diagnostics", {}).get("recorded", {})).get("dictionary_path_engine_policy")}}
 
 
-def run_rows(rows, lex, overlay, names, reverse, timeout=10.0, memory_mb=2048):
+def run_rows(rows, lex, names, reverse, timeout=10.0, memory_mb=2048):
     # fork lets the worker inherit the caller's lexicon; elsewhere the worker
     # re-imports and receives the pickled lexicon. Either way the row's
     # deadline starts once the worker reports ready, not at its start.
@@ -489,7 +481,7 @@ def run_rows(rows, lex, overlay, names, reverse, timeout=10.0, memory_mb=2048):
             else:
                 if process is None:
                     connection, child = ctx.Pipe()
-                    process = ctx.Process(target=_worker, args=(child, lex, overlay, names, reverse, memory_mb))
+                    process = ctx.Process(target=_worker, args=(child, lex, names, reverse, memory_mb))
                     process.start()
                     child.close()
                     connection.recv()  # ("ready",)
@@ -616,7 +608,6 @@ def write_reports(output: Path, rows: list[dict], manifest: dict):
             writer.writerow({**item, "row_ids": json.dumps(item["row_ids"], ensure_ascii=False),
                              "ranks": json.dumps(item["ranks"], ensure_ascii=False)})
     lines = ["# Mozc 誤り分類（自動診断）", "", "learning=off / LM=off / amb, una の2条件。",
-             f"手書き辞書: {'あり' if manifest['settings']['user_lexicon'] else 'なし'}。",
              f"入力台帳: {len(rows)} / 入力可能: {manifest['encodable_rows']} / "
              f"入力不能: {primary['input_excluded']}。",
              f"所要時間: {manifest['elapsed_seconds']:.3f} 秒（ロード・ハッシュ計算を含む）。", "",
@@ -642,7 +633,7 @@ def write_reports(output: Path, rows: list[dict], manifest: dict):
               "|amb → una|改善|悪化|同じ|未測定・対象外|", "|---|---:|---:|---:|---:|"]
     for metric, delta in deltas.items():
         lines.append(f"|{metric}|" + "|".join(str(len(delta[key])) for key in delta) + "|")
-    lines += ["", "改善・悪化の行IDは run.json の condition_differences。手書き辞書のあり/なし差分は今回未測定。",
+    lines += ["", "改善・悪化の行IDは run.json の condition_differences。",
               "Expected N は既存評価と同じ、1-bestを先頭に追加した異なる全文候補の上位Nによる近似。",
               "診断順位は未知補完・単語コスト12000以上を除く厳密全文n-best。UI候補の順位・ページとは別。",
               "上位30件未発見は rank_gt_30_or_unreachable。全文の単独エントリ不在はOOV判定に使わない。",
@@ -663,8 +654,6 @@ def main():
     parser.add_argument("--dictionary-dir", type=Path, default=DICT_DIR)
     parser.add_argument("--cache", type=Path, help="explicit trusted local pickle; recorded in manifest")
     parser.add_argument("--from-text", action="store_true", help="parse text without reading/writing any cache")
-    parser.add_argument("--user-lexicon", type=Path, default=USER_LEX)
-    parser.add_argument("--no-user-lexicon", action="store_true")
     parser.add_argument("--table", type=Path, default=DATA)
     parser.add_argument("--row-timeout", type=float, default=10.0)
     parser.add_argument("--memory-mb", type=int, default=2048)
@@ -682,13 +671,10 @@ def main():
     if cache is None and not args.from_text and args.dictionary_dir == DICT_DIR:
         cache = CACHE_DIR / mozc_dict.cache_name()
         cache = cache if cache.exists() else None
-    user = None if args.no_user_lexicon else args.user_lexicon
     # Exactly the files required by the selected snapshot, not an open glob.
     inputs = [tsv, args.table, args.dictionary_dir / "id.def", args.dictionary_dir / "suffix.txt",
               args.dictionary_dir / "connection_single_column.txt",
               *(args.dictionary_dir / f"dictionary{i:02}.txt" for i in range(10))]
-    if user:
-        inputs.append(user)
     if cache:
         inputs.append(cache)
     hashes = {str(path.resolve()): sha256(path) for path in inputs}
@@ -711,8 +697,7 @@ def main():
                 "engine_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in engine_files},
                 "inputs_sha256": hashes, "upstream_commit": upstream,
                 "lexicon_source": "cache_text_equivalence_unverified" if cache else "text",
-                "settings": {"conditions": ["amb", "una"], "user_lexicon": user is not None,
-                             "learning": False, "lm": False, "row_timeout_seconds": args.row_timeout,
+                "settings": {"conditions": ["amb", "una"], "learning": False, "lm": False, "row_timeout_seconds": args.row_timeout,
                              "memory_mb": args.memory_mb, "nbest_diagnostic_limit": 30,
                              "sentence_thresholds": [1, 3, 8, 30], "max_word_tokens": MAX_WORD_MORA,
                              "pos_keep": POS_KEEP, "ui_candidate_limit": 30, "limit": args.limit}}
@@ -720,10 +705,10 @@ def main():
     manifest["source_rows"] = len(rows)
     if args.limit:
         rows = rows[:args.limit]
-    lex, overlay, names = load_snapshot(args.dictionary_dir, cache, user)
+    lex, names = load_snapshot(args.dictionary_dir, cache)
     reverse = typing_table(load_table(args.table))
     results = []
-    for i, row in enumerate(run_rows(rows, lex, overlay, names, reverse, args.row_timeout, args.memory_mb), 1):
+    for i, row in enumerate(run_rows(rows, lex, names, reverse, args.row_timeout, args.memory_mb), 1):
         results.append(row)
         if i % 50 == 0 or row["state"].startswith("unknown"):
             print(f"{i}/{len(rows)} {row['state']} ({time.monotonic() - start:.1f}s)", file=sys.stderr)
