@@ -609,6 +609,24 @@ class LearningConnectionTest(EngineCase):
             self.assertEqual(keys.tap(SPACE)["composition"], winner)
             self.assertEqual(keys.tap(SPACE)["candidates"][0], winner)  # the window opens
 
+    def test_typing_somewhere_else_drops_the_left_bunsetsu(self):
+        store = LearningStore(self.dir / "learning.jsonl")
+        lex = real_lex()
+        store.confirm([word("げんこうの", "原稿の"), word("こうせい", "校正")], lex)
+        store.confirm([word("こうせい", "構成")], lex)
+        loaded = ImeSession(_table=load_table(), _lex=lex, _learning=store)
+        engine = self.engine(loaded=loaded)
+        self.open(engine, 11)
+        keys = Keys(lambda msg: engine.request({"sid": 11, **msg}))
+        sess = engine.connections[11].sess
+        ContextLearningTest.plain(sess, "げんこうの")
+        sess._table = loaded._table
+        keys.commit()
+        keys.tap("R", left_context="会議で")  # elsewhere: no after_commit_seq (DESIGN)
+        for key in "AGL":
+            keys.tap(key)
+        self.assertEqual(keys.tap(SPACE)["composition"], "構成")
+
 
 if __name__ == "__main__":
     unittest.main()

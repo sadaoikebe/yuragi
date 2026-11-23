@@ -263,6 +263,36 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual(k.press(VK_RETURN)["commit"], "私は学校に")
         self.assertEqual(self.rows(), [])
 
+    def test_deleting_a_one_character_last_clause_opens_the_previous_one(self):
+        lex = MozcLex({"き": [Entry("木", "き", 1, 1, 100)], "か": [Entry("蚊", "か", 1, 1, 100)]},
+                      {"き", "か"}, [0] * 4, 2)
+        k = Keys(ImeSession(_table=load_table(), _lex=lex))
+        k.tap("K")
+        k.tap("W")
+        k.convert()
+        k.press(VK_LEFT, ["shift"])
+        self.assertEqual(self.surfaces(k.convert()), ["木", "蚊"])
+        deleted = k.press(0x08)
+        self.assertEqual((deleted["phase"], deleted["composition"]), ("composing", "木"))
+
+    def test_deleting_past_the_edge_of_an_edited_clause_commits_and_passes(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        self.assertEqual(k.press(VK_ESC)["focus"], 0)  # わたしは, the caret at its end
+        k.press(VK_LEFT, ["ctrl"])  # to its start
+        reply = k.press(0x08)
+        self.assertEqual((reply["eat"], reply["phase"], reply["commit"]),
+                         (False, "empty", "わたしは学校に行く"))
+
+        k = self.typed("わたしはがっこうにいく")
+        k.convert()
+        k.press(VK_RIGHT)
+        k.press(VK_RIGHT)
+        self.assertEqual(k.press(VK_ESC)["focus"], 2)  # いく, the caret at its end
+        reply = k.press(0x2E)
+        self.assertEqual((reply["eat"], reply["phase"], reply["commit"]),
+                         (False, "empty", "私は学校にいく"))
+
     def test_reverted_middle_clause_accepts_input_without_changing_its_neighbors(self):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}
