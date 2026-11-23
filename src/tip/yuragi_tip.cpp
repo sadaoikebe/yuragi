@@ -861,7 +861,10 @@ public:
             HRESULT hr = S_OK;
             if (!r.commit.empty()) hr = Write(ec, Utf8ToWide(r.commit), true, r);
             if (SUCCEEDED(hr)) hr = Write(ec, Utf8ToWide(r.composition), false, r);
-            state_->applied_seq = r.seq;
+            // A failure leaves the rest of the batch unwritten. It counts as applied, as
+            // when the application refuses the session, so the keys waiting on those
+            // replies still go out (KEYBIND §7.6: no silent way out).
+            state_->applied_seq = FAILED(hr) ? pending.back().seq : r.seq;
             PostMessageW(keys_, kKeysMessage, 0, 0);
             if (FAILED(hr)) {
                 state_->BreakContinuity();
