@@ -69,6 +69,21 @@ class SettingsTest(Base):
         self.assertIsNone(table.lookup("empty", Chord.parse("Alt+`")))
         self.assertEqual(table.lookup("composing", Chord.parse("Enter")).id, "cancel")
 
+
+class ModelTest(Base):
+    def test_what_cannot_be_done_is_an_error(self):
+        m = self.model
+        self.assertFalse(m.set_setting("prediction", "ときどき").ok)
+        self.assertFalse(m.add_word("おやゆび", "親指", "名詞", "多め").ok)
+        self.assertFalse(self.personal.exists())
+        self.assertFalse(m.restart_engine().ok)  # no broker
+        self.assertTrue(m.reset_setting("learning").ok)  # already the default: not an error,
+        self.assertFalse(self.config.exists())              # and nothing to write
+        with mock.patch.object(broker_client, "reload_keymap",
+                               return_value={"keymap_reload": "failed", "reason": "壊れた行"}):
+            self.assertFalse(m.save_keys(m.key_settings()).ok)
+
+
 class FakeVar:
     def __init__(self, value=""):
         self.value = value
@@ -118,8 +133,9 @@ class WidgetLayerTest(Base):
         w._remove_word()
         self.assertEqual(read_words(self.personal), [])
         self.select(w, w.learning_tree, ("ぬえ", "ヌエ", "1", "", "○"))
+        w.l_pos.set("人名")
         w._promote()
-        self.assertEqual([x.surface for x in read_words(self.personal)], ["ヌエ"])
+        self.assertEqual([(x.surface, x.pos) for x in read_words(self.personal)], [("ヌエ", "人名")])
         w._forget()
         self.assertEqual([p.surface for p in self.model.learned()], ["肩"])
         w.settings_tree.selection.return_value = (str(list(SETTINGS).index("prediction")),)
@@ -134,6 +150,7 @@ class WidgetLayerTest(Base):
         w._tab_changed()
         self.assertEqual(w.message.get(), "")  # a message stays with its tab
         w._refresh_status()
+
 
 if __name__ == "__main__":
     unittest.main()
