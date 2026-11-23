@@ -65,6 +65,7 @@ user32.GetAncestor.argtypes = [wt.HWND, wt.UINT]
 user32.GetAncestor.restype = wt.HWND
 
 TARGET = {"pid": None, "hwnd": None}
+GA_ROOT = 2  # the top-level window itself; a dialog is its own root, unlike GA_ROOTOWNER
 
 
 def guard():
@@ -72,8 +73,7 @@ def guard():
     fg = user32.GetForegroundWindow()
     pid = wt.DWORD()
     user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
-    root = user32.GetAncestor(fg, 3) if fg else None  # GA_ROOTOWNER
-    if TARGET["pid"] is None or pid.value != TARGET["pid"] or root not in (TARGET["hwnd"], None) and fg != TARGET["hwnd"]:
+    if TARGET["pid"] is None or pid.value != TARGET["pid"] or not fg or user32.GetAncestor(fg, GA_ROOT) != TARGET["hwnd"]:
         release_mods()
         raise Aborted(f"foreground is {title_of(fg)!r} (pid {pid.value}), not the window under test; stopped")
 
@@ -183,10 +183,10 @@ def bring_front(hwnd, pid):
         user32.SetForegroundWindow(hwnd)
         user32.AttachThreadInput(me, fg_tid, False)
         time.sleep(0.4)
-        cur = wt.DWORD()
-        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(cur))
-        if cur.value == pid:
-            TARGET["pid"], TARGET["hwnd"] = pid, user32.GetAncestor(hwnd, 3) or hwnd
+        root = user32.GetAncestor(hwnd, GA_ROOT) or hwnd
+        fg = user32.GetForegroundWindow()
+        if fg and user32.GetAncestor(fg, GA_ROOT) == root:
+            TARGET["pid"], TARGET["hwnd"] = pid, root
             return
     raise Aborted(f"could not bring {title_of(hwnd)!r} to the front")
 
