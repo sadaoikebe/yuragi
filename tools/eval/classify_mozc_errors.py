@@ -23,7 +23,6 @@ import hashlib
 import json
 import multiprocessing as mp
 from pathlib import Path
-import pickle
 import platform
 try:
     import resource
@@ -105,7 +104,7 @@ def read_rows(path: Path) -> list[dict]:
 def load_snapshot(dictionary_dir: Path, cache: Path | None, user: Path | None):
     """Reuse loader semantics without its cache-writing side effect."""
     if cache is not None:
-        lex = pickle.loads(cache.read_bytes())
+        lex = mozc_dict.load_cache(cache, allow_legacy=True)
     else:
         # These existing parsers use a module path. Restore it even on failure.
         original = mozc_dict.DICT_DIR
@@ -335,7 +334,7 @@ def diagnose_condition(row: dict, mode: str, reverse: dict, lex: MozcLex,
                        overlay: set, names: dict, emit) -> dict:
     reading = row["input_reading"]
     tokens = plain_tokens(reading) if mode == "una" else [reverse[ch] for ch in reading]
-    best, _ = decode_tokens(tokens, lex)
+    best = decode_tokens(tokens, lex)
     criterion = parse_criterion(row["command"])
     result = {"status": "partial", **describe_path(best, lex, overlay, names),
               "reading_match": best.reading == reading,
@@ -698,7 +697,8 @@ def main():
     engine_files = [Path(__file__), ROOT / "yuragi/lattice/mozc_dict.py",
                     ROOT / "yuragi/lattice/token_viterbi.py", ROOT / "tools/eval/run_mozc_eval.py",
                     ROOT / "yuragi/lattice/expand.py", ROOT / "yuragi/lattice/decode.py",
-                    ROOT / "yuragi/lattice/table.py", ROOT / "yuragi/ime/bunsetsu.py"]
+                    ROOT / "yuragi/lattice/table.py", ROOT / "yuragi/ime/bunsetsu.py",
+                    ROOT / "yuragi/text.py"]
     git = lambda *parts: subprocess.check_output(["git", *parts], cwd=ROOT)
     manifest = {"format_version": 1, "python": platform.python_version(),
                 "code_head": git("rev-parse", "HEAD").decode().strip(),

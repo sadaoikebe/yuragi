@@ -26,6 +26,7 @@ from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
+from yuragi.text import katakana, to_full_width, to_half_width
 from .bunsetsu import (BOS_ID, PAGE_SIZE, Bunsetsu, Candidate, CandidateOrder, CandidateStream,
                        Segment, arranged_candidates, candidate_note, candidates, dictionary_candidates,
                        normal_bunsetsu, without_heads, word_piece)
@@ -68,10 +69,6 @@ for _code in range(0xFF66, 0xFF9E):
 KANA_SCRIPTS = ("hiragana", "katakana", "half_katakana")
 
 
-def katakana(hiragana: str) -> str:
-    return "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in hiragana)
-
-
 def half_katakana(hiragana: str) -> str:
     """F8: ひらがな → ﾊﾝｶｸｶﾀｶﾅ (a kana with no half-width form stays full-width)."""
     return "".join(_HALF_KATAKANA.get(c, c) for c in katakana(hiragana))
@@ -100,13 +97,6 @@ def half_width_ascii(text: str) -> bool:
     return bool(text) and all("!" <= c <= "~" for c in text)
 
 
-def to_full_width(text: str) -> str:
-    return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in text)
-
-
-def to_half_width(text: str) -> str:
-    return "".join(chr(ord(c) - 0xFEE0) if "！" <= c <= "～" else " " if c == "　" else c
-                   for c in text)
 
 def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
     if isinstance(tok, Literal):
@@ -1624,8 +1614,7 @@ class ImeSession:
         out = []
         for t in self.tokens:
             d = to_lattice_token(t, self._table)
-            if d is None:
-                continue
+            assert d is not None  # _ingest drops empty faces before inserting tokens.
             carried = self._carry.get(d.get("press")) if self._carry else None
             if carried is not None:
                 # The committed head chose this press's direction (部分確定).
@@ -1765,12 +1754,9 @@ class ImeSession:
         # The directions the committed reading gives each press (the thumbs
         # of one press alternate); the remaining chords of a press keep it.
         chosen = Plan(self._lattice()).directions(head.start, head.end, head.selected.reading)
-        # Lattice offsets skip tokens with no kana; cut the raw list there.
-        kept = [i for i, t in enumerate(self.tokens)
-                if to_lattice_token(t, self._table) is not None]
-        del self.tokens[:kept[end]]
+        del self.tokens[:end]
         if self._cursor is not None:
-            self._cursor = max(0, self._cursor - kept[end])
+            self._cursor = max(0, self._cursor - end)
         remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
         for press, dirs in chosen.items():
             if press in remaining and dirs and dirs != SIDES:
@@ -1801,22 +1787,20 @@ class ImeSession:
         """
         if not self.segments:
             return ""
-        kept = [i for i, t in enumerate(self.tokens)
-                if to_lattice_token(t, self._table) is not None]
         if self._alnum_held:
             return self._commit(reset_input=False)
         head = self.segments[0]
         # Commit the first input unit, which can display two half-width characters.
         text = self._script_units(head, self._input_script or self.input_mode)[0]
         self._note_commit(text)
-        if len(kept) == 1:
+        if len(self.tokens) == 1:
             self._clear_input()
             return text
         self._partial = True
         chosen = Plan(self._lattice()).directions(0, 1, head.selected.reading[0])
-        del self.tokens[:kept[1]]
+        del self.tokens[0]
         if self._cursor is not None:
-            self._cursor = max(0, self._cursor - kept[1])
+            self._cursor = max(0, self._cursor - 1)
         remaining = {t.press for t in self.tokens if isinstance(t, AmbShift)}
         for press, dirs in chosen.items():
             if press in remaining and dirs and dirs != SIDES:

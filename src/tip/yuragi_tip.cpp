@@ -23,7 +23,6 @@
 #include <userenv.h>
 
 #include <algorithm>
-#include <climits>
 #include <cstdarg>
 #include <cstdio>
 #include <cwchar>
@@ -455,7 +454,7 @@ private:
             }
             // The hello goes first; only then may the UI thread write (keys).
             HANDLE hello_done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            bool greeted = WriteTo(pipe, hello_done, tip_logic::Hello(YURAGI_TAG),
+            bool greeted = WriteTo(pipe, hello_done, tip_logic::Hello(),
                                    tip_logic::KEY_BUDGET_MS);
             CloseHandle(hello_done);
             if (!greeted) {
@@ -1745,7 +1744,7 @@ private:
     // resets). Only while keys go to the broker at all.
     long long SendRequest(const std::string& op, const std::string& extra = "", bool blocking = true) {
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return 0;
-        long long seq = in_flight_.Next(NowMs(), blocking);
+        long long seq = in_flight_.Next(blocking);
         if (!link_.Write(tip_logic::OpRequest(seq, op, extra), blocking ? tip_logic::KEY_BUDGET_MS : 0)) {
             in_flight_.Answer(seq);
             return 0;
@@ -1781,7 +1780,7 @@ private:
             return SendResult::FocusMoved;
         }
         if (!ScopeAllowsInput()) return SendResult::Unavailable;
-        long long seq = in_flight_.Next(start);
+        long long seq = in_flight_.Next();
         auto request = tip_logic::KeyRequest(seq, key.down, key.chord.vk, key.time, key.chord.mods,
                                             context ? &*context : nullptr);
         ULONGLONG now = NowMs();

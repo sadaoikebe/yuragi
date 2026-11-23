@@ -393,7 +393,7 @@ def conversion_picks(parts, lex: MozcLex, learning, lm_context: str,
             continue
         if cancelled():
             return None
-        dec, _ = decode_tokens(part, lex, learning=learning, left_id=left_id)
+        dec = decode_tokens(part, lex, learning=learning, left_id=left_id)
         supported = 0
         if converter is not None:
             dec, supported = converter.rescore(lm_context + text, dec, part, lex,

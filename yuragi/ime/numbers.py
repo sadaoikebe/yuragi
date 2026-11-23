@@ -6,6 +6,8 @@ type full-width digits; the half-width ones are the next row.
 """
 from __future__ import annotations
 
+from yuragi.text import to_full_width
+
 KANJI_DIGITS = "〇一二三四五六七八九"
 SMALL_UNITS = ((1000, "千"), (100, "百"), (10, "十"))
 LARGE_UNITS = ("", "万", "億", "兆", "京")
@@ -49,11 +51,11 @@ def number_spellings(digits: str) -> list[str]:
     """The typed digits, half-width, full-width, kanji digit by digit,
     positional kanji, grouped."""
     typed, digits = digits, half_width_digits(digits)
-    wide = "".join(chr(ord(c) + 0xFEE0) for c in digits)
+    wide = to_full_width(digits)
     rows = [typed, digits, wide, "".join(KANJI_DIGITS[int(c)] for c in digits)]
     if (kanji := positional_kanji(digits)) is not None:
         rows.append(kanji)
     if len(digits) >= 4 and digits[0] != "0":
         grouped = f"{int(digits):,}"
-        rows += [grouped, "".join(chr(ord(c) + 0xFEE0) for c in grouped)]
+        rows += [grouped, to_full_width(grouped)]
     return list(dict.fromkeys(rows))

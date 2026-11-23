@@ -17,8 +17,7 @@ from pathlib import Path
 import sys
 
 from . import mozc_dict
-from .mozc_dict import MANIFEST, ROOT
-FORMAT = 1
+from .mozc_dict import MANIFEST
 # The loader's inputs (dictionary*, suffix, connection, id.def for POS names),
 # plus the evaluation set and the upstream notices that travel with them.
 REQUIRED = ([f"dictionary{i:02d}.txt" for i in range(10)]
@@ -40,10 +39,8 @@ def describe(path: Path) -> dict:
 
 def build(label: str, upstream_commit: str = "unknown") -> dict:
     return {
-        "format": FORMAT,
         "label": label,
         "upstream_commit": upstream_commit,
-        "dictionary_dir": str(mozc_dict.DICT_DIR.relative_to(ROOT)),
         "files": {name: describe(mozc_dict.DICT_DIR / name) for name in REQUIRED},
         # No cache hash: the cache is named after the dictionary's hash.
     }

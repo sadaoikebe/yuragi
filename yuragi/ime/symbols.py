@@ -7,6 +7,8 @@ a few near symbols. A run of digits has its own rows (numbers.py).
 """
 from __future__ import annotations
 
+from yuragi.text import to_half_width
+
 # Not in the full-width ASCII block, so not mechanical: 「 → [ and its pair 」 → ].
 # ’ ” are the faces of the ' key, whose half-width forms are ' ".
 _HALF_EXTRA = {"「": "[", "」": "]", "’": "'", "”": '"', "￥": "¥"}
@@ -27,7 +29,7 @@ NEAR = {
 def half_width(ch: str) -> str | None:
     """The half-width counterpart of a full-width symbol, if it has one."""
     if "！" <= ch <= "～":
-        return chr(ord(ch) - 0xFEE0)
+        return to_half_width(ch)
     return _HALF_EXTRA.get(ch)
 
 

@@ -13,6 +13,7 @@ from yuragi.lattice.decode import Piece
 from yuragi.lattice import mozc_dict
 from yuragi.lattice.mozc_dict import BOS_ID, UNK_COST, MozcLex, require_dict_files
 from yuragi.lattice.token_viterbi import BOUNDARY_RID, end_cost, spans_from, word_cost
+from yuragi.text import katakana
 
 from .dates import date_spellings
 
@@ -263,7 +264,7 @@ def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
     # Even a reading absent from every dictionary prefix remains reachable.
     for c in _paths(tokens, lex, left, right, kana=True, learning=learning):
         hira = c.reading
-        kata = _katakana(hira)
+        kata = katakana(hira)
         yield Candidate(hira, hira, c.score, c.lid, c.rid, "kana")
         yield Candidate(kata, hira, c.score, c.lid, c.rid, "kana")
     # Last, so every existing row keeps its place (and its number key).
@@ -315,14 +316,10 @@ def with_symbols(rows: Iterator[Candidate],
     yield from symbol_rows(found)
 
 
-def _katakana(hiragana: str) -> str:
-    return "".join(chr(ord(ch) + 0x60) if "ぁ" <= ch <= "ゖ" else ch for ch in hiragana)
-
-
 def learned_row(row) -> Candidate:
     """A learned confirmation (LearningView.head) as a row: a kana spelling of
     its reading is a kana row, as when it was chosen."""
-    kind = "kana" if row.surface in (row.reading, _katakana(row.reading)) else "dictionary"
+    kind = "kana" if row.surface in (row.reading, katakana(row.reading)) else "dictionary"
     return Candidate(row.surface, row.reading, 0, row.lid, row.rid, kind, row.cost)
 
 

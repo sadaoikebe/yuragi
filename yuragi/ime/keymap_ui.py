@@ -156,7 +156,7 @@ class KeyTab:
         remove = "この局面の割り当てを外す"
         choices = {cmd.label: cmd.id for cmd in COMMANDS.values()
                    if keymap.command_allowed(phase, chord, cmd)
-                   and keymap.available(cmd)}
+                   and keymap.implemented(cmd)}
         key = phase, chord
         active = self.settings.overrides if self.settings.use == keymap.CUSTOM else self.settings.legacy
         picked = preset

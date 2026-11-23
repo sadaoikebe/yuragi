@@ -136,7 +136,7 @@ class FakeTip:
                 return line
 
     def hello(self) -> dict:
-        self.send({"op": "hello", "proto": 1, "tag": "test", "bits": 64})
+        self.send({"op": "hello", "proto": 1})
         return self.next()
 
     def wait_state(self, state: str, timeout=WAIT) -> None:
@@ -173,7 +173,7 @@ class BrokerCase(unittest.TestCase):
 
     def write_engine_json(self, args, app=None, python=sys.executable):
         self.engine_json.write_text(json.dumps({
-            "format": 1, "python": python, "pythonw": python,
+            "python": python, "pythonw": python,
             "app": str(app or self.dir), "args": args, "admin_args": []}), encoding="utf-8")
 
     def start(self) -> subprocess.Popen:

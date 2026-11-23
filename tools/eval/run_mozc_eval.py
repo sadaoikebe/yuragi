@@ -70,7 +70,7 @@ def main() -> None:
             tokens = ([{"kind": "plain", "key": "?", "kana": kana} for kana in reading]
                       if args.unambiguous else [reverse[kana] for kana in reading])
             start = time.perf_counter()
-            decoded, _ = decode_tokens(tokens, lex)
+            decoded = decode_tokens(tokens, lex)
             elapsed += time.perf_counter() - start
             evaluated += 1
             reading_matches += decoded.reading == reading

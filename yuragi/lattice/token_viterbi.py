@@ -97,7 +97,7 @@ def _prune(sts: list[_St]) -> list[_St]:
 
 
 def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
-                  left_id: int = BOS_ID) -> tuple[DecodeResult, dict]:
+                  left_id: int = BOS_ID) -> DecodeResult:
     """Decode 1-best using RID pruning for accuracy without rescoring.
 
     learning (a LearningView) adds the learned bunsetsu as arcs, at their own
@@ -105,12 +105,10 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
     boundary).
     """
     n = len(tokens)
-    t0 = time.perf_counter()
     plan = Plan(tokens)
     states: list[list[_St]] = [[] for _ in range(n + 1)]
     states[0] = [_St(0, BOUNDARY_RID if left_id == BOS_ID else left_id, -1, -1)]
     words: list[Word] = []
-    n_spans = 0
 
     for i in range(n):
         if not states[i]:
@@ -118,7 +116,6 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
         if len(states[i]) > POS_KEEP:
             states[i] = _prune(states[i])
         spans = spans_from(tokens, i, lex, learning, plan)
-        n_spans += len(spans)
         predecessors: dict[tuple[int, Sides], list[tuple[int, int, str | None]]] = {}
         for w in spans:
             wi = len(words)
@@ -183,18 +180,7 @@ def decode_tokens(tokens: list[dict], lex: MozcLex, *, learning=None,
               w.start, w.end, w.entry.rid, w.literal, w.learned)
         for w in path
     ]
-    ms = (time.perf_counter() - t0) * 1000
-    stats = {
-        "ms": round(ms, 3),
-        "n_tokens": n,
-        "n_word_arcs": len(words),
-        "n_spans_seen": n_spans,
-        "best_score": best_score,
-    }
-    return (
-        DecodeResult(reading=reading, surface=surface, score=best_score, pieces=pieces),
-        stats,
-    )
+    return DecodeResult(reading=reading, surface=surface, score=best_score, pieces=pieces)
 
 
 @dataclass(slots=True)

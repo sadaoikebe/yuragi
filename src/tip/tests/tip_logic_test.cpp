@@ -137,23 +137,23 @@ static void EatingKeys() {
 static void OrderOfReplies() {
     InFlight f;
     assert(!f.Waiting());
-    long long a = f.Next(1000), b = f.Next(1050), c = f.Next(1100);
+    long long a = f.Next(), b = f.Next(), c = f.Next();
     assert(a == 1 && b == 2 && c == 3 && f.Waiting(2));
     assert(f.Answer(1));
     assert(!f.Answer(1));  // already answered
     assert(f.Answer(2) && f.Answer(3));
     assert(!f.Waiting() && f.Last() == 3);
 
-    const auto old = f.Next(1200);
+    const auto old = f.Next();
     f.Clear();  // retiring the context drops outstanding requests
-    const auto current = f.Next(1300);
+    const auto current = f.Next();
     assert(current > old);
     assert(!f.Answer(old) && f.Waiting(current));
     assert(f.Answer(current));
 
-    const auto suggestion = f.Next(1400, false);
+    const auto suggestion = f.Next(false);
     assert(!f.Waiting() && f.Waiting(suggestion));
-    const auto key = f.Next(1401);
+    const auto key = f.Next();
     assert(f.Waiting() && f.Answer(suggestion) && f.Waiting(key));
     assert(f.Answer(key) && !f.Waiting());
 }
@@ -305,12 +305,10 @@ static void Requests() {
     assert(key.Get("left_context").text == *context.text);
     assert(OpRequest(8, "set_direct", "\"direct\":true") ==
            R"({"seq":8,"op":"set_direct","direct":true})");
-    std::string hello = Hello("v0.2.0");
-    Message parsed;
-    assert(ParseMessage(hello, parsed));
+    const std::string hello = Hello();
     tip_json::Value v;
     assert(tip_json::Parser(hello).Parse(v) && v.Get("op").text == "hello" &&
-           v.Get("tag").text == "v0.2.0" && v.Get("passes").boolean);
+           v.Get("passes").boolean);
 }
 
 static void LeftContextTail() {

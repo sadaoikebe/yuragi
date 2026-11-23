@@ -356,14 +356,10 @@ class Engine:
             return None
         from yuragi.ime.lm_async import ConnectionPipeline, GRACE_MS, REQUIRED_LM_DEADLINE_MS
         s = self.settings
-        if s.require_lm:
-            deadline = REQUIRED_LM_DEADLINE_MS
-        else:
-            deadline = s.lm_deadline_ms  # None: from the LM's calibration
+        deadline = REQUIRED_LM_DEADLINE_MS if s.require_lm else None
         grace = GRACE_MS if s.lm_grace_ms is None else s.lm_grace_ms
         return ConnectionPipeline(sess, self.worker, grace_ms=grace,
-                                  deadline_ms=deadline, require_lm=s.require_lm, prefetch=s.lm_prefetch,
-                                  prefetch_delay_ms=s.lm_prefetch_delay_ms, timing=s.lm_timing)
+                                  deadline_ms=deadline, require_lm=s.require_lm, timing=s.lm_timing)
 
     def read_keymap(self, settings):
         for note in settings.notes:

@@ -445,7 +445,7 @@ zenz の選んだ文節にも効く）。学習では、確認が語の末尾ま
 - 知らないキーは無視する。値が選択肢に合わない・JSON のオブジェクトでないときは、すべて既定値で動き、ログに 1 行残す。
 - 読むのはエンジンの起動時。設定ウィンドウの「設定」タブで書き換え、知っているキーだけを一時ファイルに書いてから置き換える。
   反映はエンジンの起動し直し（「変換エンジンを再起動」）で。
-- LM の調整（待つ時間、先読み、モデル、重み、候補の数、確認の回数、スレッド数、装置、期限）とログは、評価用の `yuragi.ime.server` の引数にある。エンジン（`yuragi.engine`）の引数にあるのは、モデル（`--lm-model`・`--lm-cpu-model`）、待つ時間（`--lm-grace-ms`）、時間の記録（`--lm-timing`）、`--require-lm` だけ。
+- 評価用の `yuragi.ime.server` は、モデル、重み、候補の数、確認の回数と時間、スレッド数、装置、時間の記録を引数で調整できる。エンジン（`yuragi.engine`）には、モデル（`--lm-model`・`--lm-cpu-model`）、待つ時間（`--lm-grace-ms`）、時間の記録（`--lm-timing`）、`--require-lm` がある。
 
 TIP の設定は別のファイル `~/.yuragi-ime/tip.json`（切り替えキー `toggle_vk` `toggle_mods`、ログ `log` `log_text`、文書の左文脈 `document_context`。
 [src/tip/README.md](../src/tip/README.md)）。

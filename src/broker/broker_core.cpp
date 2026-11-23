@@ -79,7 +79,6 @@ void Broker::StartEngine() {
     killing_ = false;
     kill_reason_ = Stop::None;
     warnings_.clear();  // a new engine tells its own
-    for (auto& [id, client] : clients_) client.session = false;
     SetState(EngineState::Starting);
     Log("starting the engine (" + std::to_string(exits_.size()) +
         " exit(s) in the last 10 minutes)");
@@ -95,7 +94,7 @@ void Broker::OnClientConnected(ClientId id) { clients_[id] = Client(); }
 void Broker::OnClientClosed(ClientId id) {
     auto it = clients_.find(id);
     if (it == clients_.end()) return;
-    if (it->second.session && state_ == EngineState::Ready)
+    if (it->second.hello && state_ == EngineState::Ready)
         platform_.WriteEngine("{\"op\":\"close\",\"sid\":" + std::to_string(id) + "}");
     clients_.erase(it);
 }
@@ -124,10 +123,8 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
         reply += "]";
         if (!keymap_.empty()) reply += ",\"keymap\":" + keymap_;
         platform_.WriteClient(id, reply + "}");
-        if (state_ == EngineState::Ready) {
+        if (state_ == EngineState::Ready)
             platform_.WriteEngine("{\"op\":\"open\",\"sid\":" + std::to_string(id) + "}");
-            client.session = true;
-        }
         return;
     }
     if (op == "retry") {
@@ -182,11 +179,9 @@ void Broker::OnEngineLine(const std::string& line) {
         if (msg.Get("keymap").kind == Value::Object)
             UpdateKeymap(tip_json::Stringify(msg.Get("keymap")));
         state_ = EngineState::Ready;
-        for (auto& [id, client] : clients_) {
-            if (!client.hello) continue;
-            platform_.WriteEngine("{\"op\":\"open\",\"sid\":" + std::to_string(id) + "}");
-            client.session = true;
-        }
+        for (const auto& [id, client] : clients_)
+            if (client.hello)
+                platform_.WriteEngine("{\"op\":\"open\",\"sid\":" + std::to_string(id) + "}");
         Broadcast("{\"event\":\"state\",\"state\":\"ready\"}");
         return;
     }
@@ -271,7 +266,6 @@ void Broker::EngineGone(int code) {
         if (clients_.count(f.client)) platform_.WriteClient(f.client, SeqState(f.seq, next));
     in_flight_.clear();
     if (was_ready) Broadcast("{\"event\":\"reset\"}");
-    for (auto& [id, client] : clients_) client.session = false;
     if (restart) {
         StartEngine();
         return;

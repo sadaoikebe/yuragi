@@ -1,8 +1,6 @@
 {
-  "format": 1,
   "label": "local-snapshot-20261112",
   "upstream_commit": "8be758dcc2330011d052a670b39cf8ffbaa1c253",
-  "dictionary_dir": "third_party/mozc_oss_dict",
   "files": {
     "dictionary00.txt": {
       "size": 7157174,

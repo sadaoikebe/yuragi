@@ -68,7 +68,7 @@ std::string Timestamp();  // local time, ISO 8601 with milliseconds
 void RecordStop(const fs::path& logs, Stop reason);
 
 // engine.json (DESIGN「置き場所」): written by the installer next to the version.
-//  {"format":1, "python":"<abs python.exe>", "pythonw":"<abs pythonw.exe>",
+//  {"python":"<abs python.exe>", "pythonw":"<abs pythonw.exe>",
 //   "app":"<abs app dir: the engine's working directory>",
 //   "args":["-m","yuragi.engine", ...], "admin_args":["-m","yuragi.ime.admin_ui"]}
 struct EngineConfig {

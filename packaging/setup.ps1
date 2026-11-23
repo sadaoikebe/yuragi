@@ -196,7 +196,6 @@ function Invoke-App([string]$python, [string]$app, [string[]]$moduleAndArgs) {
 
 function Write-EngineJson([string]$path, [string]$app, [string[]]$extra) {
     $engine = [ordered]@{
-        format = 1
         python = $script:Python
         pythonw = (Join-Path (Split-Path $script:Python) "pythonw.exe")
         app = $app
@@ -335,7 +334,7 @@ function Connect-Broker([int]$timeoutMs) {
     $writer.AutoFlush = $true
     $writer.NewLine = "`n"
     $reader = New-Object IO.StreamReader($pipe, $Utf8NoBom)
-    $writer.WriteLine('{"op":"hello","proto":1,"tag":"setup","bits":64}')
+    $writer.WriteLine('{"op":"hello","proto":1}')
     return @{ Pipe = $pipe; Reader = $reader; Writer = $writer }
 }
 function Read-BrokerLine($conn, [int]$timeoutMs) {

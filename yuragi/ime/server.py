@@ -194,17 +194,6 @@ def argument_parser() -> argparse.ArgumentParser:
                     help="force a device (default: try CUDA devices, then the CPU)")
     lm.add_argument("--lm-timing", action="store_true",
                     help="log the LM's time per conversion to stderr (no text)")
-    lm.add_argument("--lm-prefetch", choices=("thumb", "off"), default="thumb",
-                    help="engine: start the LM early on thumb press (default), or never")
-    lm.add_argument("--lm-deadline-ms", type=float, default=None,
-                    help="engine: a conversion still waiting for the LM after this long is "
-                         "taken as a fault: logged, and the Viterbi 1-best is used "
-                         "(default: from the LM's calibration, lm_async.deadline_ms)")
-    lm.add_argument("--lm-grace-ms", type=float, default=None,
-                    help="engine: how long the converting request waits for the LM "
-                         "(default lm_async.GRACE_MS)")
-    lm.add_argument("--lm-prefetch-delay-ms", type=float, default=30,
-                    help="engine: thumb press to prefetch start")
     return parser
 
 

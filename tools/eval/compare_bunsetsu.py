@@ -21,7 +21,7 @@ def compare(readings, out) -> None:
         if not reading or any(kana not in reverse for kana in reading):
             skipped += 1
             continue
-        decoded, _ = decode_tokens([reverse[kana] for kana in reading], lex)
+        decoded = decode_tokens([reverse[kana] for kana in reading], lex)
         pieces = decoded.pieces
         old = [p.start for i, p in enumerate(pieces)
                if i == 0 or p.learned or content(lex.base_pos(p.lid))]

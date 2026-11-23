@@ -16,7 +16,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import threading
 
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import Entry, MozcLex
@@ -128,57 +127,56 @@ class PersonalLexicon:
         self._unreadable = False
         self._original: dict[str, list[Entry] | None] = {}  # reading -> list before overlay
         self.added_readings: tuple[str, ...] = ()  # sorted additions to the base reading index
-        self._lock = threading.Lock()
 
     def sync(self, lex: MozcLex) -> None:
-        with self._lock:
+        # Only the request thread updates the overlay. The LM worker reads it.
+        try:
             try:
-                try:
-                    st = self.path.stat()
-                    signature = (st.st_ino, st.st_mtime_ns, st.st_size)
-                except FileNotFoundError:
-                    signature = None
-                if signature == self._signature and not self._unreadable:
-                    return
-                words, skipped = scan_words(self.path) if signature is not None else ([], 0)
-            except OSError as exc:
-                if not self._unreadable:
-                    print(f"personal lexicon unreadable ({type(exc).__name__}); keeping the current words",
-                          file=sys.stderr, flush=True)
-                self._unreadable = True
+                st = self.path.stat()
+                signature = (st.st_ino, st.st_mtime_ns, st.st_size)
+            except FileNotFoundError:
+                signature = None
+            if signature == self._signature and not self._unreadable:
                 return
-            self._unreadable = False
-            by_reading: dict[str, list[Word]] = {}
-            for w in words:
-                by_reading.setdefault(w.reading, []).append(w)
-            for reading in set(self._original) | set(by_reading):
-                if reading not in self._original:
-                    self._original[reading] = lex.by_reading.get(reading)
-                base = self._original[reading]
-                if reading not in by_reading:
-                    if base is None:
-                        lex.by_reading.pop(reading, None)
-                    else:
-                        lex.by_reading[reading] = base
-                    del self._original[reading]
-                    continue
-                merged = list(base or ())
-                for w in by_reading[reading]:
-                    # Like apply_user_lex: a known spelling keeps its POS and
-                    # gets the cheaper cost; a new one gets the chosen POS.
-                    # New Entry objects: the originals stay untouched for removal.
-                    at = next((i for i, e in enumerate(merged) if e.surface == w.surface), None)
-                    if at is None:
-                        merged.append(Entry(w.surface, reading, w.lid, w.lid, w.cost))
-                    else:
-                        old = merged[at]
-                        merged[at] = Entry(w.surface, reading, old.lid, old.rid,
-                                           min(old.cost, w.cost))
-                lex.by_reading[reading] = sorted(merged, key=lambda e: e.cost)
-                # Prefixes only prune the search; extra ones after a removal are harmless.
-                lex.prefixes.update(reading[:i] for i in range(1, len(reading) + 1))
-            self.count = len(words)
-            self.skipped = skipped
-            self.added_readings = tuple(sorted(r for r, base in self._original.items() if base is None))
-            self._signature = signature
-            self.revision += 1
+            words, skipped = scan_words(self.path) if signature is not None else ([], 0)
+        except OSError as exc:
+            if not self._unreadable:
+                print(f"personal lexicon unreadable ({type(exc).__name__}); keeping the current words",
+                      file=sys.stderr, flush=True)
+            self._unreadable = True
+            return
+        self._unreadable = False
+        by_reading: dict[str, list[Word]] = {}
+        for w in words:
+            by_reading.setdefault(w.reading, []).append(w)
+        for reading in set(self._original) | set(by_reading):
+            if reading not in self._original:
+                self._original[reading] = lex.by_reading.get(reading)
+            base = self._original[reading]
+            if reading not in by_reading:
+                if base is None:
+                    lex.by_reading.pop(reading, None)
+                else:
+                    lex.by_reading[reading] = base
+                del self._original[reading]
+                continue
+            merged = list(base or ())
+            for w in by_reading[reading]:
+                # Like apply_user_lex: a known spelling keeps its POS and
+                # gets the cheaper cost; a new one gets the chosen POS.
+                # New Entry objects: the originals stay untouched for removal.
+                at = next((i for i, e in enumerate(merged) if e.surface == w.surface), None)
+                if at is None:
+                    merged.append(Entry(w.surface, reading, w.lid, w.lid, w.cost))
+                else:
+                    old = merged[at]
+                    merged[at] = Entry(w.surface, reading, old.lid, old.rid,
+                                       min(old.cost, w.cost))
+            lex.by_reading[reading] = sorted(merged, key=lambda e: e.cost)
+            # Prefixes only prune the search; extra ones after a removal are harmless.
+            lex.prefixes.update(reading[:i] for i in range(1, len(reading) + 1))
+        self.count = len(words)
+        self.skipped = skipped
+        self.added_readings = tuple(sorted(r for r, base in self._original.items() if base is None))
+        self._signature = signature
+        self.revision += 1

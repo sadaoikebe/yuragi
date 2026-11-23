@@ -89,7 +89,7 @@ try {
     $writer = New-Object IO.StreamWriter($pipe, $Utf8NoBom)
     $writer.AutoFlush = $true
     $writer.NewLine = "`n"
-    $writer.WriteLine('{"op":"hello","proto":1,"tag":"uninstall","bits":64}')
+    $writer.WriteLine('{"op":"hello","proto":1}')
     $writer.WriteLine('{"op":"quit"}')
 } catch { } finally { $pipe.Dispose() }
 foreach ($b in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session })) {

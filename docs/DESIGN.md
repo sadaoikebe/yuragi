@@ -87,7 +87,7 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 TIP → ブローカー（プロトコル 1）:
 
 ```json
-{"op":"hello","proto":1,"tag":"v0.2.0","bits":64,"passes":true}
+{"op":"hello","proto":1,"passes":true}
 {"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest
 {"op":"retry"}                                              ← 利用者が「もう一度試す」を選んだ
 {"op":"open_admin"}                                         ← 設定ウィンドウを開く（`"tab":"words"` で単語登録のタブ）
@@ -413,7 +413,6 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
   TSF の登録（`HKLM\SOFTWARE\Microsoft\CTF\TIP`）は両方に共通で 1 つ。MS-IME と同じ形。
 - 登録は 32 ビット版を先に、64 ビット版を後に `regsvr32` する（共通の TSF 登録のアイコンが 64 ビット版を指す）。
 - 解除は、TSF の登録が既に無ければ COM の登録だけを消す（2 つ目の解除が失敗にならないように）。
-- hello の `bits` は 32 になる。ブローカーとの通信は同じ。
 
 ### パスワード欄
 

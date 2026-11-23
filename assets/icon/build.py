@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ゆらぎ アイコン生成スクリプト。
 
-同じ寸法表から SVG (元データ) と .ico (複数サイズ) と確認用 preview.png を出す。
+同じ寸法表から SVG と .ico (複数サイズ) と確認用 preview.png を生成する。
 字の輪郭は src/glyph.json (手描きの「あ」を写真から取り出したもの) を読み、
 全サイズ同じ輪郭を使う (手描きなので太さ違いは作らない)。
 依存: Pillow のみ。  使い方: python3 build.py
@@ -216,7 +216,6 @@ def preview(rendered):
 
 
 def main():
-    SRC.mkdir(exist_ok=True)
     rendered = {}
     for name, (kind, _, _) in VARIANTS.items():
         rendered[name] = {s: render(name, s) for s in SIZES}

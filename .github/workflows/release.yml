@@ -192,7 +192,7 @@ jobs:
             $pipe.Connect(5000)
             $writer = New-Object IO.StreamWriter($pipe); $writer.AutoFlush = $true; $writer.NewLine = "`n"
             $reader = New-Object IO.StreamReader($pipe)
-            $writer.WriteLine('{"op":"hello","proto":1,"tag":"ci","bits":64}')
+            $writer.WriteLine('{"op":"hello","proto":1}')
             $state = ($reader.ReadLine() | ConvertFrom-Json).state
             $pipe.Dispose()
             return $state

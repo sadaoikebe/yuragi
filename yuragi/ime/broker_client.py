@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import time
 
-HELLO = {"op": "hello", "proto": 1, "tag": "manage", "bits": 64}
+HELLO = {"op": "hello", "proto": 1}
 
 
 def pipe_address() -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from yuragi.text import to_full_width
 
 # Win32 VK
 VK_SPACE = 0x20
@@ -96,11 +97,7 @@ ANSI_SHIFTED = {
 }
 
 
-def _full_width(ch: str) -> str:
-    return chr(ord(ch) + 0xFEE0)
-
-
-SHIFT_FACES: dict[int, str] = {vk: _full_width(ch) for vk, ch in ANSI_SHIFTED.items()}
+SHIFT_FACES: dict[int, str] = {vk: to_full_width(ch) for vk, ch in ANSI_SHIFTED.items()}
 SHIFT_FACES[VK_OEM_7] = "\u201d"  # ”, not ＂
 
 NUMPAD = dict(zip(range(0x60, 0x6A), "0123456789"))

@@ -299,7 +299,7 @@ class ContextReadingTest(unittest.TestCase):
         """The 4 cheapest paths of うつだ are all うつり (移り・映り・写り・移)."""
         reverse = reverse_table(self.sess._table)
         tokens = [reverse[kana] for kana in "うつだ"]
-        best, _ = decode_tokens(tokens, self.sess._lex)
+        best = decode_tokens(tokens, self.sess._lex)
         self.reviewer.reading_nll.side_effect = lambda context, readings: [
             0 if reading == "うつだ" else 100 for reading in readings]
         picked = self.sess.lm.reading("", best, tokens, self.sess._lex, BOS_ID)

@@ -299,6 +299,33 @@ def apply_numerals(lex: MozcLex) -> None:
             lex.prefixes.add(reading[:i])
 
 
+def load_cache(cache: Path, *, allow_legacy: bool = False) -> MozcLex:
+    """Read a trusted dictionary cache, raising if it cannot be decoded."""
+    with cache.open("rb") as f:
+        data = pickle.load(f)
+    if allow_legacy and isinstance(data, MozcLex):
+        return data
+    readings, counts, surfaces, lids, rids, costs, extra_prefixes, connect, pos_size = data
+    if (not isinstance(connect, array) or connect.typecode != "h"
+            or pos_size <= 0 or len(connect) != pos_size * pos_size):
+        raise ValueError("dictionary cache has an invalid connection matrix")
+    numbers: dict[int, int] = {}
+    rows = zip(surfaces, lids, rids, costs, strict=True)
+    by_reading: dict[str, list[Entry]] = {}
+    for reading, count in zip(readings, counts, strict=True):
+        bucket = []
+        for _ in range(count):
+            surface, lid, rid, cost = next(rows)
+            bucket.append(Entry(surface, reading, numbers.setdefault(lid, lid),
+                                numbers.setdefault(rid, rid), numbers.setdefault(cost, cost)))
+        by_reading[reading] = bucket
+    if next(rows, None) is not None:
+        raise ValueError("dictionary cache has extra entries")
+    prefixes = set(extra_prefixes)
+    prefixes.update(by_reading)
+    return MozcLex(by_reading, prefixes, connect, pos_size)
+
+
 def read_cache(cache: Path) -> MozcLex | None:
     """The cached lexicon; None when there is none or it cannot be read.
 
@@ -306,27 +333,7 @@ def read_cache(cache: Path) -> MozcLex | None:
     format), the answer is the same: build it again from the text (DESIGN「起動時の読み込み」).
     """
     try:
-        with cache.open("rb") as f:
-            readings, counts, surfaces, lids, rids, costs, extra_prefixes, connect, pos_size = (
-                pickle.load(f))
-        if (not isinstance(connect, array) or connect.typecode != "h"
-                or pos_size <= 0 or len(connect) != pos_size * pos_size):
-            raise ValueError("dictionary cache has an invalid connection matrix")
-        numbers: dict[int, int] = {}
-        rows = zip(surfaces, lids, rids, costs, strict=True)
-        by_reading: dict[str, list[Entry]] = {}
-        for reading, count in zip(readings, counts, strict=True):
-            bucket = []
-            for _ in range(count):
-                surface, lid, rid, cost = next(rows)
-                bucket.append(Entry(surface, reading, numbers.setdefault(lid, lid),
-                                    numbers.setdefault(rid, rid), numbers.setdefault(cost, cost)))
-            by_reading[reading] = bucket
-        if next(rows, None) is not None:
-            raise ValueError("dictionary cache has extra entries")
-        prefixes = set(extra_prefixes)
-        prefixes.update(by_reading)
-        return MozcLex(by_reading, prefixes, connect, pos_size)
+        return load_cache(cache)
     except FileNotFoundError:
         return None
     except Exception as exc:  # any decoding failure: the cache is rebuilt
@@ -368,9 +375,9 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
                 tmp.unlink(missing_ok=True)
 
 
-def load_lex(force: bool = False, *, user_lexicon: bool = True) -> MozcLex:
+def load_lex(*, user_lexicon: bool = True) -> MozcLex:
     """The lexicon from the cache, or parsed from the text and cached."""
-    lex = None if force else read_cache(CACHE)
+    lex = read_cache(CACHE)
     if lex is None:
         require_dict_files(LOADER_FILES)
         print("parsing Mozc OSS dictionary (first run)...", file=sys.stderr, flush=True)

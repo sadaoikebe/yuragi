@@ -23,7 +23,6 @@ constexpr uint32_t CONNECT_MIN_INTERVAL_MS = 2000;
 constexpr uint32_t BROKER_WAIT_MS = 10000;
 constexpr uint32_t BROKER_POLL_MS = 100;
 constexpr uint32_t NOTICE_SHOW_MS = 4000;  // DESIGN「小さな表示」: the notices that go by themselves
-constexpr int PROTO = 1;
 constexpr size_t CONTEXT_CHARS = 200;
 constexpr size_t CONTEXT_UNITS = 2 * CONTEXT_CHARS;
 
@@ -48,9 +47,7 @@ inline std::optional<std::wstring_view> ContextTail(std::wstring_view text, bool
 
 // Win32 virtual keys used here (no windows.h in this header).
 enum : uint32_t {
-    VK_BACK_ = 0x08, VK_TAB_ = 0x09, VK_RETURN_ = 0x0D, VK_ESCAPE_ = 0x1B, VK_SPACE_ = 0x20,
-    VK_PRIOR_ = 0x21, VK_NEXT_ = 0x22, VK_LEFT_ = 0x25, VK_UP_ = 0x26, VK_RIGHT_ = 0x27,
-    VK_DOWN_ = 0x28, VK_F6_ = 0x75, VK_F7_ = 0x76, VK_F8_ = 0x77, VK_F9_ = 0x78, VK_F10_ = 0x79,
+    VK_RETURN_ = 0x0D, VK_SPACE_ = 0x20, VK_LEFT_ = 0x25, VK_F6_ = 0x75,
 };
 
 struct Segment {
@@ -165,17 +162,15 @@ struct ResolvedKey {
 struct Message {
     // The broker's own fields.
     bool hello = false;  // the reply to hello: {"proto":1,"state":..,"warnings":[..]}
-    int proto = 0;
     std::string event;  // "state", "reset", or empty
     std::string state;  // ready, starting, down
     bool has_seq = false;
     long long seq = 0;
-    std::vector<std::string> warnings;
     std::optional<KeyTable> keymap;
     // The engine's reply (yuragi.ime.server.snapshot).
     bool engine = false;  // carries the engine's state (not just {"seq","state"})
     std::string composition, commit;  // UTF-8
-    bool direct = false, pass_through = false, converted = false, pending = false;
+    bool direct = false, converted = false, pending = false;
     bool eat_pending = false;
     std::optional<bool> eat;
     std::optional<GlobalCommand> global;
@@ -222,18 +217,14 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     if (!tip_json::Parser(line).Parse(v) || v.kind != tip_json::Value::Object) return false;
     m = Message();
     m.hello = v.Get("proto").kind == tip_json::Value::Number;
-    ReadInt(v, "proto", m.proto);
     ReadText(v, "event", m.event);
     ReadText(v, "state", m.state);
     m.keymap = ParseKeyTable(v.Get("keymap"));
     m.has_seq = v.Get("seq").Int(m.seq);
-    for (const auto& w : v.Get("warnings").array)
-        if (w.kind == tip_json::Value::String) m.warnings.push_back(w.text);
     m.engine = m.has_seq && m.state.empty();
     ReadText(v, "composition", m.composition);
     ReadText(v, "commit", m.commit);
     ReadBool(v, "direct", m.direct);
-    ReadBool(v, "pass_through", m.pass_through);
     ReadBool(v, "converted", m.converted);
     ReadBool(v, "pending", m.pending);
     ReadBool(v, "eat_pending", m.eat_pending);
@@ -519,9 +510,9 @@ inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
 // requests went out (one reader, one broker, one engine thread).
 class InFlight {
 public:
-    long long Next(uint64_t now, bool blocking = true) {
+    long long Next(bool blocking = true) {
         long long seq = ++last_;
-        sent_.push_back({seq, now, blocking});
+        sent_.push_back({seq, blocking});
         return seq;
     }
     // A reply for seq: true when it is the oldest one in flight (as it must be);
@@ -546,7 +537,6 @@ public:
 private:
     struct Sent {
         long long seq;
-        uint64_t at;
         bool blocking;  // a suggestion only changes the popup
     };
     std::deque<Sent> sent_;
@@ -644,10 +634,9 @@ inline PopupLayout MeasurePopup(const PopupMetrics& m, int work_width, int rows,
 }
 
 // Requests (the TIP -> broker messages, DESIGN「通信」).
-inline std::string Hello(const std::string& tag) {
+inline std::string Hello() {
     // passes: keys are let through here while the engine is not ready (DESIGN「使えない間の打鍵」).
-    return "{\"op\":\"hello\",\"proto\":1,\"tag\":" + tip_json::Quote(tag) + ",\"bits\":" +
-           std::to_string(sizeof(void*) * 8) + ",\"passes\":true}";
+    return R"({"op":"hello","proto":1,"passes":true})";
 }
 inline std::string ModsJson(Mods m) {
     std::string out = "[";

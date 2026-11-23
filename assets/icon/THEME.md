@@ -35,10 +35,10 @@
 | ファイル | 用途 |
 |---|---|
 | `yuragi.ico` | 明暗両用。墨の角丸台座に白い「あ」。明るいタスクバーでは台座ごと、暗いタスクバーでは白い字が見える |
-| `src/yuragi*.svg` | 元データ。`yuragi.svg` が原図（64 単位、32px 以上に使用）、`yuragi-16px/20px/24px.svg` が画素合わせ版 |
+| `src/yuragi*.svg` | 生成した SVG。`yuragi.svg` が 64 単位、`yuragi-16px/20px/24px.svg` が画素合わせ版 |
 | `src/glyph.json` | 字の輪郭（手描きの「あ」、全サイズ共通）。`build.py` が読む |
 | `build.py` | 寸法表と字の輪郭から SVG・.ico・preview.png をまとめて生成（`python3 build.py`、Pillow のみ必要） |
-| `preview.png` | 確認用。アイコンを明るい背景／暗い背景に実寸と拡大で並べたもの |
+| `preview.png` | 生成した確認用画像。アイコンを明るい背景／暗い背景に実寸と拡大で並べたもの |
 
 .ico には 16 / 20 / 24 / 32 / 40 / 48 / 64 / 256 px が入っている
 （表示倍率 100〜300% に対応。256 のみ PNG 圧縮、ほかは 32bit BMP + マスク）。

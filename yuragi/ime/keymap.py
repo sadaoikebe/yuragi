@@ -47,19 +47,14 @@ def command_allowed(phase: str, chord: Chord, command: Command) -> bool:
         return False
     # A ThumbTap runs after down. Commands that need to return the original
     # stroke or ask the TIP to act require a regular key request.
-    effective = COMMANDS[command.until] if command.until else command
     return chord != SPACE or (
-        effective.where == "engine" and effective.key == "eat"
-        and not (phase == "editing" and effective.passes_at_edge)
+        command.where == "engine" and command.key == "eat"
+        and not (phase == "editing" and command.passes_at_edge)
     )
 
 
 def implemented(command: Command) -> bool:
     return command.run is not None or command.where == "tip"
-
-
-def available(command: Command) -> bool:
-    return implemented(command) or command.until is not None
 
 
 def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
@@ -83,9 +78,7 @@ class Keymap:
         for (phase, chord), command_id in bindings.items():
             command = COMMANDS[command_id]
             if not implemented(command):
-                if command.until is None:
-                    continue
-                command = COMMANDS[command.until]
+                continue
             rows[phase][chord.code] = command
 
         # Keep global fallbacks separate from bindings scoped to a phase.
@@ -297,7 +290,7 @@ def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings
                         except ValueError as exc:
                             settings.notes.append(f"差分 {index} 行目: {exc}")
                             continue
-                        if command is not None and not available(COMMANDS[command]):
+                        if command is not None and not implemented(COMMANDS[command]):
                             continue
                         if key in settings.overrides:
                             settings.notes.append(f"差分 {index} 行目: 同じ局面とキーの前の行を無視しました")

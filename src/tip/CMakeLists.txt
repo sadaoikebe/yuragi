@@ -15,6 +15,7 @@ add_custom_command(OUTPUT "${KEY_TABLE}"
           "${YURAGI_ROOT}/yuragi/ime/keymap.py"
           "${YURAGI_ROOT}/yuragi/ime/commands.py"
           "${YURAGI_ROOT}/yuragi/chord/keys.py"
+          "${YURAGI_ROOT}/yuragi/text.py"
   VERBATIM)
 add_custom_target(tip_key_table DEPENDS "${KEY_TABLE}")
 

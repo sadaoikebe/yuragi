@@ -59,7 +59,7 @@ void Ready(Broker& b) { b.OnEngineLine(R"({"ready":true,"proto":1,"warnings":[]}
 
 void Hello(Broker& b, ClientId c) {
     b.OnClientConnected(c);
-    b.OnClientLine(c, R"({"op":"hello","proto":1,"tag":"t","bits":64,"passes":true})");
+    b.OnClientLine(c, R"({"op":"hello","proto":1,"passes":true})");
 }
 
 bool Contains(const std::vector<std::string>& lines, const std::string& text) {
@@ -100,7 +100,7 @@ void OldTipIsToldToLetKeysThrough() {
     Broker b(f);
     b.Start();
     b.OnClientConnected(1);
-    b.OnClientLine(1, R"({"op":"hello","proto":1,"tag":"v0.1.2","bits":64})");
+    b.OnClientLine(1, R"({"op":"hello","proto":1})");
     b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
     assert(f.Client(1).back() == R"({"seq":1,"pass_through":true,"direct":false})");
     b.OnClientLine(1, R"({"seq":2,"op":"set_direct","direct":true})");

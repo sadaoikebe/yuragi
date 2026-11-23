@@ -27,7 +27,7 @@ def main() -> int:
         return [reverse[kana] for kana in reading]
 
     def best(reading: str) -> tuple[bool, str]:
-        result, _ = decode_tokens(tokens(reading), lex)
+        result = decode_tokens(tokens(reading), lex)
         return result.surface == reading, f"surface={result.surface!r}"
 
     def candidates(reading: str, expected: set[str], *, exclude: bool) -> tuple[bool, str]:

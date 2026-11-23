@@ -32,7 +32,6 @@ class Command:
     where: str = "engine"
     run: Callable[[ImeSession], str | None] | None = None
     keeps_resizing: bool = False
-    until: str | None = None
     passes_at_edge: bool = False
 
 
@@ -66,7 +65,6 @@ COMMANDS = MappingProxyType({c.id: c for c in (
             run=lambda s: s._commit_at_cursor(only_inside=True)),
     Command("commit_first_segment", "先頭の文節を確定", INPUT, run=lambda s: s._commit_prefix()),
     Command("commit_one_char", "先頭の一字を確定", COMPOSING, run=lambda s: s._commit_one_char()),
-    Command("commit_to_focus", "注目文節まで確定", CONVERTED),
     Command("delete_before", "前字削除", COMPOSING | CONVERTED, run=lambda s: s._delete_before()),
     Command("delete_last_and_commit", "末尾の一字を消して全確定", CONVERTED | PREDICTING,
             run=lambda s: s._delete_last_and_commit()),
@@ -149,8 +147,3 @@ COMMANDS = MappingProxyType({c.id: c for c in (
             keeps_resizing=True),
     Command("commit_and_pass", "確定して通す", INPUT, key="commit_pass", run=lambda s: s._commit()),
 )})
-
-for command in COMMANDS.values():
-    if command.until is not None:
-        assert command.run is None and command.where == "engine", command.id
-        assert command.until in ("noop", "pass_through") and command.until in COMMANDS, command.id

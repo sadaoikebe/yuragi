@@ -23,11 +23,13 @@ struct Value {
         return it == object.end() ? missing : it->second;
     }
     bool Int(long long& n) const {
-        if (kind != Number || text.find_first_of(".eE") != std::string::npos) return false;
+        if (kind != Number) return false;
         char* end = nullptr;
         errno = 0;
-        n = std::strtoll(text.c_str(), &end, 10);
-        return errno != ERANGE && end != text.c_str() && *end == 0;
+        const long long value = std::strtoll(text.c_str(), &end, 10);
+        if (end == text.c_str() || *end != 0) return false;
+        n = value;
+        return errno != ERANGE;
     }
 };
 
@@ -192,14 +194,6 @@ public:
         Space(); return p_ == s_.size();
     }
 };
-// An optional boolean member: absent leaves b unchanged, any other type fails.
-inline bool OptionalBool(const Value& v, const char* key, bool& b) {
-    if (v.object.find(key) == v.object.end()) return true;
-    const auto& x = v.Get(key);
-    if (x.kind != Value::Boolean) return false;
-    b = x.boolean;
-    return true;
-}
 inline std::string Quote(const std::string& s) {
     const char* hex = "0123456789abcdef";
     std::string out = "\"";

@@ -22,7 +22,6 @@ $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 # $Product (製品版の engine.json) を渡すと、その Python と LM のモデルで、リポジトリのソースを動かす。
 function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo, $Product = $null) {
     $engine = [ordered]@{
-        format = 1
         python = $Python
         pythonw = (Join-Path (Split-Path $Python) 'pythonw.exe')
         app = $Repo
@@ -82,7 +81,7 @@ try {
     $writer = New-Object IO.StreamWriter($pipe, $Utf8NoBom)
     $writer.AutoFlush = $true
     $writer.NewLine = "`n"
-    $writer.WriteLine('{"op":"hello","proto":1,"tag":"dev-register","bits":64}')
+    $writer.WriteLine('{"op":"hello","proto":1}')
     $writer.WriteLine('{"op":"quit"}')
 } catch { } finally { $pipe.Dispose() }
 foreach ($b in @(Get-Process -Name 'yuragi-broker' -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session })) {
