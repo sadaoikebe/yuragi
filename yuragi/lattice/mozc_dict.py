@@ -21,6 +21,15 @@ MANIFEST = ROOT / "data" / "dictionary-manifest.json"
 CACHE_FORMAT = "mozc_lex_v6"
 
 
+def files_digest(manifest: Path = MANIFEST) -> str:
+    """The hash of the manifest's file list (names, sizes, SHA-256): another dictionary, another digest.
+
+    It names the installer's shared copy of the dictionary (DESIGN「置き場所」) and the cache.
+    """
+    files = json.loads(Path(manifest).read_text(encoding="utf-8"))["files"]
+    return hashlib.sha256(json.dumps(files, sort_keys=True).encode("ascii")).hexdigest()[:16]
+
+
 def cache_name(manifest: Path = MANIFEST) -> str:
     """The cache file's name: the format and the hash of the manifest's file list.
 
@@ -28,9 +37,7 @@ def cache_name(manifest: Path = MANIFEST) -> str:
     (DESIGN「起動時の読み込み」): another dictionary has another name, so a
     stale cache cannot be used.
     """
-    files = json.loads(Path(manifest).read_text(encoding="utf-8"))["files"]
-    digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode("ascii")).hexdigest()
-    return f"{CACHE_FORMAT}-{digest[:16]}.pkl"
+    return f"{CACHE_FORMAT}-{files_digest(manifest)}.pkl"
 
 
 CACHE = ROOT / "data" / "cache" / cache_name()

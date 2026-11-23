@@ -283,8 +283,14 @@ New-Shared $Runtime {
 }
 $script:Python = Join-Path $Runtime "python.exe"
 
-$manifest = Get-Content -LiteralPath (Join-Path $StageApp "data\dictionary-manifest.json") -Raw | ConvertFrom-Json
-$script:Dict = Join-Path $Shared "dict\$($manifest.upstream_commit)"
+# 辞書の置き場所の名前は、マニフェストのファイル一覧のハッシュ (キャッシュの名前と同じもの)。
+# 辞書が変われば必ず別の名前になる。
+Push-Location -LiteralPath $StageApp
+try {
+    $dictId = & $script:Python -c "import os,sys; sys.path.insert(0, os.getcwd()); from yuragi.lattice.mozc_dict import files_digest; print(files_digest())"
+} finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { Fail "辞書マニフェストを読めませんでした。" }
+$script:Dict = Join-Path $Shared "dict\$dictId"
 New-Shared $script:Dict {
     param($dir)
     Invoke-Checked "Mozc 辞書のダウンロード" {

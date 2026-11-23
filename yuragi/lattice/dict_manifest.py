@@ -1,11 +1,12 @@
 """Pin the dictionary set with a SHA-256 manifest and check it.
 
-The manifest pins upstream_commit to the google/mozc commit fetch_mozc_dict
-uses. This module writes that manifest and verifies the working set against
-it: every required file present with the recorded size and hash, and no unrecorded
-dictionary*.txt (the loader globs them, so a stray file would change results).
+The manifest's upstream_commit is the google/mozc commit fetch_mozc_dict
+fetches from (the only place it is written down). This module writes that
+manifest and verifies the working set against it: every required file present
+with the recorded size and hash, and no unrecorded dictionary*.txt (the loader
+globs them, so a stray file would change results).
 
-  python -m yuragi.lattice.dict_manifest write --label local-snapshot-20261111
+  python -m yuragi.lattice.dict_manifest write --label local-snapshot-20261111 --upstream-commit <google/mozc commit>
   python -m yuragi.lattice.dict_manifest verify
 """
 from __future__ import annotations
@@ -37,7 +38,7 @@ def describe(path: Path) -> dict:
     return {"size": path.stat().st_size, "sha256": sha256(path)}
 
 
-def build(label: str, upstream_commit: str = "unknown") -> dict:
+def build(label: str, upstream_commit: str) -> dict:
     return {
         "label": label,
         "upstream_commit": upstream_commit,
@@ -68,7 +69,8 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     w = sub.add_parser("write", help="record the current files")
     w.add_argument("--label", required=True)
-    w.add_argument("--upstream-commit", default="unknown")
+    w.add_argument("--upstream-commit", required=True,
+                   help="the google/mozc commit the files come from (fetch_mozc_dict fetches from it)")
     w.add_argument("--manifest", type=Path, default=MANIFEST)
     v = sub.add_parser("verify", help="check the current files against the manifest")
     v.add_argument("--manifest", type=Path, default=MANIFEST)

@@ -51,7 +51,7 @@
     versions\<tag>\app\                     Python のソース
     versions\<tag>\engine.json              このタグが使う共有物への道順（ブローカーが読む。形は src/broker/support.h）
     shared\runtime\<id>\                    同梱 Python + tkinter + torch + 依存。id = 版とハッシュ
-    shared\dict\<上流コミット>\             Mozc 辞書
+    shared\dict\<辞書マニフェストのファイル一覧のハッシュ>\   Mozc 辞書
     shared\cache\<キャッシュの形式>-<辞書マニフェストのファイル一覧のハッシュ>.pkl
     shared\model\<リビジョン>\              LM モデル
     staging\                                更新の作業場。成功したら versions へ移す
@@ -69,7 +69,7 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 - **版ごとにフォルダを分ける。** 更新は「新しいフォルダを作って、登録を付け替える」だけで、
   読み込まれている DLL には触らない。だからアプリを開いたまま更新できる。
 - **ランタイム・辞書・モデルは共有する。** ランタイムは Python の版、torch の版と種類、
-  `requirements.txt` のハッシュで、辞書は上流のコミットで、モデルはリビジョンで名前を付ける。
+  `requirements.txt` のハッシュで、辞書はマニフェストのファイル一覧のハッシュ（キャッシュの名前と同じ）で、モデルはリビジョンで名前を付ける。
   同じ名前のフォルダがあれば再利用する。ランタイムに入る間接依存の版は作成時点によって変わりうる。
 - **学習履歴と個人辞書はプログラムのフォルダの外**に置く。
 - **Python は同梱ランタイム 1 本。** ほかの Python を探さない。
@@ -463,6 +463,7 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
   - リリースの配布物は指定したタグのものを取得し、同じリリースの `.sha256` と照合する。
   - Python の埋め込み版は `python.org` から指定した版を取得し、`setup.ps1` に記載した SHA-256 と照合する。
   - Mozc 辞書は上流のコミットを指定し、取得したファイルを辞書マニフェストの SHA-256 と照合する。
+    上流のコミットとファイルの一覧・ハッシュは、マニフェスト（`data/dictionary-manifest.json`）の 1 か所にだけ書く。
   - `get-pip.py` は `bootstrap.pypa.io` から取得し、pip を PyPI から入れる。どちらも版とハッシュの指定は無い。
   - torch は PyTorch から、transformers は PyPI から指定の版を入れる。pip が間接依存の版を解決し、
     インストーラは wheel のハッシュを指定しない。

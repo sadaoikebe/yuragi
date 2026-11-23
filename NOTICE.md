@@ -24,7 +24,7 @@ project (MIT).
 
 ## Mozc open-source dictionary
 
-Location: `%LOCALAPPDATA%\yuragi-ime\shared\dict\<commit>\` when installed;
+Location: `%LOCALAPPDATA%\yuragi-ime\shared\dict\<hash of the manifest's file list>\` when installed;
 `third_party/mozc_oss_dict/` in a development checkout.
 
 All files (`dictionary*.txt`, `connection_single_column.txt`, `suffix.txt`,
