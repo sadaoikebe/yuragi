@@ -9,10 +9,10 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table
 from tests.real_dictionary import real_lex
-from tests.support import Keys, kana_session, type_plain
+from tests.support import Keys, ingest_plain, kana_session, type_plain
 
 VK_F7, VK_F10 = 0x76, 0x79
-VK_BACK, VK_LEFT, VK_RIGHT = 0x08, 0x25, 0x27
+VK_BACK, VK_LEFT, VK_RIGHT, VK_HOME = 0x08, 0x25, 0x27, 0x24
 
 
 def type_keys(s, keys):
@@ -103,6 +103,21 @@ class JisKeyTest(unittest.TestCase):
         k.tap(VK_LEFT)
         k.tap(VK_RIGHT)
         self.assertEqual(k.tap(VK_CONVERT, ["shift"])["candidates"], ["行"])
+
+    def test_the_spelling_left_before_more_input_is_one_clause(self):
+        s = kana_session(real_lex())
+        k = Keys(s)
+        ingest_plain(s, "がい")
+        k.tap(VK_NONCONVERT)
+        self.assertEqual(k.tap(VK_NONCONVERT)["composition"], "ｶﾞｲ")
+        ingest_plain(s, "がっこうにいく")
+        converted = k.tap(VK_SPACE)
+        self.assertEqual([(g["surface"], g["start"], g["end"]) for g in converted["segments"]],
+                         [("ｶﾞｲ", 0, 2), ("学校に", 2, 7), ("行く", 7, 9)])
+        self.assertEqual(k.tap(VK_HOME)["focus"], 0)
+        # Open for input, the caret is after ｶﾞｲ: two units, three characters.
+        edited = k.tap(VK_ESCAPE)
+        self.assertEqual((edited["phase"], edited["caret"]), ("editing", 3))
 
     def test_width_changes_leave_the_input_uncommitted_and_keep_it_when_typing(self):
         k = Keys(kana_session())

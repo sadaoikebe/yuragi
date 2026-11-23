@@ -98,9 +98,14 @@ def half_width_ascii(text: str) -> bool:
 
 
 
+class FrozenText(str):
+    """The text of a frozen Literal in the lattice and the parts: a run of them is one clause."""
+    __slots__ = ()
+
+
 def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
     if isinstance(tok, Literal):
-        return {"kind": "literal", "text": tok.text}
+        return {"kind": "literal", "text": FrozenText(tok.text) if tok.frozen else tok.text}
     if isinstance(tok, Plain):
         kana = table["keys"].get(tok.key, {}).get("plain")
         if not kana:
@@ -205,6 +210,7 @@ def display_segments(parts: list, picks: list[KanaRun] | None) -> list[Segment]:
     runs = iter(picks) if picks is not None else None
     segments: list[Segment] = []
     offset = 0
+    previous = None
     for part in parts:
         if isinstance(part, str):
             last = segments[-1] if segments else None
@@ -218,6 +224,11 @@ def display_segments(parts: list, picks: list[KanaRun] | None) -> list[Segment]:
                 digits = last.selected.reading + part
                 last.end += 1
                 last.selected = Candidate(digits, digits, 0, BOS_ID, BOS_ID, "number")
+            elif isinstance(part, FrozenText) and isinstance(previous, FrozenText):
+                # The spelling NonConvert left before more input: one clause, as typed.
+                text = last.selected.reading + part
+                last.end += 1
+                last.selected = Candidate(text, text, 0, BOS_ID, BOS_ID, "literal")
             else:
                 segments.append(Segment(offset, offset + 1, Candidate(
                     part, part, 0, BOS_ID, BOS_ID, "number" if is_digit(part)
@@ -227,6 +238,7 @@ def display_segments(parts: list, picks: list[KanaRun] | None) -> list[Segment]:
             if runs is not None:
                 segments.extend(next(runs).segments)
             offset += len(part)
+        previous = part
     return segments
 
 
@@ -1088,7 +1100,10 @@ class ImeSession:
         if self.editing:
             start, end = self._edit_bounds()
             prefix = sum(len(segment.selected.surface) for segment in self.segments[:self.focus])
-            return prefix + (end if self._cursor is None else self._cursor) - start
+            # A frozen literal can show two characters (ｶﾞ); every other token shows one.
+            return prefix + sum(len(token.text) if isinstance(token, Literal) else 1
+                                for token in self.tokens[start:end if self._cursor is None
+                                                         else self._cursor])
         if not self.converted and self._reading_edit:
             end = len(self.tokens) if self._cursor is None else self._cursor
             length = 0
