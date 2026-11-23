@@ -21,34 +21,25 @@ SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
 SS = 8               # スーパーサンプリング倍率
 # 字の輪郭。手描きなので全サイズ同じ輪郭を使う。
 GLYPH = json.loads((SRC / "glyph.json").read_text(encoding="utf-8"))
-GLYPH_SMALL = GLYPH  # 16〜24px も同じ輪郭
+NAME = "yuragi"      # 出力のファイル名。墨の台座に白い字 (明暗両用) の 1 種類だけ
 
 # ---------------------------------------------------------------- 寸法表
 # 図形: 手描きの字「あ」をそのまま置く。切らない、揺らさない、曲げない。
 #   h  : 字の高さ      top : 字の上端 y      gx : 横の寄せ (0 で左右中央)
 # 小サイズ (16/20/24) は画素格子に合わせた専用の寸法 (線がいちばんくっきり出る位置を選んである)。32 以上は 64 単位の原図を拡大縮小。
 # 小サイズは、太らせた線 (GROW) も含めて枠に収まる最大の高さで、灰色の画素がいちばん少ない位置を
-# 1/8 px 刻みで探した値。台座ありでも字は台座いっぱいに置く (ダークのタスクバーでは墨の台座が
+# 1/8 px 刻みで探した値。字は台座いっぱいに置く (ダークのタスクバーでは墨の台座が
 # 背景に溶け、見えるのは字だけなので)。
 SMALL = {
-    "badge": {
-        16: dict(h=15.5, top=0.25, gx=0.375),
-        20: dict(h=19.5, top=0.25, gx=0.25),
-        24: dict(h=23.25, top=0.375, gx=-0.25),
-    },
+    16: dict(h=15.5, top=0.25, gx=0.375),
+    20: dict(h=19.5, top=0.25, gx=0.25),
+    24: dict(h=23.25, top=0.375, gx=-0.25),
 }
-MASTER = {  # 64 単位
-    "badge": dict(h=60, top=2, gx=0),
-}
+MASTER = dict(h=60, top=2, gx=0)  # 64 単位
 BADGE_RADIUS = 0.22  # 角丸 (辺に対する比)
 # 小サイズだけ線を太らせる量 (px、線の幅の増分。外側へ半分ずつ)。タスクバーの 16〜24px で
 # 細い鉛筆の線が軽く見えないように。32px 以上は原図の太さのまま。
 GROW = {16: 0.5, 20: 0.5, 24: 0.625}
-
-VARIANTS = {
-    # 名前: (寸法の系統, 台座の色, 図の色)
-    "yuragi": ("badge", INK, PAPER),        # 明暗両用
-}
 
 
 # ---------------------------------------------------------------- 字の輪郭
@@ -72,23 +63,19 @@ def pieces(glyph):
     return out
 
 
-PIECES = {id(GLYPH): pieces(GLYPH)}
+PIECES = pieces(GLYPH)
 
 
-def layout(kind, size):
+def layout(size):
     """size px のときの寸法 (px 単位) と、字の輪郭 (px 座標) を返す。字は拡大縮小と移動だけ。"""
-    if size in SMALL[kind]:
-        d, unit, g = SMALL[kind][size], size, GLYPH_SMALL
-    else:
-        d, unit, g = MASTER[kind], 64, GLYPH
+    d, unit = (SMALL[size], size) if size in SMALL else (MASTER, 64)
     L = {n: v * size / unit for n, v in d.items()}
     L["size"] = size
-    L["glyph"] = g
-    L["grow"] = GROW.get(size, 0) if size in SMALL[kind] else 0
-    k = L["h"] / g["height"]
-    ox = size / 2 + L["gx"] - g["width"] * k / 2
+    L["grow"] = GROW.get(size, 0)
+    k = L["h"] / GLYPH["height"]
+    ox = size / 2 + L["gx"] - GLYPH["width"] * k / 2
     mv = lambda p: (p[0] * k + ox, p[1] * k + L["top"])
-    L["shape"] = [[mv(c[0])] + [(mv(a), mv(b)) for a, b in c[1:]] for c in PIECES[id(g)]]
+    L["shape"] = [[mv(c[0])] + [(mv(a), mv(b)) for a, b in c[1:]] for c in PIECES]
     return L
 
 
@@ -122,14 +109,11 @@ def badge_mask(size):
     return m.resize((size, size), Image.BOX)
 
 
-def render(variant, size):
-    kind, bg, fg = VARIANTS[variant]
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    if bg:
-        img = Image.composite(Image.new("RGBA", (size, size), bg), img, badge_mask(size))
-    g = glyph_mask(layout(kind, size))
-    return Image.composite(Image.new("RGBA", (size, size), fg), img, g) if bg else \
-        Image.merge("RGBA", (*Image.new("RGB", (size, size), fg).split(), g))
+def render(size):
+    """墨の台座に白い字。"""
+    img = Image.composite(Image.new("RGBA", (size, size), INK),
+                          Image.new("RGBA", (size, size), (0, 0, 0, 0)), badge_mask(size))
+    return Image.composite(Image.new("RGBA", (size, size), PAPER), img, glyph_mask(layout(size)))
 
 
 # ---------------------------------------------------------------- ICO
@@ -173,57 +157,51 @@ def f(v):
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def svg(variant, size):
-    kind, bg, fg = VARIANTS[variant]
-    L = layout(kind, size)
+def svg(size):
+    L = layout(size)
     s = L["size"]
     d = " ".join(f"M{f(c[0][0])},{f(c[0][1])} "
                  + " ".join(f"Q{f(a[0])},{f(a[1])} {f(b[0])},{f(b[1])}" for a, b in c[1:]) + " Z"
                  for c in L["shape"])
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {s} {s}" width="{s}" height="{s}">',
-         f"  <title>ゆらぎ — {variant} ({'画素合わせ' if size in SMALL[kind] else '原図'})</title>",
-         f"  <!-- 字の輪郭: {L['glyph']['font']}。線を約 25% 太らせてベクタ化。形はそのまま -->"]
-    if bg:
-        o.append(f'  <rect width="{s}" height="{s}" rx="{f(BADGE_RADIUS * s)}" fill="{bg}"/>')
-    grow = f' stroke="{fg}" stroke-width="{f(L["grow"])}" stroke-linejoin="round"' if L["grow"] else ""
-    o += [f'  <path fill="{fg}"{grow} d="{d}"/>', "</svg>", ""]
+         f"  <title>ゆらぎ — {NAME} ({'画素合わせ' if size in SMALL else '原図'})</title>",
+         f"  <!-- 字の輪郭: {GLYPH['font']}。線を約 25% 太らせてベクタ化。形はそのまま -->",
+         f'  <rect width="{s}" height="{s}" rx="{f(BADGE_RADIUS * s)}" fill="{INK}"/>']
+    grow = f' stroke="{PAPER}" stroke-width="{f(L["grow"])}" stroke-linejoin="round"' if L["grow"] else ""
+    o += [f'  <path fill="{PAPER}"{grow} d="{d}"/>', "</svg>", ""]
     return "\n".join(o)
 
 
 # ---------------------------------------------------------------- 確認用シート
-def preview(rendered):
+def preview(imgs):
+    """明るい背景と暗い背景に、実寸と拡大で並べる。"""
     pad, zoom = 16, 8
     show = [16, 20, 24, 32, 48]
     colw = pad + sum(s + pad for s in show) + sum(s * zoom + pad for s in (16, 20, 24)) + 256 + pad
     rowh = 256 + pad * 2
-    grounds = [("#f3f3f3", "light"), ("#1c1c1c", "dark")]
-    sheet = Image.new("RGB", (colw, rowh * len(rendered) * 2), "#808080")
-    y = 0
-    for name, imgs in rendered.items():
-        for ground, _ in grounds:
-            sheet.paste(Image.new("RGB", (colw, rowh), ground), (0, y))
-            x = pad
-            for s in show:
-                sheet.paste(imgs[s], (x, y + pad), imgs[s])
-                x += s + pad
-            for s in (16, 20, 24):
-                big = imgs[s].resize((s * zoom,) * 2, Image.NEAREST)
-                sheet.paste(big, (x, y + pad), big)
-                x += s * zoom + pad
-            sheet.paste(imgs[256], (x, y + pad), imgs[256])
-            y += rowh
+    grounds = ["#f3f3f3", "#1c1c1c"]  # light, dark
+    sheet = Image.new("RGB", (colw, rowh * len(grounds)), "#808080")
+    for y, ground in zip(range(0, rowh * len(grounds), rowh), grounds):
+        sheet.paste(Image.new("RGB", (colw, rowh), ground), (0, y))
+        x = pad
+        for s in show:
+            sheet.paste(imgs[s], (x, y + pad), imgs[s])
+            x += s + pad
+        for s in (16, 20, 24):
+            big = imgs[s].resize((s * zoom,) * 2, Image.NEAREST)
+            sheet.paste(big, (x, y + pad), big)
+            x += s * zoom + pad
+        sheet.paste(imgs[256], (x, y + pad), imgs[256])
     sheet.save(OUT / "preview.png")
 
 
 def main():
-    rendered = {}
-    for name, (kind, _, _) in VARIANTS.items():
-        rendered[name] = {s: render(name, s) for s in SIZES}
-        write_ico(OUT / f"{name}.ico", [rendered[name][s] for s in SIZES])
-        (SRC / f"{name}.svg").write_text(svg(name, 64), encoding="utf-8")
-        for s in SMALL[kind]:
-            (SRC / f"{name}-{s}px.svg").write_text(svg(name, s), encoding="utf-8")
-    preview(rendered)
+    imgs = {s: render(s) for s in SIZES}
+    write_ico(OUT / f"{NAME}.ico", [imgs[s] for s in SIZES])
+    (SRC / f"{NAME}.svg").write_text(svg(64), encoding="utf-8")
+    for s in SMALL:
+        (SRC / f"{NAME}-{s}px.svg").write_text(svg(s), encoding="utf-8")
+    preview(imgs)
 
 
 if __name__ == "__main__":
