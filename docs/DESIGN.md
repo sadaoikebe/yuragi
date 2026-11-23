@@ -70,7 +70,8 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
   読み込まれている DLL には触らない。だからアプリを開いたまま更新できる。
 - **ランタイム・辞書・モデルは共有する。** ランタイムは Python の版、torch の版と種類、
   `requirements.txt` のハッシュで、辞書はマニフェストのファイル一覧のハッシュ（キャッシュの名前と同じ）で、モデルはリビジョンで名前を付ける。
-  同じ名前のフォルダがあれば再利用する。ランタイムに入る間接依存の版は作成時点によって変わりうる。
+  同じ名前のフォルダがあれば再利用する（中身を軽く確かめてから。「インストールと更新」の段 2）。
+  ランタイムに入るものは pip 自体を除き、版とハッシュを固定している（「共通の仕組み」）。
 - **学習履歴と個人辞書はプログラムのフォルダの外**に置く。
 - **Python は同梱ランタイム 1 本。** ほかの Python を探さない。
 
@@ -465,8 +466,10 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
   - Mozc 辞書は上流のコミットを指定し、取得したファイルを辞書マニフェストの SHA-256 と照合する。
     上流のコミットとファイルの一覧・ハッシュは、マニフェスト（`data/dictionary-manifest.json`）の 1 か所にだけ書く。
   - `get-pip.py` は `bootstrap.pypa.io` から取得し、pip を PyPI から入れる。どちらも版とハッシュの指定は無い。
-  - torch は PyTorch から、transformers は PyPI から指定の版を入れる。pip が間接依存の版を解決し、
-    インストーラは wheel のハッシュを指定しない。
+  - torch は PyTorch から、種類（`cpu`・`cu126`・`cu128`）ごとの wheel の SHA-256 を `setup.ps1` に固定して
+    `--no-deps` で入れる。transformers と、torch と transformers が要るものはすべて、版と SHA-256 を
+    `packaging/requirements.txt` に固定し、PyPI から `--require-hashes` で入れる（書いていないもの、ハッシュの違うものは入らない）。
+    リリースの前に、torch の 3 種類それぞれで、この固定どおりに入れて読み込めることを Windows で確かめる。
   - pip は利用者の pip の設定（`pip.ini`・`PIP_*` の環境変数）もキャッシュも使わない（`--isolated --no-cache-dir`）。
   - 言語モデルは Hugging Face のリビジョンを指定し、エンジンが読むファイルを、`packaging/fetch_model.py` に
     固定した大きさと SHA-256 と照合する。

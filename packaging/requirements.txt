@@ -1,7 +1,60 @@
-# Pinned dependencies for the engine (DESIGN「インストールと更新」).
-# torch is NOT here: setup.ps1 installs it separately from the PyTorch
-# CPU index, because the default PyPI wheel bundles CUDA (gigabytes).
-# The release workflow installs these exact pins on a Windows runner
-# and imports them before publishing, so a pin that does not resolve
-# or import blocks the release instead of reaching a user's machine.
-transformers==4.57.1
+# The engine's dependencies for the bundled runtime (CPython 3.13, 64-bit Windows), pinned
+# with their hashes (DESIGN「インストール・更新・アンインストール」): transformers, and every
+# package that it and torch need. pip installs them with --require-hashes, so a package that
+# is not listed here, or a file with another hash, stops the installation.
+# torch is NOT here: setup.ps1 installs it from the PyTorch index of its build (CPU, cu126 or
+# cu128) with --no-deps and the hash in $TorchSha256; its dependencies are the ones below.
+# The release workflow installs each torch build with these exact pins on a Windows runner
+# and imports them before publishing.
+#
+# To update, resolve for Windows (pip download --platform win_amd64 --python-version 3.13
+# --only-binary=:all: also works elsewhere, but evaluates the markers for the machine it
+# runs on: tqdm needs colorama on Windows, and huggingface_hub's hf-xet is not for AMD64).
+certifi==2026.11.20 \
+    --hash=sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f
+charset-normalizer==3.5.3 \
+    --hash=sha256:cb18428af7399e0a6f7e3b45f110d57a1a47cf07fd4b3ce50e2366d99a38959a
+colorama==0.4.6 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+filelock==4.3.0 \
+    --hash=sha256:f933f39f7e01249a4a49b9abab30edc6d4b874624c3de5dd0b0d137aa8adb979
+fsspec==2026.9.0 \
+    --hash=sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f
+huggingface_hub==0.36.2 \
+    --hash=sha256:48f0c8eac16145dfce371e9d2d7772854a4f591bcb56c9cf548accf531d54270
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+Jinja2==3.1.6 \
+    --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+MarkupSafe==3.0.4 \
+    --hash=sha256:1f1f9477e174582b0a1b583d60b66e1f2cf5d3fe12cee985e4aedf44766600e5
+mpmath==1.3.0 \
+    --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c
+networkx==3.7 \
+    --hash=sha256:e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0
+numpy==2.5.5 \
+    --hash=sha256:e0608d1585557b68dcb6a70a41654f7536567960afad79d91752d2863b242b68
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+PyYAML==6.0.4 \
+    --hash=sha256:0a3a351f04dc124f9357512bdb80ac37cd1750cf1371da33e7cbb96d80ac865f
+regex==2026.11.19 \
+    --hash=sha256:0d40bb306d4979b4c6f78f779492528ec9a6a59ca68381a78e6769ea969349cf
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+safetensors==0.8.0 \
+    --hash=sha256:096ec1a98435df7beb08853bb5aa9081a84f23d0adc67ed1a0a10550f608373f
+setuptools==84.2.1 \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
+sympy==1.14.0 \
+    --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
+tokenizers==0.22.2 \
+    --hash=sha256:c9ea31edff2968b44a88f97d784c2f16dc0729b8b143ed004699ebca91f05c48
+tqdm==4.70.1 \
+    --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+transformers==4.57.1 \
+    --hash=sha256:b10d05da8fa67dc41644dbbf9bc45a44cb86ae33da6f9295f5fbf5b7890bd267
+typing_extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3

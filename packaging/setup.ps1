@@ -39,6 +39,13 @@ $Tag = "__TAG__"                         # リリース時に workflow が刻む
 $EmbedPythonVersion = "3.13.7"
 $EmbedPythonSha256 = "__EMBED_SHA256__"  # 同上 (python.org の公式 zip の SHA-256)
 $TorchVersion = "2.9.1"
+# torch の wheel (CPython 3.13・64 ビット Windows) の SHA-256。種類ごとに 1 つ。torch は --no-deps で入れ、
+# その依存は packaging\requirements.txt に (ハッシュ付きで) ある。版を上げたら 3 つとも取り直す。
+$TorchSha256 = @{
+    cpu = "404a7ab2fffaf2ca069e662f331eb46313692b2f1630df2720094284f390ccef"
+    cu126 = "625703f377a53e20cade81291ac742f044ea46a1e86a3949069e62e321025ba3"
+    cu128 = "ad9183864acdd99fc5143d7ca9d3d2e7ddfc9a9600ff43217825d4e5e9855ccc"
+}
 $Local = Join-Path $env:LOCALAPPDATA "yuragi-ime"
 $Shared = Join-Path $Local "shared"
 $Versions = Join-Path $Local "versions"
@@ -280,11 +287,14 @@ New-Shared $Runtime {
     # pip は利用者の設定 (pip.ini・PIP_* の環境変数) もキャッシュも使わない (--isolated --no-cache-dir)。
     # PIP_REQUIRE_VIRTUALENV などがあると入らず、PIP_INDEX_URL などがあると取得先が変わるため。
     Invoke-Checked "pip のインストール" { & $py $getPip --isolated --no-cache-dir --no-warn-script-location }
+    # 版とハッシュを固定して入れる (--require-hashes: 書いていないもの・ハッシュの違うものは入らない)。
+    $torchRequirement = Join-Path $Download "torch-requirement.txt"
+    "torch==$TorchVersion --hash=sha256:$($TorchSha256[$TorchVariant])" | Set-Content -LiteralPath $torchRequirement -Encoding ASCII
     Invoke-Checked "PyTorch $TorchVersion ($TorchVariant) のインストール" {
-        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --index-url $TorchIndex "torch==$TorchVersion"
+        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --require-hashes --no-deps --index-url $TorchIndex -r $torchRequirement
     }
     Invoke-Checked "依存パッケージのインストール" {
-        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location -r $requirements
+        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --require-hashes -r $requirements
     }
     Invoke-Checked "インポートの確認" {
         & $py -c $ImportCheck

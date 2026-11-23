@@ -206,10 +206,10 @@ does not have it either. Its text (and Tk's) is in the runtime's
 `LICENSE.txt`, which comes with the embeddable package.
 
 The packages above are pinned (`$TorchVersion` in `packaging/setup.ps1`,
-`packaging/requirements.txt`). pip resolves their dependencies at install
-time; those versions are not pinned. For reference, an installation on
-Windows on 2026-11-14 resolved these, with the licenses their wheels
-declare:
+`packaging/requirements.txt`), and so are their dependencies: each with its
+version and SHA-256 in `packaging/requirements.txt` (torch's wheels by their
+SHA-256 in `packaging/setup.ps1`). These are the dependencies, with the
+licenses their wheels declare:
 
 | Package | License declared by the wheel |
 | --- | --- |

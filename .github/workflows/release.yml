@@ -1,5 +1,5 @@
 # リリース作成 (DESIGN「インストール・更新・アンインストール」): タグ v* を push すると、Windows ランナーで
-# TIP (64・32 ビット) とブローカーをタグ入りの Release でビルド・試験し、依存ピン留めを実地検証し、setup が
+# TIP (64・32 ビット) とブローカーをタグ入りの Release でビルド・試験し、依存の固定を torch の 3 種類で実地検証し、setup が
 # 取得するアセット (DLL 2 つ・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
 # と、アンインストールの入口 uninstall.ps1 を公開する。公開前の検証が1つでも失敗すればリリースは出ない。
 # ビルドの前に、タグのコミットで CI (ci.yml。Python の全試験、ブローカーと TIP の試験) を走らせ、
@@ -33,8 +33,45 @@ jobs:
           echo "python=$python" >> "$GITHUB_OUTPUT"
           echo "torch=$torch" >> "$GITHUB_OUTPUT"
 
+  # 依存の固定の実地検証: setup.ps1 が選ぶ torch の 3 種類それぞれで、setup.ps1 と同じ形 (torch は
+  # $TorchSha256 のハッシュで --no-deps、残りは requirements.txt を --require-hashes) で入れ、
+  # 食い違いが無く (pip check)、読み込めることを確かめる。固定が解決しない・読み込めない版は公開しない。
+  deps:
+    needs: pins
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        variant: [cpu, cu126, cu128]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ needs.pins.outputs.python }}
+
+      - name: torch と依存を固定どおりに入れて読み込む
+        shell: pwsh
+        env:
+          VARIANT: ${{ matrix.variant }}
+          TORCH: ${{ needs.pins.outputs.torch }}
+        run: |
+          $setup = Get-Content packaging/setup.ps1 -Raw
+          $hash = [regex]::Match($setup, "(?m)^\s+$env:VARIANT = `"([0-9a-f]{64})`"").Groups[1].Value
+          if (-not $hash) { throw "packaging/setup.ps1: no TorchSha256 for $env:VARIANT" }
+          "torch==$env:TORCH --hash=sha256:$hash" | Set-Content torch-requirement.txt -Encoding ascii
+          python -m venv .venv-verify
+          $py = ".\.venv-verify\Scripts\python"
+          & $py -m pip install --isolated --no-cache-dir --require-hashes --no-deps --index-url "https://download.pytorch.org/whl/$env:VARIANT" -r torch-requirement.txt
+          if ($LASTEXITCODE -ne 0) { throw "torch $env:TORCH ($env:VARIANT) pin failed" }
+          & $py -m pip install --isolated --no-cache-dir --require-hashes -r packaging/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "requirements pins failed" }
+          & $py -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "the pinned packages do not fit together" }
+          & $py -c "import sys, torch, transformers, huggingface_hub; assert torch.__version__ == sys.argv[1], torch.__version__; print('pins OK:', torch.__version__, 'CUDA', torch.version.cuda)" "$env:TORCH+$env:VARIANT"
+          if ($LASTEXITCODE -ne 0) { throw "the pinned packages do not import" }
+
   build:
-    needs: [ci, pins]
+    needs: [ci, pins, deps]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -45,21 +82,11 @@ jobs:
         shell: pwsh
         run: ./src/tip/dev-build.ps1 -Tag "${{ github.ref_name }}"
 
-      # setup.ps1 の同梱ランタイムと同じ版 ($EmbedPythonVersion)。依存の検証に使い、
-      # 埋め込み版に無い tkinter 一式もこの通常版から取る。
+      # setup.ps1 の同梱ランタイムと同じ版 ($EmbedPythonVersion)。埋め込み版に無い tkinter 一式を
+      # この通常版から取る。
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ needs.pins.outputs.python }}
-
-      - name: 依存ピン留めの実地検証 (torch CPU + requirements + import)
-        shell: pwsh
-        run: |
-          python -m venv .venv-verify
-          .\.venv-verify\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==${{ needs.pins.outputs.torch }}"
-          if ($LASTEXITCODE -ne 0) { throw "torch pin failed" }
-          .\.venv-verify\Scripts\python -m pip install -r packaging/requirements.txt
-          if ($LASTEXITCODE -ne 0) { throw "requirements pins failed" }
-          .\.venv-verify\Scripts\python -c "import torch, transformers, huggingface_hub; print('pins OK')"
 
       - name: モデルの固定リビジョンの存在確認
         shell: pwsh
