@@ -325,6 +325,29 @@ def application_in_front() -> bool:
     return pid.value == os.getpid()
 
 
+def work_area(root, x: int, y: int) -> tuple[int, int, int, int]:
+    """Left, top, right, bottom of the monitor at (x, y) without the taskbar
+    (the screen, off Windows)."""
+    if sys.platform != "win32":
+        return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+    import ctypes
+    from ctypes import wintypes
+
+    class MonitorInfo(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    user32 = ctypes.WinDLL("user32")
+    user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
+    info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+    monitor = user32.MonitorFromPoint(wintypes.POINT(x, y), 2)  # MONITOR_DEFAULTTONEAREST
+    user32.GetMonitorInfoW(monitor, ctypes.byref(info))
+    work = info.rcWork
+    return work.left, work.top, work.right, work.bottom
+
+
 class AdminWindow:
     """Widgets only: every button calls AdminModel and redraws from it."""
 
@@ -363,6 +386,9 @@ class AdminWindow:
 
     def px(self, pixels: int) -> int:
         return round(pixels * self.scale)
+
+    def work_area(self, x: int, y: int) -> tuple[int, int, int, int]:
+        return work_area(self.root, x, y)
 
     def _combobox(self, parent, variable, values, width):
         box = self.ttk.Combobox(parent, textvariable=variable, values=values, state="readonly",

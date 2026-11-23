@@ -134,13 +134,44 @@ class KeyTab:
 
     def _dialog(self, title):
         dialog = self.window.tk.Toplevel(self.window.root)
+        dialog.withdraw()
         dialog.title(title)
         dialog.transient(self.window.root)
-        dialog.grab_set()
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         body = self.window.ttk.Frame(dialog, padding=self.window.px(12))
         body.pack(fill="both", expand=True)
         return dialog, body
+
+    def _show_dialog(self, dialog):
+        """Show the filled dialog next to the selected row: below it, or above it when
+        the monitor ends first. Windows alone would put it at the screen's top."""
+        tree, gap = self.tree, self.window.px(4)
+        dialog.attributes("-alpha", 0.0)  # measured while shown, then moved
+        dialog.deiconify()
+        dialog.update()  # mapped: the frame around the client area can be measured
+        title = dialog.winfo_rooty() - dialog.winfo_y()
+        border = dialog.winfo_rootx() - dialog.winfo_x()
+        width = dialog.winfo_width() + 2 * border
+        height = dialog.winfo_height() + title + border
+        selection = tree.selection()
+        box = tree.bbox(selection[0]) if selection else ""
+        if box:
+            x, y, _, row = box
+            left = tree.winfo_rootx() + x + self.window.px(24)
+            top, bottom = tree.winfo_rooty() + y, tree.winfo_rooty() + y + row
+        else:
+            root = self.window.root
+            left = root.winfo_rootx() + (root.winfo_width() - width) // 2
+            top = bottom = root.winfo_rooty() + root.winfo_height() // 3
+        area_left, area_top, area_right, area_bottom = self.window.work_area(left, bottom)
+        y = bottom + gap
+        if y + height > area_bottom:
+            y = top - gap - height
+        y = max(area_top, min(y, area_bottom - height))
+        x = max(area_left, min(left, area_right - width))
+        dialog.geometry(f"+{x}+{y}")
+        dialog.attributes("-alpha", 1.0)
+        dialog.grab_set()
 
     def _edit(self):
         selection = self.tree.selection()
@@ -185,6 +216,7 @@ class KeyTab:
 
         self.window.ttk.Button(body, text="変更", command=apply).pack(side="right")
         dialog.bind("<Return>", lambda _event: apply())
+        self._show_dialog(dialog)
 
     def _add(self):
         if self.settings is None:
@@ -220,6 +252,7 @@ class KeyTab:
         dialog.bind("<Return>", lambda _event: add())
         update()
         mods_box.focus_set()
+        self._show_dialog(dialog)
 
     def _show_notes(self):
         dialog, body = self._dialog("キー設定の読み込みの記録")
@@ -231,6 +264,7 @@ class KeyTab:
         errors = [self.settings.error] if self.settings.error else []
         text.insert("1.0", "\n".join(errors + self.settings.notes))
         text.configure(state="disabled")
+        self._show_dialog(dialog)
 
     def _save(self):
         outcome = self.window.model.save_keys(self.settings)
