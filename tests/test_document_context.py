@@ -23,8 +23,8 @@ HEAD, ALTERNATE = 2, 3
 def context_session():
     size = NUMBER_ID + 1
     matrix = array("h", [0]) * (size * size)
-    for rid in (HEAD, NUMBER_ID):
-        matrix[rid * size + 1] = 300
+    for rid in (HEAD, ALTERNATE, NUMBER_ID):
+        matrix[rid * size + 1] = 300  # after these, 川 is cheaper than 河
     words = {
         "と": [Entry("語尾", "と", 1, HEAD, 10), Entry("別語尾", "と", 1, ALTERNATE, 50)],
         "か": [Entry("河", "か", 1, 1, 10), Entry("川", "か", 2, 1, 20)],
@@ -159,11 +159,11 @@ class DocumentContextTest(ContextCase):
         k = self.keys
         k.tap("J", left_context="文章の")
         k.tap(SPACE)
-        k.tap(SPACE)  # the window opens on the next row: 別語尾 has an RID whose next word is 河.
+        k.tap(SPACE)  # the window opens on the next row: after 別語尾's RID the next word is 川.
         r = k.tap("W", left_context="無視する")
-        self.assertEqual((r["commit"], r["composition"]), ("別語尾", "河"))
+        self.assertEqual((r["commit"], r["composition"]), ("別語尾", "川"))
         k.tap(SPACE)
-        self.assertEqual(self.reviewer.calls[-1], ("文章の別語尾", "か", "河"))
+        self.assertEqual(self.reviewer.calls[-1], ("文章の別語尾", "か", "川"))
 
     def test_partial_commit_sets_the_remainder_context_and_can_reopen_candidates(self):
         k = self.keys
@@ -173,8 +173,10 @@ class DocumentContextTest(ContextCase):
         r = k.send("down", DOWN, mods=["ctrl"])
         self.assertEqual((r["commit"], r["composition"], r["candidates"]), ("語尾", "川", []))
         self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
-        while k.tap(ESC)["phase"] != "composing":  # closes the window first
-            pass
+        for _ in range(4):  # closes the window first
+            if k.tap(ESC)["phase"] == "composing":
+                break
+        self.assertEqual(self.sess.phase, "composing")
         k.tap(SPACE)
         self.assertEqual(self.reviewer.calls[-1], ("本文の語尾", "か", "川"))
         k.commit()
@@ -184,7 +186,7 @@ class DocumentContextTest(ContextCase):
 
     def test_numbers_carry_pos_and_punctuation_and_space_set_bos(self):
         k = self.keys
-        for key, winner in (("1", "川"), ("Q", "河"), (SPACE, "河")):
+        for key, winner, context in (("1", "川", "１"), ("Q", "河", "。"), (SPACE, "河", "\u3000")):
             with self.subTest(key=key):
                 k.send("reset")
                 reply = k.tap(key, left_context="ある文章")
@@ -192,6 +194,8 @@ class DocumentContextTest(ContextCase):
                     reply = k.send("down", ENTER)
                 self.assertEqual(k.tap("W", after_commit_seq=reply["seq"])["composition"], winner)
                 self.assertEqual(k.tap(SPACE)["composition"], winner)
+                # The commit itself is remembered, the space included.
+                self.assertEqual(self.reviewer.calls[-1], (context, "か", winner))
 
     def test_a_literal_inside_input_overrides_its_starting_pos(self):
         k = self.keys
@@ -253,25 +257,32 @@ class PipelineContextTest(ContextCase):
 
     def test_prefetch_with_a_different_left_pos_cannot_be_promoted(self):
         k = self.keys
-        k.tap("J")
+        k.tap("1")
         k.commit()
-        k.tap("W", left_context="語尾")
+        k.tap("W", left_context="１")
         k.send("down", SPACE)
         prefetch = self.pipeline.spec
         # Retain the old prefetch while preparing identical input with a
         # verified position, to isolate the POS component of the cache key.
+        # A number leaves no left bunsetsu and is not a standalone commit.
+        # The keys bypass the pipeline, which would cancel the prefetch.
         self.sess._cancel()
-        k.tap("J")
-        seq = k.commit()
-        k.tap("W", left_context="語尾", after_commit_seq=seq)
+        direct = Keys(lambda msg: dispatch(self.sess, msg))
+        direct.t, direct.seq = k.t, k.seq
+        direct.tap("1")
+        seq = direct.commit()
+        direct.tap("W", left_context="１", after_commit_seq=seq)
+        k.t, k.seq = direct.t, direct.seq
         k.send("down", SPACE)
         self.pipeline.spec = prefetch
+        self.assertFalse(prefetch.cancelled)
         k.send("up", SPACE)
         job = self.pipeline.job
         self.assertIsNot(job, prefetch)
-        self.assertEqual((prefetch.request.lm_context, job.request.lm_context), ("語尾", "語尾"))
-        self.assertEqual(prefetch.request.parts, job.request.parts)
-        self.assertEqual((prefetch.request.left_id, job.request.left_id), (BOS_ID, HEAD))
+        before, after = prefetch.request, job.request
+        self.assertEqual((before.lm_context, before.parts, before.prev, before.repeat),
+                         (after.lm_context, after.parts, after.prev, after.repeat))
+        self.assertEqual((before.left_id, after.left_id), (BOS_ID, NUMBER_ID))
 
     def test_deadline_keeps_the_display_and_candidate_order(self):
         k = self.keys
@@ -286,7 +297,7 @@ class PipelineContextTest(ContextCase):
         self.assertEqual((r["pending"], r["composition"]), (False, "川"))
         self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
 
-    def test_reset_drops_queued_context_and_delayed_commit(self):
+    def test_after_reset_the_lm_sees_only_the_new_fields_text(self):
         k = self.keys
         k.tap("J", left_context="古い欄")
         k.tap(SPACE)
@@ -311,14 +322,15 @@ class ConnectionContextTest(EngineCase):
             self.open(engine, 2)
             first = Keys(lambda msg: engine.request({"sid": 1, **msg}))
             second = Keys(lambda msg: engine.request({"sid": 2, **msg}))
+            first.tap("W")
+            second.tap("J")
             for k in (first, second):
-                k.tap("J")
                 k.tap(SPACE)
-            first.tap(0x7B)
+            first.tap(0x7B)  # commits 河, whose RID makes 河 win again
             self.assertEqual(second.tap(SPACE)["composition"], "別語尾")
             seq = first.commit()
             self.assertEqual(seq, second.commit())
-            self.assertEqual(first.tap("W", left_context="尾", after_commit_seq=seq)["composition"],
-                             "川")
-            self.assertEqual(second.tap("W", left_context="尾", after_commit_seq=seq)["composition"],
+            self.assertEqual(first.tap("W", left_context="河", after_commit_seq=seq)["composition"],
                              "河")
+            self.assertEqual(second.tap("W", left_context="尾", after_commit_seq=seq)["composition"],
+                             "川")
