@@ -221,12 +221,12 @@ class Engine:
             from yuragi.ime.keymap import load_keymap
             import yuragi.ime.lm_async  # noqa: F401  (its worker starts after the warm-up)
             self.keymap = self.read_keymap(load_keymap(self.data_dir))
+            manifest = json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
             fatal("program-files-unreadable")
 
         # The installer checked the files' hashes; here, that they are there.
-        manifest = json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))
         missing = [name for name in manifest["files"] if not (mozc_dict.DICT_DIR / name).exists()]
         if missing:
             log(f"dictionary: missing {', '.join(missing)}")
@@ -238,12 +238,12 @@ class Engine:
         with server.freeze_after_dictionary_load():
             try:
                 lex = mozc_dict.load_lex()
-            except (FileNotFoundError, mozc_dict.DictionaryFormatError) as exc:
-                log(where(exc))
-                fatal("dictionary-unreadable")
             except mozc_dict.CacheWriteError as exc:
                 log(f"{where(exc)} (errno {exc.errno})")
                 fatal("cache-not-written")
+            except (OSError, ValueError) as exc:  # not UTF-8, a bad line, cannot be opened
+                log(where(exc))
+                fatal("dictionary-unreadable")
             loaded = server.load_session(settings, lex=lex)
         store = loaded._learning
         if store is not None:
