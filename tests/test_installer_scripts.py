@@ -6,7 +6,8 @@
 - The workflow steps that run in Windows PowerShell 5.1 are ASCII (it reads
   them as ANSI: one Japanese character can end a string and break the step).
 
-pwsh runs the rest (GitHub's Ubuntu runners have it; YURAGI_PWSH names another).
+PowerShell runs the rest: the one YURAGI_PWSH names, else pwsh (GitHub's Ubuntu
+runners have it), else Windows PowerShell 5.1 (powershell, what users run).
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PWSH = os.environ.get("YURAGI_PWSH") or shutil.which("pwsh")
+PWSH = os.environ.get("YURAGI_PWSH") or shutil.which("pwsh") or shutil.which("powershell")
 
 
 def pwsh(script: str) -> str:
@@ -43,7 +44,7 @@ def function_text(path: Path, name: str) -> str:
     return out
 
 
-@unittest.skipIf(PWSH is None, "pwsh is not installed (set YURAGI_PWSH)")
+@unittest.skipIf(PWSH is None, "neither pwsh nor powershell is installed (set YURAGI_PWSH)")
 class PowerShellTest(unittest.TestCase):
     def test_dev_registration_requires_lm_with_an_empty_model_cache(self):
         write_config = function_text(ROOT / "src/tip/dev-register.ps1", "Write-DevEngineConfig")

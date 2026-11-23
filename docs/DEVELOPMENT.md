@@ -22,7 +22,7 @@ Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても�
 動かす `tests/test_broker.py` は Windows だけ）、ブローカーの中核（`broker_core`）の試験、TIP の判断
 （`tip_logic.h`）の試験が回る。CI の Linux ジョブと同じ。
 
-`tests/test_installer_scripts.py` の PowerShell の部分は `pwsh` を使う（無ければ飛ばす。`YURAGI_PWSH` で場所を指定できる）。
+`tests/test_installer_scripts.py` の PowerShell の部分は、`YURAGI_PWSH` で指定したもの、無ければ `pwsh`、それも無ければ Windows PowerShell 5.1（`powershell`）を使う（どれも無ければ飛ばす）。
 
 ### Windows（TIP の DLL とブローカーの exe）
 
