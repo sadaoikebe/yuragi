@@ -382,7 +382,23 @@ class AdminWindow:
         notebook.bind("<<NotebookTabChanged>>", lambda e: self._tab_changed())
         root.bind_class("ComboboxPopdown", "<Map>", lambda e: self._close_lists_when_left(),
                         add="+")
+        self._keep_committed_text(root)
         self.refresh()
+
+    def _keep_committed_text(self, root):
+        # Tk gets an IME's committed text as key events with the modifiers held then and a
+        # keysym from the character's low byte (え, U+3048, comes as "h"). Committed by a
+        # Ctrl key (Ctrl+Q while converting: commit and pass), it was ignored or ran
+        # TEntry's Ctrl+H, D or K. A real Ctrl+letter carries a control character or none.
+        root.bind_class("CommittedText", "<Control-Key>",
+                        "if {[string is print -strict %A] && ![string equal %A { }]} "
+                        "{ttk::entry::Insert %W %A; break}")
+        widgets = [root]
+        while widgets:
+            widget = widgets.pop()
+            widgets.extend(widget.winfo_children())
+            if widget.winfo_class() == "TEntry":
+                widget.bindtags(("CommittedText", *widget.bindtags()))
 
     def px(self, pixels: int) -> int:
         return round(pixels * self.scale)
