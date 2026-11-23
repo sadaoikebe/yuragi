@@ -772,7 +772,9 @@ private:
                 pipe->in.append(pipe->buffer, bytes);
                 size_t start = 0;
                 ClientId id = pipe->id;
-                while (!pipe->closed) {
+                // Lines that have arrived are handled even after a failed reply closed the pipe:
+                // a client may write its last lines and go (the installer's hello and quit).
+                for (;;) {
                     size_t nl = pipe->in.find('\n', search);
                     size_t end = nl == std::string::npos ? pipe->in.size() : nl;
                     if (end - start > MAX_TIP_LINE_BYTES) {
@@ -783,7 +785,7 @@ private:
                     if (nl == std::string::npos) break;
                     std::string line = pipe->in.substr(start, end - start);
                     if (!line.empty() && line.back() == '\r') line.pop_back();
-                    handler_->OnClientLine(id, line);  // a failed reply can mark the pipe closed
+                    handler_->OnClientLine(id, line);
                     start = search = nl + 1;
                 }
                 pipe->in.erase(0, start);
