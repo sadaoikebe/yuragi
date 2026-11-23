@@ -11,7 +11,7 @@ from tests.support import Keys
 from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word
 from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, MozcLex
+from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex
 
 
 class TempFile(unittest.TestCase):
@@ -36,6 +36,14 @@ class PersonalFileTest(TempFile):
         self.assertFalse(remove_word(self.path, "やまだ", "山田"))
         self.assertEqual(len(read_words(self.path)), 1)
 
+    def test_a_word_that_cannot_be_typed_is_not_registered(self):
+        for reading, surface, pos in (("oyayubi", "親指", "名詞"), ("オヤユビ", "親指", "名詞"),
+                                      ("おやゆび", "", "名詞"), ("おやゆび", "親指", "動詞")):
+            with self.subTest(reading=reading, surface=surface, pos=pos):
+                with self.assertRaises(ValueError):
+                    add_word(self.path, reading, surface, pos)
+        self.assertFalse(self.path.exists())
+
     def test_personal_word_appears_in_conversion_until_removed(self):
         size = DEFAULT_NOUN_ID + 1
         lex = MozcLex({}, set(), array("h", [0]) * (size * size), size)
@@ -54,6 +62,20 @@ class PersonalFileTest(TempFile):
         keys.tap("W")
         keys.tap("W")
         self.assertEqual(keys.tap(SPACE)["composition"], "かか")
+
+    def test_registering_a_known_word_while_typing_puts_it_first(self):
+        size = DEFAULT_NOUN_ID + 1
+        noun = DEFAULT_NOUN_ID
+        lex = MozcLex({"かか": [Entry("佳歌", "かか", noun, noun, 3000),
+                               Entry("花歌", "かか", noun, noun, 5000)]},
+                      {"か", "かか"}, array("h", [0]) * (size * size), size)
+        session = ImeSession(_lex=lex, personal=PersonalLexicon(self.path), prediction="off")
+        session.load()
+        keys = Keys(lambda msg: dispatch(session, msg))
+        keys.tap("W")
+        self.assertEqual(keys.tap("W")["composition"], "佳歌")
+        add_word(self.path, "かか", "花歌")  # the default cost is below 佳歌's
+        self.assertEqual(keys.tap(SPACE)["composition"], "花歌")
 
     def test_conversion_survives_an_unreadable_personal_dictionary(self):
         size = DEFAULT_NOUN_ID + 1
