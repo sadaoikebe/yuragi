@@ -62,6 +62,8 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
 ```
 
 - TSF を通さずにセッションを試す窓: `python -m yuragi.ime.host_win32`。
+  通常起動では製品と同じ `~/.yuragi-ime/learning.jsonl` を読み、候補の選択を確定すると履歴に追記します。
+  個人辞書は読み込みません。`--record` では打鍵を指定のファイルに記録します。
 - 設定ウィンドウ: `python -m yuragi.ime.admin_ui`（tkinter、標準ライブラリだけ）。ロジックは tkinter に
   依存しない `AdminModel`（試験は `tests/test_admin_ui.py`）にあり、画面は薄い殻。画面の文言はすべて日本語
   （`admin_ui.SETTINGS` などの表）。DPI 対応を申告する。`--runtime-dir` と `--config` で置き場所を変えられる。

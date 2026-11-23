@@ -183,7 +183,7 @@ def _parse_connection() -> tuple[array, int]:
 
 
 def apply_user_lex(lex: MozcLex, path: Path | None = None) -> int:
-    """Overlay personal entries. Does not rewrite the Mozc cache."""
+    """Overlay the bundled corrections from data/user_lexicon.jsonl in memory."""
     p = path or USER_LEX
     if not p.exists():
         return 0

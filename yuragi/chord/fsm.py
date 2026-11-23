@@ -19,8 +19,9 @@ AmbShifts (1, 2, ...), so the conversion can make the thumbs of one press
 alternate. Plain and ThumbTap do not count.
 
 S1–S6 decide with the 80 ms window (T) and the 20 ms overlap (V). The
-deadline is the pending key's down + T and is not re-armed when S4/S5 fall
-back after a short overlap.
+deadline is Space down + T in S3/S4 and character down + T in S2/S5.
+If a short overlap leaves one key pending, its original down time sets
+the deadline.
 
 S7 (a character m held inside a used press) decides at its exit, comparing
 the overlap with Space ("cover": m down to the exit) with what would still be

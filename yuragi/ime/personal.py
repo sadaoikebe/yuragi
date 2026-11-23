@@ -21,8 +21,7 @@ from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 
 DEFAULT_PERSONAL_PATH = Path.home() / ".yuragi-ime" / "personal_lexicon.jsonl"
-# The median cost of the 71 hand-written entries in data/user_lexicon.jsonl:
-# a registered word competes like those corrections do, not like an unknown word.
+# Based on the median cost of the hand-written entries in data/user_lexicon.jsonl.
 DEFAULT_COST = 2600
 # Mozc id.def; a short list of what a user registers, by name.
 POS_IDS = {

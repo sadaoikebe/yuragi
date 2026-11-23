@@ -1,5 +1,5 @@
 // The TIP's decisions that do not need TSF (DESIGN「TIP」), tested on any OS by
-// tests/tip_logic_test.cpp: reading the broker's messages, whether to eat a key,
+// src/tip/tests/tip_logic_test.cpp: reading the broker's messages, whether to eat a key,
 // the order of replies, and what the user sees for each state.
 #pragma once
 
@@ -161,7 +161,7 @@ struct ResolvedKey {
 // default, nothing is counted or rejected).
 struct Message {
     // The broker's own fields.
-    bool hello = false;  // the reply to hello: {"proto":1,"state":..,"warnings":[..]}
+    bool hello = false;  // the reply to hello: {"proto":1,"state":..,"warnings":[..],"keymap":{..}}
     std::string event;  // "state", "reset", or empty
     std::string state;  // ready, starting, down
     bool has_seq = false;
@@ -543,8 +543,8 @@ private:
     long long last_ = 0;
 };
 
-// DESIGN「接続」: connecting is tried on activation, on a kana key, and on "retry",
-// never more often than every CONNECT_MIN_INTERVAL_MS.
+// DESIGN「接続」: limit connect signals from activation and kana keystrokes.
+// Explicit retry and settings shortcuts bypass this gate.
 class ConnectGate {
 public:
     bool Allow(uint64_t now) {

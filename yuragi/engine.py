@@ -1,22 +1,25 @@
 """The conversion engine (DESIGN「エンジン」): one JSON object per line on stdin/stdout.
 
-Started only by the broker (src/broker), as ``python -m yuragi.engine``. It has
-no other way to talk: no sockets, no files besides the user's data and its own
-program files. The broker reads stderr into logs/engine.log.
+The installed broker starts the bundled Python with the ``-c`` bootstrap in
+``engine.json`` (DESIGN §1). With development Python, run
+``python -m yuragi.engine``. The broker writes stderr to logs/engine.log.
 
 Broker → engine:
   {"op":"open","sid":3}                    a TIP connection's session
   {"op":"close","sid":3}
   {"sid":3,"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}
-      op as for yuragi.ime.server: down/up/timeout/reset/set_direct
+      op as for yuragi.ime.server: down/up/timeout/reset/set_direct/set_mode/suggest
+      reload_keymap reloads the key settings for all sessions
 Engine → broker:
-  {"ready":true,"proto":1,"warnings":[...]}
+  {"ready":true,"proto":1,"warnings":[...],"keymap":{...}}
   {"sid":3,"seq":17, ...the reply of yuragi.ime.server...}   one per request, in order
       "error":true   the request raised; the session was started afresh (DESIGN「要求 1 件ごとの防壁」)
-  {"event":"warning","warning":"lm"}       a problem found after ready (once each)
+  {"event":"warning","warning":"lm"}       a warning found after ready
+  {"event":"warning","warning":"keymap","active":false}  clears that warning
+  {"event":"keymap","keymap":{...}}         an updated key table
 
-Warnings: lm (the LM is not used). open/close have no reply. The engine exits
-when stdin closes.
+Warnings can be lm (LM unavailable) or keymap (key settings could not load).
+open/close have no reply. stdin closure initiates shutdown.
 
 A startup failure ends the process with exit code 1 and the reason on stderr,
 ``fatal <reason>`` (DESIGN「止まるときの理由」): the broker keeps it in its log.

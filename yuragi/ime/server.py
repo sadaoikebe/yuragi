@@ -14,7 +14,9 @@ One JSON object per line:
   {"op":"down","vk":37,"t":280,"mods":["shift"]}  # shrink focused bunsetsu
   {"op":"reset"}  # focus loss or application-terminated composition; no commit
   {"op":"set_direct","direct":true}
+  {"op":"set_mode","mode":"katakana"}
   {"op":"down","vk":9,"t":300}  # Tab: predictions for the input, if any
+  {"op":"suggest","t":500}  # poll for an idle prediction
 Reply: {"composition":"...","commit":"...","phase":"composing","fsm":"S1","pending":false}
 eat: whether the down was consumed (present on down replies). While the LM
       is pending, a down that could be consumed is reserved for later dispatch.
