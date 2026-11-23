@@ -5,6 +5,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from yuragi.ime import keymap
 
 ROOT = Path(__file__).resolve().parents[1]
 CHILD = """
@@ -21,32 +24,39 @@ raise SystemExit(main(["--data-dir", str(directory)]))
 
 
 class BundledPresetTest(unittest.TestCase):
-    def test_invalid_distribution_reports_fatal_before_ready(self):
-        deep = sys.getrecursionlimit() + 100
-        header = b'{"name":"ms-ime","label":"MS-IME","bindings":'
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = directory.name
+        self.preset = Path(directory.name) / "ms-ime.json"
+
+    def test_missing_preset_reports_fatal_before_ready(self):
+        child = subprocess.run([sys.executable, "-c", CHILD, self.directory], cwd=ROOT,
+                               input="", capture_output=True, encoding="utf-8", timeout=30)
+        self.assertEqual(child.returncode, 1, child.stderr)
+        self.assertIn("fatal program-files-unreadable", child.stderr.splitlines())
+        self.assertEqual(child.stdout, "")
+
+    def test_damaged_preset_is_rejected(self):
+        """The engine reports these through the same path as a missing file."""
+        deep = 100_000  # deeper than the limit of the C stack, too
+        header = b'{"name":"ms-ime","label":"MS-IME"'
         cases = {
-            "missing": None,
             "invalid UTF-8": b'\xff',
             "invalid JSON": b'{',
-            "non-JSON number": b'{"version":NaN,"bindings":[]}',
+            "non-JSON number": header + b',"version":NaN,"bindings":[]}',
             "deep nesting": b'[' * deep + b'0' + b']' * deep,
-            "missing bindings": b'{}',
-            "malformed row": header + b'[["composing",13,"commit"]]}',
-            "unknown command": header + b'[["composing","Enter","unknown"]]}',
-            "bad chord": header + b'[["composing","NoSuchKey","commit"]]}',
-            "forbidden assignment": header + b'[["composing","Enter","commit"],'
+            "not an object": b'[]',
+            "missing bindings": header + b'}',
+            "malformed row": header + b',"bindings":[["composing",13,"commit"]]}',
+            "unknown command": header + b',"bindings":[["composing","Enter","unknown"]]}',
+            "bad chord": header + b',"bindings":[["composing","NoSuchKey","commit"]]}',
+            "forbidden assignment": header + b',"bindings":[["composing","Enter","commit"],'
                                              b'["composing","A","commit"]]}',
         }
-        with tempfile.TemporaryDirectory() as directory:
-            preset = Path(directory) / "ms-ime.json"
+        with patch.object(keymap, "PRESET_PATH", self.preset):
             for label, data in cases.items():
                 with self.subTest(label=label):
-                    if data is None:
-                        preset.unlink(missing_ok=True)
-                    else:
-                        preset.write_bytes(data)
-                    child = subprocess.run([sys.executable, "-c", CHILD, directory], cwd=ROOT,
-                                           input="", capture_output=True, encoding="utf-8", timeout=30)
-                    self.assertEqual(child.returncode, 1, child.stderr)
-                    self.assertIn("fatal program-files-unreadable", child.stderr.splitlines())
-                    self.assertEqual(child.stdout, "")
+                    self.preset.write_bytes(data)
+                    with self.assertRaises(ValueError):
+                        keymap._read_preset(keymap.DEFAULT_PRESET)
