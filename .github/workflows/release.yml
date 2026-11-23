@@ -17,8 +17,24 @@ jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
+  # 同梱 Python と torch の版の数字は setup.ps1 の 1 か所だけに書く。以降のジョブはここで読んだものを使う。
+  pins:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.read.outputs.python }}
+      torch: ${{ steps.read.outputs.torch }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          python=$(sed -n 's/^\$EmbedPythonVersion = "\([0-9.]*\)".*/\1/p' packaging/setup.ps1)
+          torch=$(sed -n 's/^\$TorchVersion = "\([0-9.]*\)".*/\1/p' packaging/setup.ps1)
+          test -n "$python" && test -n "$torch" || { echo "packaging/setup.ps1: no EmbedPythonVersion or TorchVersion line"; exit 1; }
+          echo "python=$python" >> "$GITHUB_OUTPUT"
+          echo "torch=$torch" >> "$GITHUB_OUTPUT"
+
   build:
-    needs: ci
+    needs: [ci, pins]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -33,13 +49,13 @@ jobs:
       # 埋め込み版に無い tkinter 一式もこの通常版から取る。
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13.7"
+          python-version: ${{ needs.pins.outputs.python }}
 
       - name: 依存ピン留めの実地検証 (torch CPU + requirements + import)
         shell: pwsh
         run: |
           python -m venv .venv-verify
-          .\.venv-verify\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1
+          .\.venv-verify\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==${{ needs.pins.outputs.torch }}"
           if ($LASTEXITCODE -ne 0) { throw "torch pin failed" }
           .\.venv-verify\Scripts\python -m pip install -r packaging/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "requirements pins failed" }
@@ -64,7 +80,7 @@ jobs:
           Copy-Item dist/yuragi_tip.dll .
           Copy-Item dist/yuragi_tip32.dll .
           Copy-Item dist/yuragi-broker.exe .
-          $pyVersion = (Select-String -Path packaging/setup.ps1 -Pattern '^\$EmbedPythonVersion = "([0-9.]+)"').Matches[0].Groups[1].Value
+          $pyVersion = "${{ needs.pins.outputs.python }}"
           # 設定ウィンドウ用の tkinter 一式。埋め込み版には無いので、同じ版の通常版
           # (setup-python が入れたもの) から取り、setup.ps1 がランタイムの直下に展開する。
           $base = @(python -c "import sys, platform; print(platform.python_version()); print(platform.architecture()[0]); print(sys.base_prefix)")
@@ -116,10 +132,13 @@ jobs:
 
       # 正式公開は、実機確認を終えた所有者が GitHub の Releases 画面で行う。
       - name: リリースへ公開 (プレリリース)
-        uses: softprops/action-gh-release@v2
+        # 第三者のアクション (contents: write を持つ): タグではなくコミットで固定する。
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           prerelease: true
           make_latest: "false"
+          # 名前が実物とずれたアセットがあれば、欠けたまま出さずに止まる。
+          fail_on_unmatched_files: true
           body: "インストール・更新・アンインストールは README を参照してください。"
           files: |
             setup.ps1
@@ -132,8 +151,8 @@ jobs:
             yuragi-broker.exe.sha256
             yuragi-source.zip
             yuragi-source.zip.sha256
-            python-3.13.7-tkinter-amd64.zip
-            python-3.13.7-tkinter-amd64.zip.sha256
+            python-${{ needs.pins.outputs.python }}-tkinter-amd64.zip
+            python-${{ needs.pins.outputs.python }}-tkinter-amd64.zip.sha256
 
       - name: プレリリースと正式版の配布先を確認
         shell: pwsh
