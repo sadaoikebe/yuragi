@@ -23,6 +23,7 @@
 #include <userenv.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cwchar>
@@ -358,9 +359,10 @@ static bool SpawnBroker() {
 
 // -- the connection (DESIGN「接続」) ----------------------------------------------------------
 
-// One pipe and one reader thread per Tip. The thread waits only for the pipe,
-// the stop signal and the connect signal; nothing runs on a clock. Each line
-// read is queued and the TIP's window is told; writes come from the UI thread.
+// One pipe and one reader thread per Tip. The thread waits for the pipe, the
+// stop signal and the connect signal, and polls only while it waits for a pipe
+// to appear (Open). Each line read is queued and the TIP's window is told;
+// writes come from the UI thread.
 class BrokerLink {
 public:
     struct Item {
@@ -389,7 +391,13 @@ public:
         for (HANDLE h : {stop_, connect_, arrived_, write_done_}) CloseHandle(h);
         stop_ = connect_ = arrived_ = write_done_ = nullptr;
     }
-    void RequestConnect() { SetEvent(connect_); }
+    // Neither connected nor trying: only then does a connect signal start an attempt,
+    // so no signal is left behind to start another one right after (DESIGN「接続」).
+    bool Idle() const { return idle_; }
+    void RequestConnect() {
+        idle_ = false;
+        SetEvent(connect_);
+    }
     bool Connected() {
         std::lock_guard<std::mutex> lock(pipe_lock_);
         return pipe_ != INVALID_HANDLE_VALUE;
@@ -449,6 +457,7 @@ private:
             HANDLE pipe = Open(why);
             if (pipe == INVALID_HANDLE_VALUE) {
                 if (Stopping()) return;
+                idle_ = true;
                 Push({Item::Unavailable, {}, why});
                 continue;
             }
@@ -459,6 +468,7 @@ private:
             CloseHandle(hello_done);
             if (!greeted) {
                 CloseHandle(pipe);
+                idle_ = true;
                 Push({Item::Unavailable, {}, Link::Unreachable});
                 continue;
             }
@@ -470,6 +480,7 @@ private:
             Read(pipe);
             Close();
             if (Stopping()) return;
+            idle_ = true;
             Push({Item::Lost, {}, Link::Connecting});
         }
     }
@@ -555,6 +566,7 @@ private:
     std::mutex pipe_lock_, queue_lock_;
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
     std::deque<Item> queue_;
+    std::atomic<bool> idle_{true};
     std::thread thread_;
 };
 
@@ -1292,6 +1304,8 @@ public:
         if (!tested) {
             if (decision.action == Action::ObserveAlt) Buffer(key); // no pipe I/O in OnTestKeyDown
             tested_ = TestedKey{key, decision, focus_generation_};
+            // IMM applications call OnKeyDown only for a key eaten here (keybind/windows.md §1.1).
+            if (!decision.Eats() && Eligible() && ScopeAllowsInput()) Typed(key);
         }
         *e = decision.Eats() ? TRUE : FALSE;
         return S_OK;
@@ -1332,13 +1346,7 @@ public:
         }
         if (!eligible) return S_OK;
         FlushReleases();
-        if (!direct_ && tip_logic::Typing(key.chord)) {
-            if (!link_.Connected()) TryConnect();
-            if (CurrentMode() == Mode::Stopped && !stopped_told_) {
-                stopped_told_ = true;
-                ShowNotice(Notice::Stopped);
-            }
-        }
+        Typed(key);
         switch (decision.action) {
             case Action::Buffer: break; // queued above, even if the field is unresolved
             case Action::Global:
@@ -1476,10 +1484,10 @@ public:
                 break;
             case tip_logic::MENU_ADMIN:
                 // DESIGN「メニュー」: the broker opens it (the TIP starts no Python).
-                SendOp("open_admin");
+                OpenAdmin(R"({"op":"open_admin"})");
                 break;
             case tip_logic::MENU_RETRY:
-                if (link_.Connected()) SendOp("retry");
+                if (link_.Connected()) link_.Write(R"({"op":"retry"})", tip_logic::KEY_BUDGET_MS);
                 else TryConnect(true);
                 break;
         }
@@ -1617,13 +1625,35 @@ private:
 
     // -- connection -------------------------------------------------------------------------
     void TryConnect(bool user = false) {
-        if (link_.Connected()) return;
+        if (!link_.Idle()) return;
         if (!user && !connect_gate_.Allow(NowMs())) return;
         if (user) connect_gate_.Allow(NowMs());
         link_.RequestConnect();
     }
 
     Mode CurrentMode() const { return tip_logic::ModeFor(link_state_, broker_state_); }
+
+    // A kana keystroke (DESIGN「接続」): tries the connection, and when stopped, says so once
+    // per focus (DESIGN「小さな表示」).
+    void Typed(const Stroke& key) {
+        if (direct_ || !tip_logic::Typing(key.chord)) return;
+        TryConnect();
+        if (CurrentMode() == Mode::Stopped && !stopped_told_) {
+            stopped_told_ = true;
+            ShowNotice(Notice::Stopped);
+        }
+    }
+
+    // The settings window, also when there is no connection yet: the request waits for the
+    // connection the user's action starts, and goes when it is made (DESIGN「接続」).
+    void OpenAdmin(const char* request) {
+        if (link_.Connected()) {
+            link_.Write(request, tip_logic::KEY_BUDGET_MS);
+            return;
+        }
+        admin_request_ = request;
+        TryConnect(true);
+    }
 
     // Apply link changes and replies in order, synchronously when TSF allows it.
     bool Drain(bool sync, long long wanted) {
@@ -1636,12 +1666,15 @@ private:
                     link_state_ = Link::Connected;
                     broker_state_.clear();
                     in_flight_.Clear();
+                    if (admin_request_) link_.Write(admin_request_, tip_logic::KEY_BUDGET_MS);
+                    admin_request_ = nullptr;
                     break;
                 case BrokerLink::Item::Connecting:
                     link_state_ = Link::Connecting;
                     break;
                 case BrokerLink::Item::Unavailable:
                     link_state_ = item.link;
+                    admin_request_ = nullptr;
                     break;
                 case BrokerLink::Item::Lost:
                     // DESIGN「見えている文字の確定」: the broker is gone; what is shown stays.
@@ -1650,6 +1683,7 @@ private:
                     broker_state_.clear();
                     in_flight_.Clear();
                     FinishLocal();
+                    if (admin_request_) TryConnect(true);  // asked for as the link went
                     break;
                 case BrokerLink::Item::Line: {
                     Message m;
@@ -1750,10 +1784,6 @@ private:
             return 0;
         }
         return seq;
-    }
-    // A request to the broker itself (retry, open_admin): no reply.
-    void SendOp(const char* op) {
-        link_.Write(std::string("{\"op\":\"") + op + "\"}", tip_logic::KEY_BUDGET_MS);
     }
 
     SendResult SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
@@ -2325,9 +2355,8 @@ private:
             return true;
         }
         if (command == GlobalCommand::Settings || command == GlobalCommand::Words) {
-            if (!link_.Connected()) TryConnect(true);
-            if (command == GlobalCommand::Settings) SendOp("open_admin");
-            else link_.Write("{\"op\":\"open_admin\",\"tab\":\"words\"}", tip_logic::KEY_BUDGET_MS);
+            OpenAdmin(command == GlobalCommand::Settings ? R"({"op":"open_admin"})"
+                                                         : R"({"op":"open_admin","tab":"words"})");
             return true;
         }
         if (!tip_logic::Toggles(CurrentMode())) return false;
@@ -2469,6 +2498,7 @@ private:
     DWORD layout_cookie_ = TF_INVALID_COOKIE;
     Notice notice_ = Notice::None;
     bool stopped_told_ = false;
+    const char* admin_request_ = nullptr;  // waiting for the connection (OpenAdmin)
     bool direct_ = false;
     std::string input_mode_ = "hiragana";
     bool composing_ = false, pending_ = false, timer_pending_ = false;
