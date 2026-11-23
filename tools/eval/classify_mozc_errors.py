@@ -367,6 +367,7 @@ def _worker(connection, lex, overlay, names, reverse, memory_mb):
     if resource is not None:  # memory cap is unavailable on Windows
         resource.setrlimit(resource.RLIMIT_AS, (memory_mb * 1024 * 1024,) * 2)
     try:
+        connection.send(("ready",))
         while True:
             row = connection.recv()
             if row is None:
@@ -480,10 +481,12 @@ def run_rows(rows, lex, overlay, names, reverse, timeout=10.0, memory_mb=2048):
                     process = ctx.Process(target=_worker, args=(child, lex, overlay, names, reverse, memory_mb))
                     process.start()
                     child.close()
+                    connection.recv()  # ("ready",)
+                deadline = time.monotonic() + timeout
                 connection.send(row)
                 row["state"] = "complete"
                 while True:
-                    remaining = timeout - (time.monotonic() - start)
+                    remaining = deadline - time.monotonic()
                     if remaining <= 0 or not connection.poll(max(0, remaining)):
                         row["state"] = "unknown_timeout"
                         stop()
@@ -683,13 +686,19 @@ def main():
                     ROOT / "yuragi/lattice/expand.py", ROOT / "yuragi/lattice/decode.py",
                     ROOT / "yuragi/lattice/table.py", ROOT / "yuragi/ime/bunsetsu.py",
                     ROOT / "yuragi/text.py"]
-    git = lambda *parts: subprocess.check_output(["git", *parts], cwd=ROOT)
-    manifest = {"format_version": 1, "python": platform.python_version(),
-                "code_head": git("rev-parse", "HEAD").decode().strip(),
+    git = lambda *parts: subprocess.check_output(["git", *parts], cwd=ROOT, stderr=subprocess.DEVNULL)
+    try:  # Outside a git work tree (an installed copy) there is no code record.
+        code = {"code_head": git("rev-parse", "HEAD").decode().strip(),
                 "dirty_diff_sha256": hashlib.sha256(git("diff", "HEAD", "--binary")).hexdigest(),
-                "git_status": git("status", "--porcelain").decode().splitlines(),
+                "git_status": git("status", "--porcelain").decode().splitlines()}
+    except (OSError, subprocess.CalledProcessError):
+        code = {}
+    # The manifest describes the default dictionary only.
+    upstream = (json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))["upstream_commit"]
+                if args.dictionary_dir == DICT_DIR else "unknown")
+    manifest = {"format_version": 1, "python": platform.python_version(), **code,
                 "engine_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in engine_files},
-                "inputs_sha256": hashes, "upstream_commit": "unknown",
+                "inputs_sha256": hashes, "upstream_commit": upstream,
                 "lexicon_source": "cache_text_equivalence_unverified" if cache else "text",
                 "settings": {"conditions": ["amb", "una"], "user_lexicon": user is not None,
                              "learning": False, "lm": False, "row_timeout_seconds": args.row_timeout,
