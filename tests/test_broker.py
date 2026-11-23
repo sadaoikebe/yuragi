@@ -226,6 +226,16 @@ class BrokerCase(unittest.TestCase):
 
 
 class ProcessTest(BrokerCase):
+    def test_conversion_recovers_after_an_oversized_engine_ready_message(self):
+        self.plan("oversized_ready", "normal")
+        self.start()
+        tip = self.tip()
+        tip.hello()
+        tip.wait_state("ready")
+        self.assertEqual(self.starts(), 2)
+        tip.key(1)
+        self.assertEqual(tip.reply(1)["composition"], "down:74")
+
     def test_one_broker_per_user(self):
         self.plan("normal")
         self.start()

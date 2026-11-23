@@ -618,6 +618,9 @@ Windows サンドボックスか仮想マシンで、各操作の間、新しく
 | `KEY_BUDGET_MS` | 200 | TIP | 打鍵 1 回で UI スレッドが待つ上限 |
 | `CONNECT_MIN_INTERVAL_MS` | 2000 | TIP | 接続の試み（とブローカーの起動）の最小間隔 |
 | `BROKER_WAIT_MS` | 10000 | TIP | 起動したブローカーのパイプを待つ上限 |
+| `MAX_TIP_LINE_BYTES` | 1 MiB | ブローカー | TIP から受け取る 1 行の上限（末尾の LF を除く）。超えた接続を閉じる |
+| `MAX_TIP_OUTPUT_BYTES` | 1 MiB | ブローカー | TIP 1 接続あたりの送信待ちと書き込み中の合計の上限。超えた接続を閉じる |
+| `MAX_ENGINE_LINE_BYTES` | 1 MiB | ブローカー | エンジンの標準出力・標準エラーの 1 行の上限（末尾の LF を除く）。標準出力で超えたらエンジンを終了し、標準エラーではその行を捨てる |
 | `NOTICE_SHOW_MS` | 4000 | TIP | 小さな表示の表示時間 |
 | `ENGINE_MAX_EXITS` | 3 | ブローカー | `ENGINE_EXIT_WINDOW_MS` の間にこれだけ終了したら止める |
 | `ENGINE_EXIT_WINDOW_MS` | 600000 | ブローカー | 同上の窓（10 分） |

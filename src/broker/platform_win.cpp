@@ -27,6 +27,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -43,6 +44,10 @@ namespace {
 constexpr wchar_t BROKER_MUTEX[] = L"Local\\yuragi-ime-broker";
 constexpr wchar_t PRODUCT_KEY[] = L"Software\\yuragi-ime";
 constexpr DWORD PIPE_BUFFER = 64 * 1024;
+constexpr size_t MAX_TIP_LINE_BYTES = 1024 * 1024;
+constexpr size_t MAX_TIP_OUTPUT_BYTES = 1024 * 1024;
+constexpr size_t MAX_ENGINE_LINE_BYTES = 1024 * 1024;
+constexpr int64_t LISTEN_RETRY_MS = 1000;
 constexpr UINT WM_APP_NOTICE = WM_APP + 1;
 constexpr UINT WM_APP_CLEAR = WM_APP + 2;
 constexpr UINT WM_APP_TRAY = WM_APP + 3;
@@ -166,7 +171,7 @@ std::vector<wchar_t> EngineEnvironment() {
 
 // Lines out of a pipe, on a thread; each line is posted to the loop.
 struct EngineEvent {
-    enum Kind { Out, Err, Exit } kind;
+    enum Kind { Out, Err, OversizedOutput, Exit } kind;
     int generation;
     std::string line;
     int code = 0;
@@ -178,19 +183,38 @@ void PostEngine(HANDLE iocp, EngineEvent* event) {
 
 void ReadLinesFrom(HANDLE pipe, HANDLE iocp, int generation, EngineEvent::Kind kind) {
     std::string buffer;
+    bool discarding = false;
     char chunk[65536];
     DWORD n = 0;
     while (ReadFile(pipe, chunk, sizeof chunk, &n, nullptr) && n > 0) {
-        buffer.append(chunk, n);
-        size_t start = 0;
-        for (size_t nl; (nl = buffer.find('\n', start)) != std::string::npos; start = nl + 1) {
-            std::string line = buffer.substr(start, nl - start);
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            PostEngine(iocp, new EngineEvent{kind, generation, line});
+        std::string_view remaining(chunk, n);
+        while (!remaining.empty()) {
+            size_t newline = remaining.find('\n');
+            auto part = remaining.substr(0, newline);
+            if (!discarding && part.size() > MAX_ENGINE_LINE_BYTES - buffer.size()) {
+                if (kind == EngineEvent::Out) {
+                    // A lost protocol line could be the ready message or a pending reply.
+                    PostEngine(iocp, new EngineEvent{EngineEvent::OversizedOutput, generation, {}});
+                    CloseHandle(pipe);
+                    return;
+                }
+                PostEngine(iocp, new EngineEvent{kind, generation,
+                                               "[engine stderr line exceeded the limit; dropped]"});
+                buffer.clear();
+                discarding = true;
+            }
+            if (!discarding) buffer.append(part);
+            if (newline == std::string_view::npos) break;
+            if (!discarding) {
+                if (!buffer.empty() && buffer.back() == '\r') buffer.pop_back();
+                PostEngine(iocp, new EngineEvent{kind, generation, std::move(buffer)});
+                buffer.clear();
+            }
+            discarding = false;
+            remaining.remove_prefix(newline + 1);
         }
-        buffer.erase(0, start);
     }
-    if (!buffer.empty()) PostEngine(iocp, new EngineEvent{kind, generation, buffer});
+    if (!buffer.empty()) PostEngine(iocp, new EngineEvent{kind, generation, std::move(buffer)});
     CloseHandle(pipe);
 }
 
@@ -314,7 +338,7 @@ private:
             return 0;
         }
         if (message == WM_APP_EXIT || message == WM_ENDSESSION) {
-            PostQuitMessage(0);
+            if (message == WM_APP_EXIT || wparam) PostQuitMessage(0);
             return 0;
         }
         if (message == WM_APP_TRAY) {
@@ -411,7 +435,7 @@ struct Pipe {
     Op read{}, write{};
     char buffer[8192];
     std::string in;
-    std::deque<std::string> out;
+    std::string out;
     std::string writing;
     bool reading = false, write_pending = false, closed = false;
 };
@@ -537,8 +561,17 @@ public:
     void WriteClient(ClientId id, const std::string& line) override {
         auto it = pipes_.find(id);
         if (it == pipes_.end() || it->second->closed) return;
-        it->second->out.push_back(line + "\n");
-        PumpWrite(*it->second);
+        Pipe& p = *it->second;
+        size_t pending = p.out.size() + p.writing.size();
+        // Leave room for the newline as well as the line itself.
+        if (line.size() >= MAX_TIP_OUTPUT_BYTES - pending) {
+            Log("TIP output limit exceeded; closing its pipe");
+            Close(p);
+            return;
+        }
+        p.out.append(line);
+        p.out.push_back('\n');
+        PumpWrite(p);
     }
 
     void NotifyStopped(Stop reason) override {
@@ -591,7 +624,7 @@ public:
 
     int Run() {
         while (!quit_) {
-            int64_t deadline = handler_->NextDeadline();
+            int64_t deadline = std::min(handler_->NextDeadline(), listen_retry_);
             DWORD timeout = INFINITE;
             if (deadline != NEVER) {
                 int64_t wait = deadline - Now();
@@ -612,6 +645,8 @@ public:
                 retry_();
             }
             if (!quit_ && handler_->NextDeadline() <= Now()) handler_->OnTimer();
+            ReportClosedClients();
+            if (!quit_ && listen_retry_ <= Now()) RenewListener();
         }
         if (ui_) ui_->Stop();
         return finish_code_;
@@ -632,30 +667,51 @@ private:
             error = LastError("CreateNamedPipe");
             return false;
         }
-        CreateIoCompletionPort(pipe, iocp_, KEY_IO, 0);
-        listening_ = std::make_unique<Pipe>();
-        listening_->handle = pipe;
-        listening_->read.kind = Op::Listen;
-        listening_->read.pipe = listening_.get();
-        if (ConnectNamedPipe(pipe, &listening_->read)) return true;  // completion is queued
-        DWORD e = GetLastError();
-        if (e == ERROR_IO_PENDING) return true;
-        if (e == ERROR_PIPE_CONNECTED) {
-            // Connected before we asked: no completion will come; take it now.
-            PostQueuedCompletionStatus(iocp_, 0, KEY_IO, &listening_->read);
-            return true;
+        if (!CreateIoCompletionPort(pipe, iocp_, KEY_IO, 0)) {
+            error = LastError("CreateIoCompletionPort");
+            CloseHandle(pipe);
+            return false;
         }
-        error = LastError("ConnectNamedPipe");
-        CloseHandle(pipe);
-        return false;
+        auto instance = std::make_unique<Pipe>();
+        instance->handle = pipe;
+        instance->read.kind = Op::Listen;
+        instance->read.pipe = instance.get();
+        if (!ConnectNamedPipe(pipe, &instance->read)) {
+            DWORD e = GetLastError();
+            const char* failed = nullptr;
+            if (e == ERROR_PIPE_CONNECTED || e == ERROR_NO_DATA) {
+                // The client connected before ConnectNamedPipe and may already be gone.
+                // Windows won't queue a completion for either result.
+                if (!PostQueuedCompletionStatus(iocp_, 0, KEY_IO, &instance->read))
+                    failed = "PostQueuedCompletionStatus";
+            } else if (e != ERROR_IO_PENDING) {
+                failed = "ConnectNamedPipe";
+            }
+            if (failed) {
+                error = LastError(failed);
+                CloseHandle(pipe);
+                return false;
+            }
+        }
+        listening_ = std::move(instance);
+        return true;
+    }
+
+    void RenewListener() {
+        std::string why;
+        if (NextInstance(false, why)) {
+            listen_retry_ = NEVER;
+        } else {
+            Log("cannot wait for the next TIP: " + why);
+            listen_retry_ = Now() + LISTEN_RETRY_MS;
+        }
     }
 
     void Completed(Op* op, DWORD bytes, DWORD error) {
         Pipe* pipe = op->pipe;
         if (op->kind == Op::Listen) {
             std::unique_ptr<Pipe> owned = std::move(listening_);
-            std::string why;
-            if (!NextInstance(false, why)) Log("cannot wait for the next TIP: " + why);
+            RenewListener();
             if (error != ERROR_SUCCESS && error != ERROR_PIPE_CONNECTED) {
                 CloseHandle(owned->handle);
                 return;
@@ -670,15 +726,24 @@ private:
         if (op->kind == Op::Read) {
             pipe->reading = false;
             if (error == ERROR_SUCCESS && bytes > 0 && !pipe->closed) {
+                // Buffered bytes have already been searched for a newline.
+                size_t search = pipe->in.size();
                 pipe->in.append(pipe->buffer, bytes);
                 size_t start = 0;
                 ClientId id = pipe->id;
-                for (size_t nl; !pipe->closed &&
-                                (nl = pipe->in.find('\n', start)) != std::string::npos;
-                     start = nl + 1) {
-                    std::string line = pipe->in.substr(start, nl - start);
+                while (!pipe->closed) {
+                    size_t nl = pipe->in.find('\n', search);
+                    size_t end = nl == std::string::npos ? pipe->in.size() : nl;
+                    if (end - start > MAX_TIP_LINE_BYTES) {
+                        Log("TIP line limit exceeded; closing its pipe");
+                        Close(*pipe);
+                        break;
+                    }
+                    if (nl == std::string::npos) break;
+                    std::string line = pipe->in.substr(start, end - start);
                     if (!line.empty() && line.back() == '\r') line.pop_back();
-                    handler_->OnClientLine(id, line);  // may close this pipe (quit)
+                    handler_->OnClientLine(id, line);  // a failed reply can mark the pipe closed
+                    start = search = nl + 1;
                 }
                 pipe->in.erase(0, start);
                 StartRead(*pipe);
@@ -687,6 +752,7 @@ private:
             }
         } else {
             pipe->write_pending = false;
+            pipe->writing.clear();
             if (error != ERROR_SUCCESS) Close(*pipe);
             else PumpWrite(*pipe);
         }
@@ -708,11 +774,7 @@ private:
 
     void PumpWrite(Pipe& p) {
         if (p.write_pending || p.closed || p.out.empty()) return;
-        p.writing.clear();
-        while (!p.out.empty()) {
-            p.writing += p.out.front();
-            p.out.pop_front();
-        }
+        p.writing.swap(p.out);
         p.write = {};
         p.write.kind = Op::Write;
         p.write.pipe = &p;
@@ -728,7 +790,19 @@ private:
         if (p.closed) return;
         p.closed = true;
         CancelIoEx(p.handle, nullptr);
-        handler_->OnClientClosed(p.id);
+        closed_clients_.push_back(p.id);
+    }
+
+    void ReportClosedClients() {
+        // WriteClient can close a pipe during a handler callback. Notify only
+        // after that callback returns, when it no longer holds client references.
+        while (!closed_clients_.empty()) {
+            ClientId id = closed_clients_.front();
+            closed_clients_.pop_front();
+            handler_->OnClientClosed(id);
+            auto it = pipes_.find(id);
+            if (it != pipes_.end()) Reap(*it->second);
+        }
     }
 
     void Reap(Pipe& p) {
@@ -745,6 +819,10 @@ private:
             case EngineEvent::Err:
                 engine_log_.Write(event->line);
                 handler_->OnEngineStderrLine(event->line);
+                break;
+            case EngineEvent::OversizedOutput:
+                Log("engine stdout line exceeded the limit; ending the engine");
+                KillEngine();
                 break;
             case EngineEvent::Exit:
                 input_.reset();
@@ -764,7 +842,9 @@ private:
     PSECURITY_DESCRIPTOR security_ = nullptr;
     std::wstring pipe_name_;
     std::unique_ptr<Pipe> listening_;
+    int64_t listen_retry_ = NEVER;
     std::map<ClientId, std::unique_ptr<Pipe>> pipes_;
+    std::deque<ClientId> closed_clients_;
     ClientId next_client_ = 1;
     int generation_ = 0;
     std::unique_ptr<EngineInput> input_;

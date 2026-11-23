@@ -64,6 +64,21 @@ class Parser {
             out += (char)(0x80 | ((cp >> 6) & 63)); out += (char)(0x80 | (cp & 63));
         }
     }
+    bool RawUtf8(std::string& out, unsigned char lead) {
+        if (lead < 0xc2 || lead > 0xf4) return false;
+        unsigned rest = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
+        unsigned cp = lead & (0x7f >> (rest + 1));
+        if (s_.size() - p_ < rest) return false;
+        for (unsigned i = 0; i < rest; ++i) {
+            unsigned char c = (unsigned char)s_[p_++];
+            if ((c & 0xc0) != 0x80) return false;
+            cp = (cp << 6) | (c & 0x3f);
+        }
+        if ((rest == 2 && cp < 0x800) || (rest == 3 && cp < 0x10000) ||
+            (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) return false;
+        Utf8(out, cp);
+        return true;
+    }
     bool String(std::string& out, bool allow_unpaired = false) {
         if (!Take('"')) return false;
         out.clear();
@@ -71,6 +86,10 @@ class Parser {
             unsigned char c = (unsigned char)s_[p_++];
             if (c == '"') return true;
             if (c < 0x20) return false;
+            if (c >= 0x80) {
+                if (!RawUtf8(out, c)) return false;
+                continue;
+            }
             if (c != '\\') { out += (char)c; continue; }
             if (p_ == s_.size()) return false;
             switch (s_[p_++]) {

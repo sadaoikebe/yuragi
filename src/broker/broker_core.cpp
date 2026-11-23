@@ -148,6 +148,11 @@ void Broker::OnClientLine(ClientId id, const std::string& line) {
         Log("a request without hello or seq; ignored");
         return;
     }
+    // Only the broker owns session IDs and sends operations without replies.
+    if (msg.object.count("sid") || op == "open" || op == "close") {
+        Log("a request with broker-owned session fields or operations; ignored");
+        return;
+    }
     if (op == "set_direct") Flag(msg, "direct", client.direct);
     if (state_ != EngineState::Ready) {
         if (op == "reload_keymap") {

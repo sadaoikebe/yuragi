@@ -4,6 +4,7 @@
 
 STATE_DIR/plan.json lists what each start does, in order (the last entry repeats):
   "normal"                 ready, then one reply per request
+  "oversized_ready"        ready with a diagnostic longer than the protocol's line limit
   "pending_conversion"     Space is settled by a timer, as with an async LM
 Each start appends "pid birth" to STATE_DIR/starts.
 """
@@ -43,7 +44,10 @@ def main() -> int:
     mode = plan[min(index, len(plan) - 1)]
     print(f"fake engine start {index} mode {json.dumps(mode)}", file=sys.stderr, flush=True)
     out = sys.stdout
-    out.write(json.dumps({"ready": True, "proto": 1, "warnings": []}) + "\n")
+    ready = {"ready": True, "proto": 1, "warnings": []}
+    if mode == "oversized_ready":
+        ready["diagnostic"] = "x" * (1024 * 1024)
+    out.write(json.dumps(ready) + "\n")
     out.flush()
     pending = False
     for line in sys.stdin:
