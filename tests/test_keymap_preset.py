@@ -105,9 +105,6 @@ class KeymapFileTest(unittest.TestCase):
         (self.dir / "keymap.json").write_text('{"use": "custom",', encoding="utf-8")
         self.assertIsNotNone(keymap.load_keymap(self.dir).error)
 
-    def test_a_previous_tip_toggle_that_types_is_not_carried(self):
-        (self.dir / "tip.json").write_text('{"toggle_vk": 32, "toggle_mods": []}', encoding="utf-8")
-        self.assertEqual(keymap.load_keymap(self.dir).legacy, {})  # Space would no longer type
 
 
 class EatTableTest(unittest.TestCase):

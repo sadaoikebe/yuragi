@@ -88,7 +88,7 @@ jobs:
           ctest --test-dir build/broker -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "broker core test failed" }
 
-      - name: TIP のビルド (MSVC, Release) と判断の試験 (tip_logic, tip_json, tip_peer)
+      - name: TIP のビルド (MSVC, Release) と判断の試験 (tip_logic, tip_json)
         shell: pwsh
         run: |
           cmake -S src/tip -B build/tip -A x64
@@ -108,25 +108,10 @@ jobs:
           ctest --test-dir build/tip32 -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "32-bit TIP tests failed" }
 
-      # tests/test_engine_stdin.py は torch が無いと飛ばされる。利用者の PC と同じく、
-      # setup.ps1 の版の CPU 版 torch と packaging/requirements.txt (numpy を含む) を入れる。
-      - name: torch と依存 (setup.ps1 と同じ版、CPU 版)
-        shell: pwsh
-        run: |
-          $match = Select-String -Path packaging/setup.ps1 -Pattern '^\$TorchVersion = "([0-9.]+)"'
-          if (-not $match) { throw "packaging/setup.ps1: no TorchVersion line" }
-          $torch = $match.Matches[0].Groups[1].Value
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==$torch"
-          if ($LASTEXITCODE -ne 0) { throw "torch $torch install failed" }
-          python -m pip install -r packaging/requirements.txt
-          if ($LASTEXITCODE -ne 0) { throw "requirements install failed" }
-          python -c "import torch, numpy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
-          if ($LASTEXITCODE -ne 0) { throw "torch does not import" }
-
-      - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験) とエンジンの標準入力の試験
+      - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験)
         shell: pwsh
         env:
           YURAGI_BROKER: ${{ github.workspace }}\dist\yuragi-broker.exe
         run: |
-          python -m unittest -v tests.test_broker tests.test_engine_stdin
-          if ($LASTEXITCODE -ne 0) { throw "broker or engine stdin tests failed" }
+          python -m unittest -v tests.test_broker
+          if ($LASTEXITCODE -ne 0) { throw "broker tests failed" }

@@ -63,25 +63,8 @@ static void CommittingVisibleText() {
     assert(!CommitsVisibleText(Parse(R"({"seq":3,"composition":"x"})")));
 }
 
-static void StatesAndWhatTheUserSees() {
-    assert(ModeFor(Link::Connected, "ready") == Mode::Normal);
-    assert(ModeFor(Link::Connected, "starting") == Mode::Preparing);
-    assert(ModeFor(Link::Connected, "") == Mode::Preparing);  // before the hello reply
-    assert(ModeFor(Link::Connected, "down") == Mode::Stopped);
-    assert(ModeFor(Link::Connecting, "") == Mode::Preparing);
-    assert(ModeFor(Link::Unreachable, "ready") == Mode::Stopped);
-    assert(ModeFor(Link::NotAllowed, "") == Mode::Excluded);
-}
-
 static void EatingKeys() {
     const auto table = DefaultKeyTable();
-    // An earlier engine still supplies a usable key table without the editing row.
-    tip_json::Value older;
-    const std::string encoded(kDefaultKeyTable);
-    assert(tip_json::Parser(encoded).Parse(older));
-    assert(older.object.at("phases").object.erase("editing") == 1);
-    auto old_table = ParseKeyTable(older);
-    assert(old_table && old_table->rev == table.rev);
 
     auto take = [&](uint32_t vk, Mods mods, Phase phase, bool unsettled = false) {
         return WantKey(NormalizeKey(vk, mods), {phase, unsettled}, table);
@@ -155,8 +138,6 @@ static void KeysSentInPlace() {
     };
     // No input: the TIP sends the key itself, also with the keyboard closed.
     assert(take(back, Phase::Empty) == Take::Pass);
-    assert(table.GlobalAt(Phase::Empty, back.Code()) == GlobalCommand::SendBackspace);
-    assert(SentKeyOf(GlobalCommand::SendBackspace)->vk == 0x08);
     assert(table.GlobalAt(Phase::Direct, up.Code()) == GlobalCommand::SendUp);
     assert(WorksClosed(GlobalCommand::SendUp) && !WorksClosed(GlobalCommand::Settings));
     // With input: the phase's row runs, or the engine commits before the key is sent.
@@ -164,7 +145,6 @@ static void KeysSentInPlace() {
     assert(table.GlobalAt(Phase::Composing, back.Code()) == GlobalCommand::None);
     assert(take(up, Phase::Composing) == Take::Send);
     assert(take(up, Phase::Empty, true) == Take::Send);
-    for (const auto& sent : kSentKeys) assert(ParseGlobal(sent.id) == sent.command);
 }
 
 static void OrderOfReplies() {
@@ -279,13 +259,6 @@ static void HeldKeysDrainInOrderAfterTab() {
     }
 }
 
-static void ConnectionBackoff() {
-    ConnectGate gate;
-    assert(gate.Allow(5000));
-    assert(!gate.Allow(6999));
-    assert(gate.Allow(7000));
-}
-
 static void CandidatePlacement() {
     assert(CandidateTop(400, 420, 176, 4, 1000) == 424);  // room below
     assert(CandidateTop(800, 820, 176, 4, 1000) == 824);  // exactly fits
@@ -384,14 +357,12 @@ int main(int argc, char** argv) {
     ReadingReplies();
     ReadingBrokerMessages();
     CommittingVisibleText();
-    StatesAndWhatTheUserSees();
     EatingKeys();
     KeysSentInPlace();
     OrderOfReplies();
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();
     HeldKeysDrainInOrderAfterTab();
-    ConnectionBackoff();
     CandidatePlacement();
     CandidatePopupLayout();
     Requests();

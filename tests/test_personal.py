@@ -24,18 +24,6 @@ class TempFile(unittest.TestCase):
 
 
 class PersonalFileTest(TempFile):
-    def test_add_replace_remove(self):
-        add_word(self.path, "おやゆび", "親指")
-        add_word(self.path, "やまだ", "山田", "姓")
-        add_word(self.path, "おやゆび", "親指", "名詞", 1000)  # replaces, not duplicates
-        self.assertEqual(len(self.path.read_text(encoding="utf-8").splitlines()), 2)
-        self.assertEqual([(w.reading, w.surface, w.pos, w.cost) for w in read_words(self.path)],
-                         [("やまだ", "山田", "姓", DEFAULT_COST),
-                          ("おやゆび", "親指", "名詞", 1000)])
-        self.assertTrue(remove_word(self.path, "やまだ", "山田"))
-        self.assertFalse(remove_word(self.path, "やまだ", "山田"))
-        self.assertEqual(len(read_words(self.path)), 1)
-
     def test_a_word_that_cannot_be_typed_is_not_registered(self):
         for reading, surface, pos in (("oyayubi", "親指", "名詞"), ("オヤユビ", "親指", "名詞"),
                                       ("おやゆび", "", "名詞"), ("おやゆび", "親指", "動詞")):

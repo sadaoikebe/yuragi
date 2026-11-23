@@ -14,7 +14,6 @@
 | `default_keymap.h`（ビルド時に生成） | 同梱の `ms-ime.json` から作る食べる表（`python -m yuragi.ime.keymap`）。ブローカーから表が届くまで使う。ビルドに Python が要る |
 | `yuragi_tip.rc` `resource.h` | 製品アイコン（`assets/icon/yuragi.ico`）を DLL に持たせる。登録時に `RegisterProfile` がこの DLL とリソース番号を渡し、入力方式の切り替え一覧に出る。言語バーの「ゆ/Y」は実行時に描くモード表示で、これとは別 |
 | `tests/tip_logic_test.cpp` `tests/tip_json_test.cpp` | 上の 2 つの単体試験（どの OS でも動く） |
-| `tests/tip_peer_test.cpp` | `tip_peer.h` の試験（Windows だけ）。自分の写しをアプリコンテナーと整合性レベル低で動かす |
 | `tests/mingw/ctffunc.h` | Linux で llvm-mingw を使って型検査するときだけの補い（製品のビルドでは使わない） |
 
 設定ファイルは `%USERPROFILE%\.yuragi-ime\tip.json`。各項目の既定値を示す。

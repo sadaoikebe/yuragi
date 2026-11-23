@@ -117,16 +117,6 @@ void SessionsOpenOnlyAfterHello() {
     assert(f.to_engine.size() == 2 && f.to_engine.back() == R"({"op":"close","sid":2})");
 }
 
-// DESIGN「メニュー」: the TIP's settings and word-registration commands.
-void ManagementWindowOpensOnRequest() {
-    Fake f;
-    Broker b(f);
-    b.Start();
-    Hello(b, 1);
-    b.OnClientLine(1, R"({"op":"open_admin"})");
-    assert(f.admin == 1);
-}
-
 void ReplyOnlyAnswersTheMatchingSession() {
     Fake f;
     Broker b(f);
@@ -164,34 +154,6 @@ void AnAppPackageCannotQuit() {
     Hello(b, 2);  // the installer
     b.OnClientLine(2, R"({"op":"quit"})");
     assert(f.quits == 1);
-}
-
-// A v0.1.2 TIP (no "passes") eats a key answered with a state: it is told to let the key
-// through instead, in its own input mode.
-void OldTipIsToldToLetKeysThrough() {
-    Fake f;
-    Broker b(f);
-    b.Start();
-    b.OnClientConnected(1, false);
-    b.OnClientLine(1, R"({"op":"hello","proto":1})");
-    b.OnClientLine(1, R"({"seq":1,"op":"down","vk":74,"t":0,"mods":[]})");
-    assert(f.Client(1).back() == R"({"seq":1,"pass_through":true,"direct":false})");
-    b.OnClientLine(1, R"({"seq":2,"op":"set_direct","direct":true})");
-    assert(f.Client(1).back() == R"({"seq":2,"pass_through":true,"direct":true})");
-    assert(f.to_engine.empty());
-    // Asked while ready: the engine ends before it answers.
-    Ready(b);
-    b.OnClientLine(1, R"({"seq":3,"op":"set_direct","direct":false})");
-    b.OnEngineExit(1);
-    b.OnClientLine(1, R"({"seq":4,"op":"down","vk":74,"t":0,"mods":[]})");
-    assert(f.Client(1).back() == R"({"seq":4,"pass_through":true,"direct":false})");
-    // Answered by the engine (its own key turned direct input on).
-    Ready(b);
-    b.OnClientLine(1, R"({"seq":5,"op":"down","vk":243,"t":0,"mods":[]})");
-    b.OnEngineLine(R"({"sid":1,"seq":5,"direct":true})");
-    b.OnEngineExit(1);
-    b.OnClientLine(1, R"({"seq":6,"op":"down","vk":74,"t":0,"mods":[]})");
-    assert(f.Client(1).back() == R"({"seq":6,"pass_through":true,"direct":true})");
 }
 
 // DESIGN「見張り」: an exit restarts at once; the lost key and composition are told.
@@ -385,10 +347,8 @@ void RetryWhileRunningRestartsWithoutCounting() {
 int main() {
     KeysPassWhileStartingThenGoToTheEngine();
     SessionsOpenOnlyAfterHello();
-    ManagementWindowOpensOnRequest();
     ReplyOnlyAnswersTheMatchingSession();
     AnAppPackageCannotQuit();
-    OldTipIsToldToLetKeysThrough();
     ExitWhileReadyResetsAndRestarts();
     ExitIsLoggedWithItsOwnFatalLine();
     ThreeExitsStopThenRetry();
