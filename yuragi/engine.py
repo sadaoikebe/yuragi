@@ -215,7 +215,7 @@ class Engine:
             if args.dict_dir is not None:
                 mozc_dict.DICT_DIR = args.dict_dir
             if args.cache_dir is not None:
-                mozc_dict.CACHE = args.cache_dir / mozc_dict.CACHE.name
+                mozc_dict.CACHE_DIR = args.cache_dir
             # Imported after the directories are set: some modules read them at import.
             from yuragi.ime import config, server
             from yuragi.ime.keymap import load_keymap

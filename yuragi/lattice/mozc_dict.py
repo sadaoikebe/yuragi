@@ -33,14 +33,14 @@ def files_digest(manifest: Path = MANIFEST) -> str:
 def cache_name(manifest: Path = MANIFEST) -> str:
     """The cache file's name: the format and the hash of the manifest's file list.
 
-    A cache is only ever read for the dictionary it was built from
-    (DESIGN「起動時の読み込み」): another dictionary has another name, so a
-    stale cache cannot be used.
+    A cache is read for the dictionary the manifest names; the installer verifies the
+    files against it (DESIGN「起動時の読み込み」). Text changed by hand in a working
+    tree keeps the old cache: delete it.
     """
     return f"{CACHE_FORMAT}-{files_digest(manifest)}.pkl"
 
 
-CACHE = ROOT / "data" / "cache" / cache_name()
+CACHE_DIR = ROOT / "data" / "cache"
 USER_LEX = ROOT / "data" / "user_lexicon.jsonl"
 
 
@@ -147,7 +147,8 @@ def require_dict_files(names: list[str], directory: Path | None = None) -> None:
 def _parse_dict_files() -> tuple[dict[str, list[Entry]], set[str]]:
     by_reading: dict[str, list[Entry]] = {}
     prefixes: set[str] = set()
-    files = list(DICT_DIR.glob("dictionary*.txt")) + [DICT_DIR / "suffix.txt"]
+    # A glob's order is up to the OS: the same reading and cost would come out in another order.
+    files = sorted(DICT_DIR.glob("dictionary*.txt")) + [DICT_DIR / "suffix.txt"]
     for path in files:
         with path.open(encoding="utf-8") as f:
             for number, line in enumerate(f, 1):
@@ -384,17 +385,18 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
 
 def load_lex(*, user_lexicon: bool = True) -> MozcLex:
     """The lexicon from the cache, or parsed from the text and cached."""
-    lex = read_cache(CACHE)
+    cache = CACHE_DIR / cache_name()
+    lex = read_cache(cache)
     if lex is None:
         require_dict_files(LOADER_FILES)
         print("parsing Mozc OSS dictionary (first run)...", file=sys.stderr, flush=True)
         by_reading, prefixes = _parse_dict_files()
         connect, pos_size = _parse_connection()
         lex = MozcLex(by_reading, prefixes, connect, pos_size)
-        write_cache(CACHE, lex)
+        write_cache(cache, lex)
         print(
             f"  readings={len(by_reading)} prefixes={len(prefixes)} "
-            f"pos={pos_size} cache={CACHE}",
+            f"pos={pos_size} cache={cache}",
             file=sys.stderr,
         )
     apply_numeral_context(lex)

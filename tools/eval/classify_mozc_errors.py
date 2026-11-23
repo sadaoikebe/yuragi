@@ -38,7 +38,7 @@ from yuragi.ime.bunsetsu import PAGE_SIZE, candidates
 from yuragi.lattice import mozc_dict
 from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
-from yuragi.lattice.mozc_dict import (BOS_ID, CACHE, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
+from yuragi.lattice.mozc_dict import (BOS_ID, CACHE_DIR, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
                                        UNK_COST, UNK_LID, USER_LEX, Entry, MozcLex,
                                        apply_numerals, apply_user_lex)
 from yuragi.lattice.table import DATA, load_table, reverse_table
@@ -683,7 +683,10 @@ def main():
         parser.error("choose either --from-text or --cache")
     start = time.monotonic()
     tsv = args.tsv or args.dictionary_dir / "evaluation.tsv"
-    cache = None if args.from_text else args.cache or (CACHE if args.dictionary_dir == DICT_DIR and CACHE.exists() else None)
+    cache = None if args.from_text else args.cache
+    if cache is None and not args.from_text and args.dictionary_dir == DICT_DIR:
+        cache = CACHE_DIR / mozc_dict.cache_name()
+        cache = cache if cache.exists() else None
     user = None if args.no_user_lexicon else args.user_lexicon
     # Exactly the files required by the selected snapshot, not an open glob.
     inputs = [tsv, args.table, args.dictionary_dir / "id.def", args.dictionary_dir / "suffix.txt",
