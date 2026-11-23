@@ -81,7 +81,9 @@ class FakeVar:
 
 
 class WidgetLayerTest(Base):
-    """AdminWindow against a stand-in tkinter: every builder and handler runs."""
+    """AdminWindow against a stand-in tkinter: the window builds, and the word,
+    learning and setting handlers reach their files. Of the key tab
+    (keymap_ui.py), only KeyTab.__init__ runs; the status tab is not checked."""
 
     def window(self):
         tk = mock.MagicMock(StringVar=FakeVar)
