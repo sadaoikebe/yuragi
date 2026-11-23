@@ -24,6 +24,7 @@ constexpr uint32_t BROKER_WAIT_MS = 10000;
 constexpr uint32_t BROKER_POLL_MS = 100;
 constexpr uint32_t NOTICE_SHOW_MS = 4000;  // DESIGN「小さな表示」: the notices that go by themselves
 constexpr size_t CONTEXT_CHARS = 200;
+// Not a setting: the UTF-16 units that can hold CONTEXT_CHARS code points.
 constexpr size_t CONTEXT_UNITS = 2 * CONTEXT_CHARS;
 
 // The last CONTEXT_CHARS code points; none when they hold a lone surrogate (what lies

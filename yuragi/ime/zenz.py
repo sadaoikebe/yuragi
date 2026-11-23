@@ -55,7 +55,7 @@ from .bunsetsu import Bunsetsu, Candidate, Segment, ZenzEvidence, normal_bunsets
 
 DEFAULT_MODEL = "Miwa-Keita/zenz-v2.5-medium"
 DEFAULT_ALPHA = 1.0
-# Measured on Windows (zenz medium, 200 own items; 2026-11-19): k 8 or 16
+# Measured on Windows (zenz medium, 200 own items): k 8 or 16
 # picks no better than 4, and 4 threads is the fastest CPU setting. The same
 # defaults on a GPU: it changes the speed, not the picks.
 DEFAULT_K = 4
