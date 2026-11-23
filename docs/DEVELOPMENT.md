@@ -10,6 +10,7 @@
 - [KEYBIND.md](KEYBIND.md) — キーバインドの設計（局面とコマンド、プリセット、TIP の食べる表と送り直し）。前提にした Windows のキー入力と各 IME の資料は [keybind/](keybind/)
 - [EVALUATION.md](EVALUATION.md) — 変換の評価と診断、実打鍵の記録と再生
 - [PERFORMANCE.md](PERFORMANCE.md) — CPU・GPU での LM の速さと精度の調査（モデルの比較、較正、遅い PC、GPU と電池）
+- [assets/icon/THEME.md](../assets/icon/THEME.md) — 見た目のテーマ（アイコンの形と色、`.ico` の大きさと作り方、使いどころ）
 
 同時打鍵の状態機械（S1〜S7）の表と各状態の出口は、`yuragi/chord/fsm.py` 冒頭の説明にあります。
 TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/broker/README.md`](../src/broker/README.md)。
@@ -73,9 +74,10 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
   その前提は、ゆらぎとは別の確認用の TIP と `checks.py` で実機で確かめる。MS-IME の動きを見る道具も同じ所にある（`tools/keyprobe/README.md`）。
   どちらも、ゆらぎ本体のコードには手を入れない。
 
-> **注意**: TIP の登録は `ITfInputProcessorProfileMgr` だけで行う。HKCU への手書きの登録や、古い
-> `Register` / `AddLanguageProfile` との二重登録をすると、一覧に出ても別のエンジンを掴んだり、
-> ホットキーがおかしくなったりする。
+> **注意**: TIP は `ITfInputProcessorProfileMgr::RegisterProfile` だけで登録する（`yuragi_tip.cpp` の `RegisterProfile`）。
+> 古い `ITfInputProcessorProfiles::Register` と `AddLanguageProfile` の登録をこれと一緒にすると、Windows 11 では、
+> 入力方式の一覧に出ていても別の CJK のエンジンが付く。登録の仕方を変えたら、`dev-register.ps1` で入れ直し、
+> 一覧から選んだときにゆらぎの「ゆ」が出て変換できることを確かめる。
 
 ## リリース
 
@@ -84,6 +86,8 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
 インストール試験では、配置済みの Python・辞書・固定モデルを使い、`--require-lm` 付きの自己試験で zenz の変換を確認する。
 リリースに置く `setup.ps1` と `uninstall.ps1` の元は `packaging/setup.ps1` と
 `packaging/uninstall-entry.ps1` です（手順は DESIGN「インストール・更新・アンインストール」）。
+公開前の版を実機で試すには、アセットを置いたフォルダを `setup.ps1 -AssetDir <フォルダ>` で渡します。
+ソースの zip は、新しいファイルも含めて作業ツリーから作ります（`git stash create` は未追跡のファイルを含まないので、その zip では起動できません）。
 実機確認が済むまではプレリリースのままです。正式公開するときは、リポジトリ所有者が GitHub の Releases 画面で対象のタグを選び、
 正式版に切り替えます。README の `releases/latest` は正式版の配布先です。ワークフローはプレリリースの作成前後でこの配布先を照合します。
 
