@@ -198,7 +198,8 @@ jobs:
           }
 
   # 公開したプレリリースの setup.ps1 で、まっさらなランナーに実際に入れる (経路は 1 本)。
-  # インストール → 動作 (ブローカーが ready、同梱ランタイムで tkinter と zenz の変換が動くか)
+  # 1 つ前の正式版 (releases/latest。あれば) のインストール → この版への更新 (旧版の Program Files と
+  # versions が残らないか) → 動作 (ブローカーが ready、同梱ランタイムで tkinter と zenz の変換が動くか)
   # → 同じ版の入れ直し (学習データが残るか)
   # → リリースの uninstall.ps1 でアンインストール (プログラムは全部消え、利用者のデータは残るか)
   # → もう一度 uninstall.ps1 (入っていないと伝えて、何もせずに終わるか)。
@@ -265,9 +266,29 @@ jobs:
 
           if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
           Set-ItemProperty -LiteralPath $runKey -Name "yuragi-ci-startup" -Value $startupMarker
+          # The update path: the latest release first (when there is one other than this tag).
+          $latestUrl = "https://github.com/$env:REPO/releases/latest/download/setup.ps1"
+          $latestAt = curl.exe --silent --show-error --head --max-time 15 --output NUL --write-out '%{redirect_url}' $latestUrl
+          if ($LASTEXITCODE -ne 0) { throw "Could not look up the latest release" }
+          $latestTag = ""
+          if ("$latestAt" -match '/releases/download/([^/]+)/setup\.ps1$' -and $Matches[1] -ne $env:TAG) { $latestTag = $Matches[1] }
+          if ($latestTag) {
+            $latestSetup = Join-Path $env:RUNNER_TEMP "yuragi-latest-setup.ps1"
+            Invoke-WebRequest -UseBasicParsing $latestAt -OutFile $latestSetup
+            Invoke-Logged "install $latestTag (the latest release)" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $latestSetup, "-Yes")
+            if ((Get-ItemProperty "HKCU:\Software\yuragi-ime").Tag -ne $latestTag) { throw "HKCU Tag is not $latestTag" }
+          } else {
+            Write-Host "No latest release other than $($env:TAG); a fresh install only"
+          }
+
           $setupArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $setup, "-Yes")
-          Invoke-Logged "install" $setupArgs
+          Invoke-Logged "install (over $latestTag)" $setupArgs
           Assert-Installed
+          if ($latestTag) {
+            # Its broker was asked to quit before the old version was removed: nothing of it stays.
+            if (Test-Path (Join-Path $env:ProgramFiles "yuragi-ime\$latestTag")) { throw "Program Files still has $latestTag after the update" }
+            if (Test-Path (Join-Path $local "versions\$latestTag")) { throw "versions\$latestTag remains after the update" }
+          }
           Write-Host "install OK"
 
           # The settings window (admin_args in engine.json) needs tkinter in the bundled runtime.

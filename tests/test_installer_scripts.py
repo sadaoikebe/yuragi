@@ -132,15 +132,22 @@ class PowerShellTest(unittest.TestCase):
             (header.format("12.8"), [], "cpu"),
             ("", ["NVIDIA GeForce RTX 4060, 8.9"], "cpu"),
             (header.format("12.8"), ["Quadro P1000, 6.1", "NVIDIA RTX A2000, 8.6"], "cu128"),
+            # The edges: cu128 needs CUDA 12.8 and Turing (7.5) or later, cu126 CUDA 12.6 and 6.0 to 9.x.
+            (header.format("12.7"), ["NVIDIA GeForce RTX 3060, 8.6"], "cu126"),
+            (header.format("12.5"), ["NVIDIA GeForce RTX 3060, 8.6"], "cpu"),
+            (header.format("12.8"), ["Tesla V100-PCIE-16GB, 7.0"], "cu126"),  # Volta
+            (header.format("12.6"), ["Tesla P100-PCIE-16GB, 6.0"], "cu126"),  # the first Pascal
+            (header.format("12.6"), ["NVIDIA GeForce RTX 5070, 12.0"], "cpu"),  # Blackwell: cu128 only
             # Driver 610 renamed the field (2026-11-20): read as no GPU before.
             ("| NVIDIA-SMI 610.74                 KMD Version: 610.74        CUDA UMD Version: 13.3     |",
              ["NVIDIA GeForce RTX 4060 Laptop GPU, 8.9"], "cu128"),
         ]
-        for smi_header, gpus, expected in cases:
+        calls = "\n".join(f"Select-TorchVariant {ps_quote(smi_header)} @({', '.join(ps_quote(g) for g in gpus)})"
+                          for smi_header, gpus, _ in cases)
+        got = pwsh(f"{func}\n{calls}").splitlines()
+        for (smi_header, gpus, expected), variant in zip(cases, got, strict=True):
             with self.subTest(header=smi_header, gpus=gpus):
-                listed = ", ".join("'" + g.replace("'", "''") + "'" for g in gpus)
-                got = pwsh(f"{func}\nSelect-TorchVariant '{smi_header}' @({listed})").strip()
-                self.assertEqual(got, expected)
+                self.assertEqual(variant, expected)
 
     @unittest.skipIf(os.name == "nt", "the stand-in nvidia-smi is a shell script")
     def test_torch_variant_runs_nvidia_smi(self):
