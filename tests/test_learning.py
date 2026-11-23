@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -155,6 +157,30 @@ class LearningTest(unittest.TestCase):
         chosen = self.choose_second(s, "こうせい")
         self.assertTrue(learning_admin.forget(self.path, "こうせい", chosen))
         self.assertNotEqual(self.convert(s, "こうせい").selected.surface, chosen)
+
+    def test_a_commit_right_after_forgetting_keeps_it_forgotten(self):
+        s = self.session()
+        chosen = self.choose_second(s, "こうせい")
+        self.convert(s, "きしゃ")
+        s._select(1)
+        # The window forgets while this conversion is open; Enter then appends.
+        self.assertTrue(learning_admin.forget(self.path, "こうせい", chosen))
+        dispatch(s, {"op": "down", "vk": VK_RETURN})
+        self.assertFalse(s._learning.has_pair("こうせい", chosen))
+        self.assertNotEqual(self.convert(s, "こうせい").selected.surface, chosen)
+
+    def test_an_unreadable_history_is_not_used_until_it_can_be_read(self):
+        s = self.session()
+        chosen = self.choose_second(s, "こうせい")
+        aside = self.path.with_name("aside")
+        self.path.rename(aside)
+        self.path.mkdir()  # it exists, but cannot be read as a file
+        with redirect_stderr(io.StringIO()) as log:
+            self.assertNotEqual(self.convert(s, "こうせい").selected.surface, chosen)
+        self.assertIn("learning history unreadable", log.getvalue())
+        self.path.rmdir()
+        aside.rename(self.path)
+        self.assertEqual(self.convert(s, "こうせい").selected.surface, chosen)
 
 
 if __name__ == "__main__":
