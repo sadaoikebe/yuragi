@@ -27,6 +27,9 @@ class Disagrees:
     def reading_nll(self, context, readings):
         return [0.0 for _ in readings]
 
+    def candidate_nll(self, context, candidates):
+        return [0.0] * len(candidates)
+
     def review(self, context, reading, draft, accepted, reachable):
         self.calls.append(reading)
         wanted = self.wanted.setdefault(
@@ -57,17 +60,21 @@ class ReachTest(unittest.TestCase):
         model.bytes = {ord(c): c.encode() for c in "あいうかきえ"}
         model.eos = 0
         a, i, u, ka, ki, e = map(ord, "あいうかきえ")
-        for name, ranked, reachable, fix in (
-            ("the 2nd token", [[a], [ka, ki, i], [u]], {"あき"}, ("あき", False)),
-            ("</s>, then the 2nd", [[a], [0, ka], [u]], {"あか"}, ("あか", False)),
-            ("none before the draft's token: on to the next position",
-             [[a], [ka, i, ki], [e, u]], {"あき", "あいえ"}, ("あいえ", False)),
+        for name, accepted, ranked, reachable, fix in (
+            ("the 2nd token", "", [[a], [ka, ki, i], [u]], {("あき", False)}, ("あき", False)),
+            ("</s>, then the 2nd", "", [[a], [0, ka], [u]], {("あか", False)}, ("あか", False)),
+            ("</s> ends the text exactly", "", [[a], [0, ka], [u]], {("あ", True)}, ("あ", True)),
+            ("none before the draft's token: on to the next position", "",
+             [[a], [ka, i, ki], [e, u]], {("あき", False), ("あいえ", False)}, ("あいえ", False)),
+            ("inside the accepted constraint, differences do not count", "あい",
+             [[ka, a], [ki, i], [e, u]], {("か", False), ("あき", False), ("あいえ", False)},
+             ("あいえ", False)),
         ):
             with self.subTest(name):
                 model._guesses = lambda text, ids: ranked
                 self.assertEqual(
-                    model.review("", "あいう", "あいう", b"",
-                                 lambda prefix, exact: prefix.decode() in reachable),
+                    model.review("", "あいう", "あいう", spell(accepted),
+                                 lambda prefix, exact: (prefix.decode(), exact) in reachable),
                     (fix[0].encode(), fix[1]))
 
 
