@@ -2156,10 +2156,18 @@ private:
     // -- keys and replay -------------------------------------------------------------------
     bool Eligible() { return tm_ && !KeyboardDisabled(tm_) && !KeyboardClosed(tm_); }
     bool ScopeAllowsInput() const { return tip_logic::AllowsInput(scope_, carry_.Active()); }
+    // The window with the keyboard focus, when it is this thread's: keys typed now come here.
+    // Not the foreground window: a UWP app's frame belongs to ApplicationFrameHost, while the
+    // focus is in the app's own window (KEYBIND §7.6).
+    static HWND FocusHere() {
+        GUITHREADINFO gui{sizeof(gui)};
+        if (!GetGUIThreadInfo(0, &gui)) return nullptr;
+        HWND focus = gui.hwndFocus ? gui.hwndFocus : gui.hwndActive;
+        return focus && GetWindowThreadProcessId(focus, nullptr) == GetCurrentThreadId() ? focus : nullptr;
+    }
     static uintptr_t RootOwner() {
-        HWND foreground = GetForegroundWindow();
-        if (GetWindowThreadProcessId(foreground, nullptr) != GetCurrentThreadId()) return 0;
-        return reinterpret_cast<uintptr_t>(GetAncestor(foreground, GA_ROOTOWNER));
+        HWND focus = FocusHere();
+        return focus ? reinterpret_cast<uintptr_t>(GetAncestor(focus, GA_ROOTOWNER)) : 0;
     }
     size_t HeldCount() const {
         return (retry_replay_ ? 1 : 0) +
@@ -2398,9 +2406,8 @@ private:
     }
 
     ReplayResult Replay(const Stroke& key) {
-        DWORD foreground = 0;
-        GetWindowThreadProcessId(GetForegroundWindow(), &foreground);
-        if (foreground != GetCurrentProcessId()) return ReplayResult::Foreground;
+        // SendInput reaches the focus: send only while it is in this thread.
+        if (!FocusHere()) return ReplayResult::Foreground;
         if (FocusChanged() || (carry_.Active() && !carry_.SameRoot(RootOwner())))
             return ReplayResult::FocusMoved;
         if ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) {
