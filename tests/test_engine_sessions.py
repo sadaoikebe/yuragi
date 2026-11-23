@@ -12,6 +12,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from yuragi.engine import Engine, argument_parser
 from yuragi.chord.keys import Chord
@@ -160,12 +161,45 @@ class KeyDispatchTest(EngineCase):
 
         self.type_a(engine, 1)
         self.assertEqual(self.request(engine, 1, {"op": "down", "vk": 13, "t": 100})["commit"], "")
+        self.open(engine, 2)  # a connection opened later gets the reloaded map too
+        self.type_a(engine, 2)
+        self.assertEqual(self.request(engine, 2, {"op": "down", "vk": 13, "t": 100})["commit"], "")
         fresh = self.engine()
         fresh.keymap = fresh.read_keymap(load_keymap(self.dir))
         self.assertIn("keymap", fresh.channel.warnings)
         self.open(fresh, 2)
         self.type_a(fresh, 2)
         self.assertEqual(self.request(fresh, 2, {"op": "down", "vk": 13, "t": 100})["commit"], "宇")
+        self.write_keymap()  # repaired: the warning goes away
+        self.assertEqual(self.request(engine, 1, {"op": "reload_keymap"})["keymap_reload"], "applied")
+        self.assertNotIn("keymap", engine.channel.warnings)
+
+
+class RequestBarrierTest(EngineCase):
+    """DESIGN「要求 1 件ごとの防壁」: what goes wrong stays inside one request."""
+
+    @mock.patch("yuragi.engine.log")
+    def test_a_failing_request_restarts_only_that_session(self, _log):
+        engine = self.engine()
+        engine.serve([b"\xff\n", b"[1]\n", b'{"op": "open", "sid": 1}\n'])  # bad lines skipped
+        self.assertEqual(self.request(engine, 2, {"op": "down", "vk": 65, "t": 0}),
+                         {"error": True, "sid": 2, "seq": self.seq})
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("bug")
+
+        self.request(engine, 1, {"op": "set_mode", "mode": "katakana"})
+        self.type_a(engine, 1)
+        engine.connections[1].sess.on_key = fail
+        reply = self.request(engine, 1, {"op": "down", "vk": 65, "t": 100})
+        self.assertEqual((reply["error"], reply["eat"], reply["direct"], reply["input_mode"],
+                          reply["composition"]), (True, True, False, "katakana", ""))
+        self.assertEqual(self.type_a(engine, 1, 200)["composition"], "ウ")
+
+        self.request(engine, 1, {"op": "set_direct", "direct": True})
+        engine.connections[1].sess.on_key = fail
+        reply = self.request(engine, 1, {"op": "down", "vk": 65, "t": 300})
+        self.assertEqual((reply["error"], reply["eat"], reply["direct"]), (True, False, True))
 
 
 class SlowModel:
