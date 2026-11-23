@@ -102,7 +102,6 @@ bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& e
 
 namespace {
 constexpr int64_t SELFTEST_REPLY_MS = 15000;  // required-LM conversion can wait up to 10 s
-constexpr int64_t SELFTEST_START_MS = 600000;  // a first start builds the dictionary cache
 constexpr int64_t SELFTEST_EXIT_MS = 10000;
 // かいはつ on the NICOLA-A plain layer, then Space: one conversion.
 constexpr int SELFTEST_KEYS[] = {0x57, 0x4C, 0x48, 0x4F, 0x20};
@@ -110,7 +109,7 @@ constexpr int SELFTEST_KEYS[] = {0x57, 0x4C, 0x48, 0x4F, 0x20};
 
 void SelfTest::Start() {
     std::string error;
-    deadline_ = platform_.Now() + SELFTEST_START_MS;
+    deadline_ = platform_.Now() + ENGINE_START_MS;
     if (!platform_.StartEngine(error)) {
         phase_ = Finished;
         platform_.Log("selftest: the engine could not be started: " + error);

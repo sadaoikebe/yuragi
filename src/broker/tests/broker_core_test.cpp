@@ -305,6 +305,19 @@ void RepeatedHangsStopTheEngine() {
     }
 }
 
+// An engine that never gets ready is ended like a hung one (and counted).
+void AnEngineNotReadyInTimeIsEnded() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    Advance(b, f, ENGINE_START_MS - 1);
+    assert(f.kills == 0);
+    Advance(b, f, 1);
+    assert(f.kills == 1);
+    b.OnEngineExit(9);
+    assert(f.starts == 2 && b.State() == EngineState::Starting);
+}
+
 // Retry while running (new settings): a fresh engine, not counted as an exit.
 void RetryWhileRunningRestartsWithoutCounting() {
     Fake f;
@@ -348,6 +361,7 @@ int main() {
     PlannedRestartsAreNotCounted();
     RepeatedHangsStopTheEngine();
     RetryWhileRunningRestartsWithoutCounting();
+    AnEngineNotReadyInTimeIsEnded();
     std::puts("broker_core_test: all passed");
     return 0;
 }

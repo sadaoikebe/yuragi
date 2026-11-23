@@ -81,6 +81,7 @@ void Broker::StartEngine() {
     warnings_.clear();  // a new engine tells its own
     last_fatal_.clear();  // so is its fatal line
     SetState(EngineState::Starting);
+    started_ = platform_.Now();
     Log("starting the engine (" + std::to_string(exits_.size()) +
         " exit(s) in the last 10 minutes)");
     std::string error;
@@ -302,12 +303,17 @@ void Broker::OnTimer() {
         Log("no reply from the engine for " + std::to_string(ENGINE_HANG_MS) + " ms; ending it");
         Kill(Stop::Hang);
     }
+    if (state_ == EngineState::Starting && !killing_ && now - started_ >= ENGINE_START_MS) {
+        Log("the engine was not ready in " + std::to_string(ENGINE_START_MS) + " ms; ending it");
+        Kill(Stop::Hang);
+    }
 }
 
 int64_t Broker::NextDeadline() const {
     if (killing_) return NEVER;
     if (state_ == EngineState::Ready && !in_flight_.empty())
         return in_flight_.front().sent + ENGINE_HANG_MS;
+    if (state_ == EngineState::Starting) return started_ + ENGINE_START_MS;
     return NEVER;
 }
 
