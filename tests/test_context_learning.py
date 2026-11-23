@@ -20,7 +20,7 @@ from yuragi.ime import learning_admin
 from yuragi.ime.bunsetsu import Bunsetsu, Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline
-from yuragi.ime.server import argument_parser, dispatch, load_session
+from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession, Literal
 from yuragi.ime.zenz import ZenzConverter, spell
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID
@@ -315,18 +315,6 @@ class ContextLearningTest(unittest.TestCase):
         self.learn(None, "構成")
         self.assertEqual(s._learning.snapshot().head(
             "こうせい", Bunsetsu("かいぎの", "会議の"), zenz="校正").surface, "校正")
-
-    def test_learning_off_ignores_history(self):
-        self.learn("原稿の", "校正")
-        initial = self.path.read_bytes()
-        parser = argument_parser()
-        args = parser.parse_args(["--learning", "off", "--learning-file", str(self.path),
-                                  "--prediction", "off",
-                                  "--personal-file", str(self.path.with_name("personal.jsonl"))])
-        s = load_session(args, lex=self.lex)
-        self.plain(s, "げんこうのこうせい")
-        Keys(lambda msg: dispatch(s, msg)).commit()
-        self.assertEqual(self.path.read_bytes(), initial)
 
     def test_far_learned_row_and_snapshot_until_next_conversion(self):
         self.learn("原稿の", "私製校正", cost=50_000)

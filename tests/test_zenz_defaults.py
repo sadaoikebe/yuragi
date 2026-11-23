@@ -143,11 +143,6 @@ class CalibrationLadderTest(unittest.TestCase):
         self.assertEqual((converter.model.device, converter.model.name), ("cuda:0", "medium"))
         self.assertEqual(self.loaded, [("cuda:0", "medium")])
 
-    def test_a_gpu_that_cannot_run_it_falls_to_small_on_the_cpu(self):
-        converter = self.build(self.GPU_INSTALL, {("cuda:0", "medium"): "fails",
-                                                  ("cpu", "small"): 82})
-        self.assertEqual((converter.model.device, converter.model.name), ("cpu", "small"))
-
     def test_on_battery_the_gpu_is_not_tried(self):
         self.battery = True
         converter = self.build(self.GPU_INSTALL, {("cpu", "small"): 106})

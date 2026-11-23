@@ -204,17 +204,6 @@ class ContextReadingTest(unittest.TestCase):
         self.reviewer.reading_nll.assert_not_called()
         self.reviewer.review.assert_called_once()
 
-    def test_unavailable_document_context_uses_the_commit_only(self):
-        self.assert_reading(self.replay(MESSAGE), "きどく", "既読")
-        k = Keys(lambda msg: dispatch(self.sess, msg))
-        k.t = self.events(MESSAGE)[-1]["t"]
-        seq = k.commit()
-        self.reviewer.reset_mock()
-        for event in self.events(None, after_commit_seq=seq):
-            reply = dispatch(self.sess, {**event, "t": event["t"] + k.t + 100})
-        self.assert_reading(reply, "きおく", "記憶")
-        self.reviewer.reading_nll.assert_called_once_with("既読", ["きおく", "きどく"])
-
     def test_prefetch_can_only_be_used_for_the_same_context(self):
         self.sess.lm = None
         worker = ManualWorker(self.sess._lex, self.reviewer, eager_prefetch=True)

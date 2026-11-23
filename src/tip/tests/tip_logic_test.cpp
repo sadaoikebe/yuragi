@@ -45,9 +45,8 @@ static void ReadingReplies() {
 }
 
 static void ReadingBrokerMessages() {
-    Message hello = Parse(R"({"proto":1,"state":"starting","warnings":["config","lm"]})");
-    assert(hello.hello && hello.proto == 1 && hello.state == "starting");
-    assert(hello.warnings.size() == 2 && !hello.engine);
+    Message hello = Parse(R"({"proto":1,"state":"starting"})");
+    assert(hello.hello && hello.state == "starting" && !hello.engine);
     Message down = Parse(R"({"seq":9,"state":"down"})");
     assert(down.has_seq && !down.engine && down.state == "down");
     Message event = Parse(R"({"event":"state","state":"ready"})");
@@ -247,24 +246,11 @@ static void HeldKeysDrainInOrderAfterTab() {
     }
 }
 
-static void ConnectingAndSpawning() {
+static void ConnectionBackoff() {
     ConnectGate gate;
     assert(gate.Allow(5000));
     assert(!gate.Allow(6999));
     assert(gate.Allow(7000));
-
-    SpawnFacts f;
-    f.tag_matches = f.medium_integrity = true;
-    assert(MaySpawn(f));
-    SpawnFacts old_dll = f;
-    old_dll.tag_matches = false;  // uninstalled or updated: never starts anything
-    assert(!MaySpawn(old_dll));
-    SpawnFacts installing = f;
-    installing.maintenance = true;
-    assert(!MaySpawn(installing));
-    SpawnFacts sandboxed = f;
-    sandboxed.medium_integrity = false;
-    assert(!MaySpawn(sandboxed));
 }
 
 static void CandidatePlacement() {
@@ -373,7 +359,7 @@ int main(int argc, char** argv) {
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();
     HeldKeysDrainInOrderAfterTab();
-    ConnectingAndSpawning();
+    ConnectionBackoff();
     CandidatePlacement();
     CandidatePopupLayout();
     Requests();

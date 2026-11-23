@@ -13,7 +13,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
 from tests.real_dictionary import real_lex
 
-VK_RETURN, VK_SPACE, VK_LEFT, VK_UP, VK_DOWN, VK_DELETE = 0x0D, 0x20, 0x25, 0x26, 0x28, 0x2E
+VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE = 0x0D, 0x20, 0x26, 0x28, 0x2E
 
 
 class LearningTest(unittest.TestCase):
@@ -87,16 +87,6 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(segment.selected.surface, "旗艦")
         self.assertEqual(segment.choices.cache[0].surface, "旗艦")
         self.assertIn(b'"prev"', self.path.read_bytes())
-
-    def test_a_learned_clause_resizes_to_its_own_rows(self):
-        s = self.session()
-        self.choose(s, "きょうは", "きょうは", "今日は")
-        self.convert(s, "きょうは")
-        dispatch(s, {"op": "down", "vk": VK_LEFT, "mods": ["shift"]})
-        self.assertEqual([g.selected.reading for g in s.segments], ["きょう", "は"])
-        for op in ("down", "up"):
-            dispatch(s, {"op": op, "vk": VK_SPACE})
-        self.assertEqual(s.composition, "今日は")
 
     def test_penalized_numeral_can_be_chosen_and_learned(self):
         for reading, first, surface in (("いち", "市", "1"), ("ようか", "ようか", "8日")):

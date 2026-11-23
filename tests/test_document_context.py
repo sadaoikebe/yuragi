@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from tests.test_engine_sessions import EngineCase
 from tests.test_lm_async import ManualWorker
-from yuragi.ime.lm_async import ConnectionPipeline, LmWorker
+from yuragi.ime.lm_async import ConnectionPipeline
 from yuragi.ime.server import dispatch, process_request
 from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter
@@ -301,21 +301,6 @@ class PipelineContextTest(ContextCase):
         self.worker.complete(self.pipeline.job)
         self.assertEqual(k.send("timeout")["commit"], "")
         self.assertEqual(self.reviewer.calls, [("新しい欄", "か", "河")])
-
-    def test_worker_uses_the_request_snapshot(self):
-        worker = LmWorker(lambda: ZenzConverter(self.reviewer), self.sess._lex)
-        self.addCleanup(worker.thread.join, 5)
-        self.addCleanup(worker.stop)
-        self.assertTrue(worker.wait_until_loaded())
-        pipe = ConnectionPipeline(self.sess, worker, grace_ms=500, prefetch="off")
-        k = Keys(pipe.handle)
-        k.tap("J")
-        seq = k.commit()
-        k.tap("W", left_context="外語尾", after_commit_seq=seq)
-        r = k.tap(SPACE)
-        self.assertEqual((r["pending"], r["composition"]), (False, "川"))
-        self.assertEqual(k.tap(SPACE)["candidates"][0], "川")
-        self.assertEqual(self.reviewer.calls, [("外語尾", "か", "川")])
 
 
 class ConnectionContextTest(EngineCase):

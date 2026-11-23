@@ -214,12 +214,6 @@ class BrokerCase(unittest.TestCase):
     def starts(self) -> int:
         return len(self.engines())
 
-    def notices(self) -> list[dict]:
-        """What the user was told (logs/notices.log), without the times."""
-        path = self.data / "logs" / "notices.log"
-        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-        return [{k: v for k, v in json.loads(l).items() if k != "time"} for l in lines]
-
     def log(self) -> str:
         path = self.data / "logs" / "broker.log"
         return path.read_text(encoding="utf-8") if path.exists() else ""

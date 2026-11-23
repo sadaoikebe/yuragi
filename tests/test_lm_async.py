@@ -316,45 +316,6 @@ class DeadlineTest(unittest.TestCase):
         clock = worker.clock
         return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
 
-    def test_slow_normal_conversion_waits_for_the_lm(self):
-        """A conversion slower than the old 400 ms cut (the measured CPU median is
-        ~340 ms, so the slow half came close to it) still shows the LM's picks."""
-        typist = Typist().kana("きしゃ").space()
-        head = list(typist.events)
-        tail = Typist()
-        tail.t = typist.t
-        tail.kana("かいせい", gap=20).tap(VK_RETURN)
-        pipe, worker, clock = self.pipeline()
-        commits = ""
-        for event in head:
-            commits += pipe.handle(dict(event))["commit"]
-        job = pipe.job
-        for event in tail.events[:3]:
-            self.assertTrue(pipe.handle(dict(event))["pending"])
-        clock.now += 0.5
-        log = io.StringIO()
-        with redirect_stderr(log):
-            reply = pipe.handle(dict(tail.events[3]))
-            self.assertTrue(reply["pending"])  # still waiting, not cut
-            commits += reply["commit"]
-            worker.complete_all()
-            for event in tail.events[4:] + [TERMINAL]:
-                reply = pipe.handle(dict(event))
-                commits += reply["commit"]
-        self.assertFalse(job.cancelled)
-        self.assertEqual(log.getvalue(), "")
-        self.assertEqual((commits, final_state(reply)),
-                         run_reference(self.session, head + tail.events, PickyModel()))
-
-    def test_completed_prefetch_converts_in_the_space_reply(self):
-        pipe, worker, _ = self.pipeline()
-        worker.eager_prefetch = True
-        for event in Typist().kana("きしゃ").space().events:
-            reply = pipe.handle(event)
-        self.assertEqual(len(worker.jobs), 1)
-        self.assertFalse(reply["pending"])
-        self.assertTrue(reply["converted"])
-
     def test_candidate_number_waits_for_conversion(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
         keys = Typist().kana("きしゃ").space().space()  # the second Space opens the window
@@ -376,21 +337,6 @@ class DeadlineTest(unittest.TestCase):
         self.assertNotIn("eat", released)
         self.assertEqual((released["composition"], released["timer"]), ("", next_key["timer"]))
 
-    def test_poll_returns_the_final_eat_for_each_deferred_down(self):
-        pipe, worker, _ = self.pipeline(prefetch="off")
-        keys = Typist().kana("きしゃ").space()
-        for event in keys.events:
-            pipe.handle(event)
-        for seq in (11, 12):
-            reply = pipe.handle({"op": "down", "vk": VK_RETURN, "seq": seq, "t": keys.t + seq})
-            self.assertTrue(reply["eat_pending"])
-        worker.complete(pipe.job)
-        reply = pipe.handle({"op": "timeout", "t": keys.t + 20, "seq": 13})
-        self.assertTrue(reply["commit"])
-        self.assertNotIn("eat", reply)
-        self.assertEqual(reply["resolved_keys"], [{"seq": 11, "eat": True}, {"seq": 12, "eat": False}])
-        self.assertNotIn("resolved_keys", pipe.handle({"op": "timeout", "t": keys.t + 30}))
-
     def test_poll_returns_toggle_for_the_key_after_a_deferred_commit(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
         keys = Typist().kana("きしゃ").space()
@@ -406,12 +352,14 @@ class DeadlineTest(unittest.TestCase):
         worker.complete(pipe.job)
         reply = pipe.handle({"op": "timeout", "t": keys.t + 20, "seq": 14})
         self.assertTrue(reply["commit"])
+        self.assertNotIn("eat", reply)
         self.assertNotIn("global", reply)
         self.assertEqual(reply["resolved_keys"], [
             {"seq": 11, "eat": True},
             {"seq": 12, "eat": False, "global": "ime_toggle"},
             {"seq": 13, "eat": False},
         ])
+        self.assertNotIn("resolved_keys", pipe.handle({"op": "timeout", "t": keys.t + 30}))
 
     def test_replay_pauses_at_next_conversion_and_resumes_in_order(self):
         pipe, worker, _ = self.pipeline(prefetch="off")

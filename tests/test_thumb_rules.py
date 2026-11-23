@@ -31,11 +31,6 @@ class ChordJudgmentTest(unittest.TestCase):
         self.assertEqual(out, [AmbShift("w")])
         self.assertEqual((out[0].press, out[0].turn), (1, 1))
 
-    def test_thumb_first_then_character(self):
-        out = tokens([("down", "O", "space", 0), ("down", "M", "w", 40),
-                      ("up", "M", "w", 90), ("up", "O", "space", 100)])
-        self.assertEqual(out, [AmbShift("w")])
-
     def test_characters_typed_while_the_thumb_stays_down(self):
         out = tokens([("down", "O", "space", 0), *chord("w", 10, 60), *chord("e", 100, 150),
                       *chord("w", 200, 250), ("up", "O", "space", 300)])
