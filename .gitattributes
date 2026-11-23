@@ -1,0 +1,10 @@
+# The release's source zip (git archive in release.yml) is what setup.ps1 installs:
+# only what the installed app runs. Tests, documents, the C++ sources (built in CI),
+# the key-probe tools and the icon's sources stay in the repository.
+/.github export-ignore
+/docs export-ignore
+/src export-ignore
+/tests export-ignore
+/tools/keyprobe export-ignore
+/assets/icon/** export-ignore
+/assets/icon/yuragi.ico -export-ignore
