@@ -70,6 +70,7 @@ class DeviceStartupTest(unittest.TestCase):
             self.assertFalse(converter.rank_candidates)
             self.assertEqual(self.placed, ["cuda:0", "cpu"])
             self.assertEqual(len(self.model_loads), 2)
+            self.assertTrue(all(o["local_files_only"] for o in self.model_loads))  # no network
             self.assertEqual(self.warmed, ["cpu"])
 
         with self.subTest("the engine's warm-up conversion fails on a GPU: the next GPU"):
@@ -101,6 +102,31 @@ class DeviceStartupTest(unittest.TestCase):
                 self.build("--lm-device", "cuda")
             self.assertEqual(self.placed, ["cuda"])
             self.assertEqual(self.warmed, ["cuda"])
+
+
+class CalibrateTest(unittest.TestCase):
+    def test_uncached_conversions_of_the_faster_pass(self):
+        """A stand-in LM: a reading it has seen since the last forget() is fast;
+        the first pass is slower (the device warms up)."""
+        readings = zenz.CALIBRATION_READINGS
+        clock = [0.0]
+        calls = []
+        model = SimpleNamespace(seen=set())
+        model.forget = model.seen.clear
+
+        def convert(parts, lex, learning, context, converter):
+            reading = "".join(parts[0])
+            ms = 10 if reading in model.seen else 150 if len(calls) < len(readings) else 100
+            model.seen.add(reading)
+            calls.append(reading)
+            clock[0] += ms / 1000
+
+        converter = SimpleNamespace(model=model, last={})
+        reverse = {kana: kana for reading in readings for kana in reading}
+        with (mock.patch.object(zenz, "conversion_picks", side_effect=convert),
+              mock.patch.object(zenz, "time", SimpleNamespace(perf_counter=lambda: clock[0]))):
+            ms = zenz.calibrate(converter, None, reverse)
+        self.assertAlmostEqual(ms, 100)
 
 
 class CalibrationLadderTest(unittest.TestCase):
