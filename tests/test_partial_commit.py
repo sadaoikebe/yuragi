@@ -14,8 +14,7 @@ from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
-from tests.real_dictionary import real_lex
-from tests.support import Keys, type_plain
+from tests.support import Keys, small_lex, type_plain
 
 VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
@@ -25,7 +24,50 @@ VK_CAPITAL, VK_PAGEUP = 0x14, 0x21
 class PartialCommitTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = small_lex("""
+わたし 私 263
+は は 0 283
+がっこう 学校 3258
+がっこう 月光 4000
+に に 0 327
+いく 行く 9 731
+い 行 100 701
+き き 0 1391
+き 木 1000
+か か 0 325
+か 蚊 1000
+え 絵 1000
+え 江 1500
+いえ 家 1
+でる 出る 41 684
+がえ 替え 4067 701
+れんらく 連絡 3108 1841
+する する 0 633
+なる 成る 0 765
+みる 見る 1496 680
+こうせい 構成 3100 1841
+こうせい 厚生 3172 1922
+を を 0 379
+じゅう 十 2521 2051
+まん 万 15 2047
+えん 円 1685 2011
+ご 御 334 2620
+たんとうしゃ 担当者 4683 1841
+め 目 12
+が が 0 332
+っ っ 0 1386
+こう 光 4139
+で で 0 349
+ぐ 具 1000
+とうきょう 東京 1000
+かんじ 漢字 1000
+かんじ 感じ 1000
+かんじ 幹事 1000
+かんじ 監事 1000
+かんじ 完治 1000
+かんじ 換字 1000
+かんじ 莞爾 1000
+かんじ 寛治 1000""")
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

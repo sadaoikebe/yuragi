@@ -8,11 +8,23 @@ from yuragi.chord.keys import VK_CONVERT, VK_ESCAPE, VK_NONCONVERT, VK_SPACE
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table
-from tests.real_dictionary import real_lex
-from tests.support import Keys, ingest_plain, kana_session, type_plain
+from tests.support import Keys, ingest_plain, kana_session, small_lex, type_plain
 
 VK_F6, VK_F7, VK_F10, VK_SEMICOLON = 0x75, 0x76, 0x79, 0xBA
 VK_BACK, VK_LEFT, VK_RIGHT, VK_HOME = 0x08, 0x25, 0x27, 0x24
+LEX = small_lex("""
+きょう 京 2000
+きょう 今日 1000
+きょう 強 3000
+きょう 凶 3000
+きょう 経 3000
+がっこう 学校 1000
+は は 0 283
+に に 0 283
+いく 行く 1000
+い 行 1000
+とうき 陶器 1000
+くじ 籤 1000""")
 
 
 def type_keys(s, keys):
@@ -32,7 +44,7 @@ def tap(s, vk):
 class KanaKeyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = LEX
 
     def session(self):
         return ImeSession(_lex=self.lex)
@@ -55,7 +67,7 @@ class KanaKeyTest(unittest.TestCase):
         k.chords("h")
         k.idle()
         self.assertEqual([k.tap(VK_F7)["composition"] for _ in range(5)],
-                         ["クジンバ", "クジンミ", "クアンミ", "クアンバ", "クジンバ"])
+                         ["クジンバ", "クジンミ", "クアンバ", "クアンミ", "クジンバ"])
         self.assertEqual([k.tap(VK_F6)["composition"] for _ in range(2)], ["くじんば", "くじんみ"])
 
     def test_f10_gives_the_typed_keys_and_cycles_case(self):
@@ -68,7 +80,7 @@ class KanaKeyTest(unittest.TestCase):
 
 class JisKeyTest(unittest.TestCase):
     def test_convert_starts_conversion_and_shift_convert_opens_its_candidates(self):
-        k = Keys(kana_session(real_lex()))
+        k = Keys(kana_session(LEX))
         input_text = k.letters("jak")["composition"]
         passed = k.down(VK_CONVERT, ["shift"])
         k.up(VK_CONVERT, ["shift"])
@@ -92,7 +104,7 @@ class JisKeyTest(unittest.TestCase):
         self.assertEqual(k.tap(VK_SPACE)["composition"], "とうき")
 
     def test_converted_nonconvert_restyles_the_focused_clause_and_a_literal_keeps_its_rows(self):
-        k = Keys(kana_session(real_lex()))
+        k = Keys(kana_session(LEX))
         k.letters("jak")  # とうき
         k.tap(ord("1"))
         k.tap(ord("2"))
@@ -106,7 +118,7 @@ class JisKeyTest(unittest.TestCase):
                          (["１２", "12", "一二", "十二"], 1))
 
         # A clause that Backspace left as typed text, revisited: its own rows.
-        s = kana_session(real_lex())
+        s = kana_session(LEX)
         type_plain(s, "きょうはがっこうにいく")
         k = Keys(s)
         k.tap(VK_SPACE)
@@ -117,7 +129,7 @@ class JisKeyTest(unittest.TestCase):
         self.assertEqual(k.tap(VK_CONVERT, ["shift"])["candidates"], ["行"])
 
     def test_the_spelling_left_before_more_input_is_one_clause(self):
-        s = kana_session(real_lex())
+        s = kana_session(LEX)
         k = Keys(s)
         ingest_plain(s, "がい")
         k.tap(VK_NONCONVERT)

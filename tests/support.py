@@ -1,13 +1,23 @@
 """Shared test helpers: input typed on plain faces, and key events with a clock."""
 from __future__ import annotations
 
+from array import array
+
 from yuragi.chord.fsm import Plain
+from yuragi.ime import bunsetsu
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession, Literal
-from yuragi.lattice.mozc_dict import MozcLex
+from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex, finish_lex
 from yuragi.lattice.table import load_table
 
 VK_RETURN, VK_SPACE, VK_DOWN = 0x0D, 0x20, 0x28
+
+# Importing this module replaces Mozc's id.def with the parts of speech the tests use.
+bunsetsu._pos_names = lambda: {
+    12: ("副詞",), **dict.fromkeys((680, 684, 701, 731, 765), ("動詞", "自立")),
+    1841: ("名詞", "サ変接続"), 1851: ("名詞", "一般"), 1922: ("名詞", "固有名詞", "人名", "名"),
+    1931: ("名詞", "形容動詞語幹"), 2011: ("名詞", "接尾", "助数詞"), 2044: ("名詞", "数"),
+    2047: ("名詞", "数"), 2051: ("名詞", "数"), 2121: ("名詞", "非自立"), 2620: ("接頭詞", "名詞接続")}
 
 
 def plain_table(reading: str) -> dict:
@@ -32,6 +42,19 @@ def kana_session(lex: MozcLex | None = None) -> ImeSession:
     """The NICOLA layout; without lex, no dictionary rows (kana stays kana)."""
     return ImeSession(_table=load_table(),
                       _lex=lex if lex is not None else MozcLex({}, set(), [0] * 4, 2))
+
+
+def small_lex(words: str) -> MozcLex:
+    """Lines of "reading surface cost [part of speech]", a noun by default."""
+    size = 2672  # as many parts of speech as Mozc
+    lex = MozcLex({}, set(), array("h", [1]) * size * size, size)
+    for line in words.strip().splitlines():
+        reading, surface, cost, *pos = line.split()
+        pos = int(pos[0]) if pos else DEFAULT_NOUN_ID
+        lex.by_reading.setdefault(reading, []).append(Entry(surface, reading, pos, pos, int(cost)))
+        lex.prefixes.update(reading[:i] for i in range(1, len(reading) + 1))
+    finish_lex(lex)
+    return lex
 
 
 class Keys:

@@ -11,8 +11,7 @@ from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.ime.symbol_readings import load_symbols, parse
-from tests.real_dictionary import real_lex
-from tests.support import type_plain
+from tests.support import small_lex, type_plain
 
 VK_RETURN, VK_DELETE = 0x0D, 0x2E
 
@@ -29,11 +28,20 @@ class ParseTest(unittest.TestCase):
 
 
 class SymbolConversionTest(unittest.TestCase):
-    """With the real dictionary."""
+    """Each reading has more words than the rows before the symbols."""
 
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = small_lex("""
+きごう 機甲 2000
+きごう 記号 1000
+きごう 揮毫 2000
+きごう 寄港 2000
+きごう 帰港 2000
+かっこ 確固 2000
+かっこ 括弧 1000
+かっこ 各個 2000
+かっこ 格好 2000""")
         cls.symbols = load_symbols()
 
     def setUp(self):

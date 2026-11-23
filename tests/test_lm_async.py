@@ -26,7 +26,7 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ConversionRequest, ImeSession, Literal
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table, reverse_table
-from tests.real_dictionary import real_lex
+from tests.support import small_lex
 
 # Up of an unclassified key: a no-op for every session state. Sent last to both
 # sides so the subject has one request in which to resolve what is still pending.
@@ -309,7 +309,15 @@ class LoadRetryTest(unittest.TestCase):
 class DeadlineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = small_lex("""
+きしゃ 帰社 2000
+きしゃ 記者 1000
+きしゃ 汽車 2000
+きしゃ 貴社 2000
+きしゃ 喜捨 2000
+かいせい 改正 1000
+かいせい 快晴 2000
+う 鵜 1000""")
 
     def session(self):
         return ImeSession(_table=load_table(), _lex=self.lex)

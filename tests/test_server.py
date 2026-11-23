@@ -8,6 +8,7 @@ from yuragi.ime import server
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
+from tests import support  # noqa: F401 (Mozc の品詞名)
 
 
 class ServerTest(unittest.TestCase):

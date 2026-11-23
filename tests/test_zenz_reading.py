@@ -7,9 +7,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
-from tests.real_dictionary import real_lex
 from tests.test_document_context import SPACE
-from tests.support import Keys
+from tests.support import Keys, small_lex
 from tests.test_lm_async import Clock, ManualWorker, TERMINAL, Typist
 from yuragi.ime.lm_async import ConnectionPipeline, LmWorker
 from yuragi.ime.server import dispatch
@@ -24,6 +23,19 @@ START, CONTEXT, END = "\uee00", "\uee02", "\uee01"
 VOCAB_SIZE = 32
 MESSAGE = "メッセージを送るとすぐに"
 CHILDHOOD = "子どものころの"
+LEX = small_lex("""
+きおく 気遅 2000
+きおく 記憶 1000
+きおく 記臆 2000
+きおく 機奥 2000
+きおく 帰奥 2000
+きどく 既読 2000
+うつり 移り 1000
+うつり 映り 1000
+うつり 写り 1000
+うつり 遷り 1000
+うつ 鬱 3000
+だ だ 0 283""")
 
 
 class PromptLogits:
@@ -149,7 +161,7 @@ class PromptLikelihoodTest(unittest.TestCase):
 
 class ContextReadingTest(unittest.TestCase):
     def setUp(self):
-        self.sess = ImeSession(_table=load_table(), _lex=real_lex())
+        self.sess = ImeSession(_table=load_table(), _lex=LEX)
         self.reviewer = Mock()
         self.reviewer.candidate_nll.side_effect = lambda context, rows: [0.0] * len(rows)
         self.reviewer.reading_nll.side_effect = lambda context, readings: [

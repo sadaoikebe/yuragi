@@ -16,8 +16,7 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ConversionRequest, ImeSession
 from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry
 from yuragi.lattice.table import load_table
-from tests.real_dictionary import real_lex
-from tests.support import type_plain
+from tests.support import small_lex, type_plain
 
 VK_TAB, VK_RETURN, VK_DELETE = 0x09, 0x0D, 0x2E
 VK_SPACE, VK_ESCAPE = 0x20, 0x1B
@@ -35,7 +34,22 @@ def press(s, vk, mods=None):
 class Fixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = small_lex("""
+まいなす マイナス 1000
+でしょう でしょう 0 283
+とう 当 1000
+きょ 虚 1000
+とうきょう 東京 1000
+とうきょうと 東京都 2000
+そら 空 1000
+の の 0 283
+てん 点 8 2121
+のてんぶろ 野天風呂 1000
+こうせい 構成 1000
+こうせい 厚生 2000
+こうせい 校正 3000
+こうせい 公正 4000
+この この 0 2662""")
         cls.index = P.ReadingIndex()
 
     def session(self, *, learning=None, prediction="tab"):
@@ -89,7 +103,7 @@ class TabGestureTest(Fixture):
             type_plain(s, "こうせい")
             press(s, VK_SPACE)
             press(s, VK_SPACE)
-            self.assertEqual(press(s, ord("3"))["composition"], "公正")  # not the first row
+            self.assertEqual(press(s, ord("4"))["composition"], "公正")  # not the first row
             press(s, VK_RETURN)
 
             s = self.session(learning=LearningStore(path))

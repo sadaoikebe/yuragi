@@ -23,6 +23,7 @@ from yuragi.ime.zenz import ZenzConverter
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex
 from yuragi.lattice.table import load_table
+from tests import support  # noqa: F401 (Mozc の品詞名)
 
 def loaded_session():
     # A has plain=う. A confirmation of the initially second row must change the best.

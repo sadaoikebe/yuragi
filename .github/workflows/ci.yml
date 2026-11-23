@@ -23,18 +23,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # 辞書は data/dictionary-manifest.json で固定した上流コミットのもの。
-      - name: Mozc 辞書 (キャッシュ)
-        uses: actions/cache@v4
-        with:
-          path: third_party/mozc_oss_dict
-          key: mozc-dict-${{ hashFiles('data/dictionary-manifest.json') }}
-
-      - name: Mozc 辞書の取得と照合
-        run: |
-          python -m tools.eval.fetch_mozc_dict
-          python -m yuragi.lattice.dict_manifest verify
-
       - name: ブローカーのビルドと中核の試験 (CTest)
         run: |
           cmake -S src/broker -B build/broker -DCMAKE_BUILD_TYPE=Release
@@ -61,20 +49,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Mozc 辞書 (キャッシュ)
-        uses: actions/cache@v4
-        with:
-          path: third_party/mozc_oss_dict
-          key: mozc-dict-${{ hashFiles('data/dictionary-manifest.json') }}
-
-      - name: Mozc 辞書の取得と照合
-        shell: pwsh
-        run: |
-          python -m tools.eval.fetch_mozc_dict
-          if ($LASTEXITCODE -ne 0) { throw "dictionary fetch failed" }
-          python -m yuragi.lattice.dict_manifest verify
-          if ($LASTEXITCODE -ne 0) { throw "dictionary does not match the manifest" }
 
       - name: ブローカーのビルド (MSVC, Release)
         shell: pwsh

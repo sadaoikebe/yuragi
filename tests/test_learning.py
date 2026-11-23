@@ -13,8 +13,7 @@ from yuragi.ime.learning import LearningStore
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.ime import learning_admin
-from tests.real_dictionary import real_lex
-from tests.support import type_plain
+from tests.support import small_lex, type_plain
 
 VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE, VK_F7 = 0x0D, 0x20, 0x26, 0x28, 0x2E, 0x76
 
@@ -22,7 +21,25 @@ VK_RETURN, VK_SPACE, VK_UP, VK_DOWN, VK_DELETE, VK_F7 = 0x0D, 0x20, 0x26, 0x28, 
 class LearningTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = small_lex("""
+こうせい 構成 1000
+こうせい 公正 2000
+こうせい 厚生 3000
+こうせい 恒星 4000
+きかん 帰還 1000
+きかん 旗艦 2000
+きのう 昨日 1000
+きょう 今日 1000
+は は 0 283
+も も 0 283
+いい 良い 1000
+てんき 天気 1000
+いち 市 3000
+いち 1 0 2044
+ようか 養家 3000
+ようか 8日 0 2046
+きしゃ 記者 1000
+きしゃ 汽車 2000""")
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -90,7 +107,7 @@ class LearningTest(unittest.TestCase):
         self.assertIn(b'"prev"', self.path.read_bytes())
 
     def test_penalized_numeral_can_be_chosen_and_learned(self):
-        for reading, first, surface in (("いち", "市", "1"), ("ようか", "ようか", "8日")):
+        for reading, first, surface in (("いち", "市", "1"), ("ようか", "養家", "8日")):
             with self.subTest(reading=reading):
                 s = self.session()
                 self.assertEqual(self.choose(s, reading, reading, surface), first)

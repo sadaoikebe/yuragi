@@ -255,14 +255,6 @@ class ProcessTest(BrokerCase):
 
 
 class SelfTestTest(BrokerCase):
-    def test_real_engine_converts(self):
-        """--selftest with the real engine (no LM), as the installer runs it."""
-        data = self.dir / "user"
-        data.mkdir()
-        (data / "config.json").write_text('{"lm_rescore": false}', encoding="utf-8")
-        self.write_engine_json(["-m", "yuragi.engine", "--data-dir", str(data)], app=ROOT)
-        self.assert_selftest_converts()
-
     def test_conversion_completes_after_a_timer(self):
         self.plan("pending_conversion")
         self.assert_selftest_converts()

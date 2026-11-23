@@ -7,8 +7,7 @@ import math
 from types import SimpleNamespace
 import unittest
 
-from tests.real_dictionary import real_lex
-from tests.support import ingest_plain
+from tests.support import ingest_plain, small_lex
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import DEFAULT_MODEL, ZenzConverter, ZenzModel, prompt, spell
@@ -40,7 +39,16 @@ class Disagrees:
 class ReviewBudgetTest(unittest.TestCase):
     def test_later_runs_get_their_first_review_after_the_budget(self):
         model = Disagrees({"げんこうの": ("原稿の", "現行の"), "こうせい": ("構成", "厚生")})
-        s = ImeSession(_lex=real_lex(), _table=load_table(),
+        s = ImeSession(_lex=small_lex("""
+げんこう 現行 2000
+げんこう 原稿 1000
+げんこう 言行 2000
+げんこう 元寇 2000
+の の 0 283
+こうせい 公正 2000
+こうせい 構成 1000
+こうせい 厚生 2000
+こうせい 校正 2000"""), _table=load_table(),
                        lm=ZenzConverter(model, review_budget_ms=0))
         text = "げんこうの、こうせい"
         s.start_input(None, None, disconnected=True)

@@ -11,8 +11,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from tests.real_dictionary import real_lex
-from tests.support import Keys, ingest_plain
+from tests.support import Keys, ingest_plain, small_lex
 from tests.test_engine_sessions import EngineCase
 from tests.test_lm_async import ManualWorker
 from yuragi.ime import learning_admin
@@ -27,6 +26,21 @@ from yuragi.lattice.table import load_table
 
 ENTER, SPACE, ESC = 0x0D, 0x20, 0x1B
 LEFT, RIGHT, DOWN, NEXT, DELETE = 0x25, 0x27, 0x28, 0x22, 0x2E
+LEX = small_lex("""
+げんこう 現行 4652
+げんこう 原稿 4713
+こうせい 厚生 3172 1922
+こうせい 構成 3100 1841
+こうせい 公正 3717 1931
+こうせい 校正 5033 1841
+かいぎ 会議 3638 1841
+しりょう 資料 3665
+の の 0 433
+の ノ 3216 2644
+の 野 4907
+が が 0 332
+を を 0 379
+で で 0 349""")
 
 
 class Review:
@@ -56,7 +70,7 @@ def word(reading, surface, *, cost=5200, kind="dictionary"):
 class ContextLearningTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lex = real_lex()
+        cls.lex = LEX
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -588,7 +602,7 @@ class ContextLearningTest(unittest.TestCase):
 class LearningConnectionTest(EngineCase):
     def test_only_the_connection_that_confirmed_the_left_bunsetsu_uses_it(self):
         store = LearningStore(self.dir / "learning.jsonl")
-        lex = real_lex()
+        lex = LEX
         store.confirm([word("げんこうの", "原稿の"), word("こうせい", "校正")], lex)
         store.confirm([word("こうせい", "構成")], lex)
         loaded = ImeSession(_table=load_table(), _lex=lex, _learning=store)
@@ -611,7 +625,7 @@ class LearningConnectionTest(EngineCase):
 
     def test_typing_somewhere_else_drops_the_left_bunsetsu(self):
         store = LearningStore(self.dir / "learning.jsonl")
-        lex = real_lex()
+        lex = LEX
         store.confirm([word("げんこうの", "原稿の"), word("こうせい", "校正")], lex)
         store.confirm([word("こうせい", "構成")], lex)
         loaded = ImeSession(_table=load_table(), _lex=lex, _learning=store)
