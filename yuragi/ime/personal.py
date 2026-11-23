@@ -18,15 +18,17 @@ from pathlib import Path
 import sys
 
 from yuragi.lattice.expand import is_literal_face
-from yuragi.lattice.mozc_dict import Entry, MozcLex
+from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_id
 
 DEFAULT_PERSONAL_PATH = Path.home() / ".yuragi-ime" / "personal_lexicon.jsonl"
 # The default cost of a registered word (CONVERSION「辞書の重ね方」).
 DEFAULT_COST = 2600
-# Mozc id.def; a short list of what a user registers, by name.
-POS_IDS = {
-    "名詞": 1851, "サ変名詞": 1841, "形容動詞": 1931, "固有名詞": 1920,
-    "人名": 1921, "名": 1922, "姓": 1923, "地名": 1924, "組織": 1929, "副詞": 12,
+# A short list of what a user registers: its name in Mozc's id.def.
+POS_NAMES = {
+    "名詞": "名詞,一般", "サ変名詞": "名詞,サ変接続", "形容動詞": "名詞,形容動詞語幹",
+    "固有名詞": "名詞,固有名詞,一般", "人名": "名詞,固有名詞,人名,一般", "名": "名詞,固有名詞,人名,名",
+    "姓": "名詞,固有名詞,人名,姓", "地名": "名詞,固有名詞,地域,一般", "組織": "名詞,固有名詞,組織",
+    "副詞": "副詞,一般",
 }
 
 
@@ -39,7 +41,7 @@ class Word:
 
     @property
     def lid(self) -> int:
-        return POS_IDS[self.pos]
+        return pos_id(POS_NAMES[self.pos])
 
 
 def validate(reading: str, surface: str, pos: str) -> None:
@@ -47,8 +49,8 @@ def validate(reading: str, surface: str, pos: str) -> None:
         raise ValueError("読みは、ひらがなと長音記号（ー）で入力してください")
     if not surface or surface != surface.strip():
         raise ValueError("単語を入力してください（前後に空白は入れられません）")
-    if pos not in POS_IDS:
-        raise ValueError(f"品詞「{pos}」は使えません。次から選んでください: {'、'.join(POS_IDS)}")
+    if pos not in POS_NAMES:
+        raise ValueError(f"品詞「{pos}」は使えません。次から選んでください: {'、'.join(POS_NAMES)}")
 
 
 def read_words(path: Path) -> list[Word]:

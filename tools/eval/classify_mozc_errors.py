@@ -38,7 +38,7 @@ from yuragi.lattice import mozc_dict
 from yuragi.lattice.decode import DecodeResult, Piece
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import (BOS_ID, CACHE_DIR, DICT_DIR, MAX_WORD_MORA, POS_KEEP, ROOT,
-                                       UNK_COST, UNK_LID, Entry, MozcLex, finish_lex)
+                                       UNK_COST, Entry, MozcLex, finish_lex, pos_ids)
 from yuragi.lattice.table import DATA, load_table
 from yuragi.lattice.token_viterbi import (BOUNDARY_RID, Word, decode_tokens, end_cost,
                                            nbest_tokens, word_cost)
@@ -187,7 +187,8 @@ def constrained_path(reading: str, surface: str, lex: MozcLex,
                 if policy != "nbest" or e.cost < UNK_COST:
                     arcs.append(Word(i, end, e))
         if policy == "backoff" and not is_literal_face(ch) and not lex.by_reading.get(ch):
-            arcs.append(Word(i, i + 1, Entry(ch, ch, UNK_LID, UNK_LID, UNK_COST), unknown=True))
+            unknown = pos_ids().unknown
+            arcs.append(Word(i, i + 1, Entry(ch, ch, unknown, unknown, UNK_COST), unknown=True))
         for (out, rid), (cost, _, _) in list(layer.items()):
             for w in arcs:
                 if not surface.startswith(w.entry.surface, out):

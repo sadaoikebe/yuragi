@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import lru_cache
 from heapq import heappop, heappush
 from itertools import chain, count, islice
 from typing import Iterator
@@ -11,7 +10,7 @@ from typing import Iterator
 from yuragi.lattice.alternation import Plan, admits, after
 from yuragi.lattice.decode import Piece
 from yuragi.lattice import mozc_dict
-from yuragi.lattice.mozc_dict import BOS_ID, UNK_COST, MozcLex, require_dict_files
+from yuragi.lattice.mozc_dict import BOS_ID, UNK_COST, MozcLex
 from yuragi.lattice.token_viterbi import BOUNDARY_RID, end_cost, spans_from, word_cost
 from yuragi.text import katakana
 
@@ -28,16 +27,8 @@ SYMBOL_OFFSET = 3
 SYMBOL_HEAD = 6
 
 
-@lru_cache(maxsize=1)
-def _pos_names() -> dict[int, tuple[str, ...]]:
-    directory = mozc_dict.DICT_DIR  # read at call time so --dict-dir overrides apply
-    require_dict_files(["id.def"], directory)
-    return {int(i): tuple(name.strip().split(",")) for line in (directory / "id.def").read_text(
-        encoding="utf-8").splitlines() for i, name in [line.split(None, 1)]}
-
-
 def content(lid: int) -> bool:
-    p = _pos_names().get(lid, ("",))
+    p = mozc_dict.pos_names().get(lid, ("",))
     if p[0] in ("名詞", "動詞", "形容詞"):
         return p[1] not in ("接尾", "非自立")
     return p[0] in ("副詞", "連体詞", "接続詞", "感動詞", "接頭詞")
@@ -136,7 +127,7 @@ def _joins(previous: Piece, current: Piece, lex: MozcLex | None) -> bool:
     if previous.learned:
         return False
     base = lex.base_pos if lex is not None else int
-    names = _pos_names()
+    names = mozc_dict.pos_names()
     left = names.get(base(previous.rid), ("",))
     right = names.get(base(current.lid), ("",))
     if left[0] == "接頭詞":

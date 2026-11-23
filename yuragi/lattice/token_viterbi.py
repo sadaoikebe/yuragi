@@ -17,7 +17,7 @@ from typing import Literal
 
 from .alternation import FREE, Plan, Sides, admits, after
 from .decode import DecodeResult, Piece
-from .mozc_dict import BOS_ID, MAX_WORD_MORA, POS_KEEP, UNK_COST, UNK_LID, Entry, MozcLex
+from .mozc_dict import BOS_ID, MAX_WORD_MORA, POS_KEEP, UNK_COST, Entry, MozcLex, pos_ids
 
 # Distinguish an empty run after a literal from a real dictionary RID=0.
 # Empty runs have no BOS->EOS cost, like a run split at a literal.
@@ -73,7 +73,8 @@ def spans_from(tokens: list[dict], i: int, lex: MozcLex, learning, plan: Plan) -
             out.append(Word(i, i + 1, Entry(kana, kana, BOS_ID, BOS_ID, 0), literal=True,
                             sides=sides))
         elif kana not in have_one:
-            out.append(Word(i, i + 1, Entry(kana, kana, UNK_LID, UNK_LID, UNK_COST), True,
+            unknown = pos_ids().unknown
+            out.append(Word(i, i + 1, Entry(kana, kana, unknown, unknown, UNK_COST), True,
                             sides=sides))
     if learning is not None:
         out.extend(Word(i, end, e, learned=True, sides=plan.read(i, end, e.reading))

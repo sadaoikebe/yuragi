@@ -32,7 +32,7 @@ from . import broker_client, config, keymap, learning_admin, personal
 from .keymap_ui import KeyTab
 from .learning import LearningStore
 
-POS_NAMES = list(personal.POS_IDS)
+POS_NAMES = list(personal.POS_NAMES)
 RESTART_NOTE = "変換エンジンを再起動すると反映されます（「状態」タブ）。"
 # The product icon (assets/icon/THEME.md). The installed app is the source tree,
 # so the same relative place holds there too.

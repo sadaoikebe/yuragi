@@ -11,6 +11,7 @@ from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import MozcLex
 from yuragi.lattice.table import load_table
+from tests import support  # noqa: F401 (Mozc の品詞名)
 
 
 def key_cases():
@@ -56,6 +57,5 @@ def key_cases():
 
 
 if __name__ == "__main__":
-    with patch("yuragi.ime.bunsetsu._pos_names", return_value={1: ("その他", "間投")}):
-        cases = "".join(key_cases())
+    cases = "".join(key_cases())
     subprocess.run([sys.argv[1], "--key-cases"], input=cases, text=True, check=True)

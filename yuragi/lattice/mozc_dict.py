@@ -11,6 +11,7 @@ import pickle
 import re
 import sys
 from dataclasses import dataclass, replace
+from functools import cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
@@ -53,27 +54,65 @@ class DictionaryFormatError(ValueError):
 
 class CacheWriteError(OSError):
     """The rebuilt dictionary cache could not be written (disk space etc.)."""
-DEFAULT_NOUN_ID = 1851  # 名詞,一般 in Mozc id.def
-
-BOS_ID = 0
-NUMBER_ID = 2044  # 名詞,数,アラビア数字
-COUNTER_IDS = range(2011, 2019)  # 名詞,接尾,助数詞 (including 月)
-NUMBER_UNIT_IDS = range(2047, 2056)  # 名詞,数,漢数字 for units like 千 and 百
-MONTH_COUNTER_ID = 2016
-PARTICLE_IDS = range(268, 434)  # 助詞
-RANGE_PARTICLE_IDS = (314, 368)  # まで and から
+BOS_ID = 0  # BOS/EOS: Mozc's format fixes it as row and column 0 of the connection matrix
 ARITHMETIC_OPERATORS = frozenset(("プラス", "マイナス"))
 # An unqualified numeral gets a larger penalty at the end of a run. Keep the
 # smaller penalty inside a run so more compound candidates stay in range.
 DIGIT_PENALTY = 2500
 UNQUALIFIED_NUMERAL_PENALTY = 3500
-UNK_LID = 1  # その他,間投
 UNK_COST = 12000
 MAX_WORD_MORA = 16
 POS_KEEP = 12  # surviving (rid, score) per token position
 
 NumeralPos = tuple[Literal["digit", "day", "month", "after_month", "operator",
                           "after_operator"], int]
+
+
+@cache
+def pos_names() -> dict[int, tuple[str, ...]]:
+    """The part-of-speech names of id.def, padded to its 7 fields."""
+    require_dict_files(["id.def"], DICT_DIR)  # DICT_DIR at call time: --dict-dir applies
+    return {int(i): (tuple(name.strip().split(",")) + ("*",) * 7)[:7]
+            for line in (DICT_DIR / "id.def").read_text(encoding="utf-8").splitlines()
+            for i, name in [line.split(None, 1)]}
+
+
+@dataclass(frozen=True)
+class PosIds:
+    """The parts of speech the conversion treats specially, looked up by name in id.def."""
+    noun: int  # 名詞,一般: a user's word
+    unknown: int  # その他,間投: an unknown character
+    number: int  # 名詞,数,アラビア数字
+    counters: frozenset[int]  # 名詞,接尾,助数詞 (including 月)
+    month_counter: int
+    number_units: frozenset[int]  # 名詞,数,漢数字 for units like 千 and 百
+    particles: frozenset[int]  # 助詞
+    range_particles: frozenset[int]  # まで and から
+
+
+def pos_set(prefix: str) -> frozenset[int]:
+    """The IDs whose id.def name starts with these fields."""
+    fields = tuple(prefix.split(","))
+    return frozenset(i for i, name in pos_names().items() if name[:len(fields)] == fields)
+
+
+def pos_id(name: str) -> int:
+    """The one ID of this id.def name; the fields left out are *."""
+    (found,) = pos_set(",".join((tuple(name.split(",")) + ("*",) * 7)[:7]))
+    return found
+
+
+@cache
+def pos_ids() -> PosIds:
+    return PosIds(
+        noun=pos_id("名詞,一般"),
+        unknown=pos_id("その他,間投"),
+        number=pos_id("名詞,数,アラビア数字"),
+        counters=pos_set("名詞,接尾,助数詞"),
+        month_counter=pos_id("名詞,接尾,助数詞,*,*,*,月"),
+        number_units=pos_set("名詞,数,漢数字") - pos_set("名詞,数,漢数字,*,*,*,*"),
+        particles=pos_set("助詞"),
+        range_particles=pos_set("助詞,副助詞,*,*,*,*,まで") | pos_set("助詞,格助詞,一般,*,*,*,から"))
 
 
 @dataclass(slots=True)
@@ -103,14 +142,15 @@ class MozcLex:
         prev_kind, rid = self.numeral_pos[rid - size] if rid >= size else (None, rid)
         next_kind, lid = self.numeral_pos[lid - size] if lid >= size else (None, lid)
         cost = self.connect[rid * size + lid]
-        if (prev_kind == "digit" and next_kind != "operator" and lid not in COUNTER_IDS
-                and lid not in NUMBER_UNIT_IDS and lid not in RANGE_PARTICLE_IDS):
+        ids = pos_ids()
+        if (prev_kind == "digit" and next_kind != "operator" and lid not in ids.counters
+                and lid not in ids.number_units and lid not in ids.range_particles):
             cost += UNQUALIFIED_NUMERAL_PENALTY if lid == BOS_ID else DIGIT_PENALTY
-        if prev_kind == "day" and lid not in PARTICLE_IDS:
+        if prev_kind == "day" and lid not in ids.particles:
             cost += UNQUALIFIED_NUMERAL_PENALTY
         # The alternate arcs have the same word cost and bypass the outgoing
         # penalty in these contexts. Otherwise the regular arc stays cheaper.
-        if next_kind == "after_month" and prev_kind != "month" and rid != MONTH_COUNTER_ID:
+        if next_kind == "after_month" and prev_kind != "month" and rid != ids.month_counter:
             cost += UNQUALIFIED_NUMERAL_PENALTY + 1
         if next_kind == "after_operator" and prev_kind != "operator":
             cost += UNQUALIFIED_NUMERAL_PENALTY + 1
@@ -124,7 +164,10 @@ def left_id_after(literal: str, lex: MozcLex | None) -> int:
     Small test lexicons have no Mozc numeral POS and keep the boundary.
     """
     digit = literal and ("0" <= literal[-1] <= "9" or "０" <= literal[-1] <= "９")
-    return NUMBER_ID if digit and lex is not None and NUMBER_ID < lex.pos_size else BOS_ID
+    if not digit or lex is None:
+        return BOS_ID
+    number = pos_ids().number
+    return number if number < lex.pos_size else BOS_ID
 
 
 # What load_lex parses to build the cache. A missing one must stop the build:
@@ -209,13 +252,14 @@ def apply_numeral_context(lex: MozcLex) -> None:
     Use the original cost when adjacent words indicate a number or date.
     Assign private IDs only to the connection sides that need the distinction.
     """
+    number = pos_ids().number
     left: list[tuple[Entry, NumeralPos]] = []
     right: list[tuple[Entry, NumeralPos]] = []
     for bucket in lex.by_reading.values():
         alternatives = []
         for entry in bucket:
             surface = entry.surface
-            if entry.rid == NUMBER_ID and len(surface) == 1 and "0" <= surface <= "9":
+            if entry.rid == number and len(surface) == 1 and "0" <= surface <= "9":
                 right.append((entry, ("digit", entry.rid)))
                 alternate = replace(entry)
                 left.append((alternate, ("after_operator", entry.lid)))
@@ -254,12 +298,13 @@ def apply_numerals(lex: MozcLex) -> None:
     The Mozc dictionary has only the single digits as Arabic numerals, and a
     digit cannot follow a digit (13820), so じゅうさん could never be 13:
     the lattice took a counter reading (さんじゅう as 3+重, じゅうご as 中5)
-    instead. Like a numeral POS word, the new entries connect as 数 (NUMBER_ID).
+    instead. Like a numeral POS word, the new entries connect as 数 (PosIds.number).
     """
+    number = pos_ids().number
     for n in range(10, NUMERAL_MAX + 1):
         reading = numeral_reading(n)
         bucket = lex.by_reading.setdefault(reading, [])
-        bucket.append(Entry(str(n), reading, NUMBER_ID, NUMBER_ID,
+        bucket.append(Entry(str(n), reading, number, number,
                             NUMERAL_COST + NUMERAL_COST_PER_DIGIT * (len(str(n)) - 2)))
         bucket.sort(key=lambda e: e.cost)
         for i in range(1, len(reading) + 1):

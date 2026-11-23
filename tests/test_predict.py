@@ -14,7 +14,7 @@ from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import PersonalLexicon, add_word, remove_word
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ConversionRequest, ImeSession
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry
+from yuragi.lattice.mozc_dict import Entry, pos_ids
 from yuragi.lattice.table import load_table
 from tests.support import small_lex, type_plain
 
@@ -213,7 +213,7 @@ class AutomaticPredictionTest(Fixture):
         self.assertEqual((closed["phase"], closed["composition"]), ("empty", ""))
 
     def test_a_changed_personal_dictionary_is_visible_to_the_next_preview(self):
-        entry = Entry("登記", "とうき", DEFAULT_NOUN_ID, DEFAULT_NOUN_ID, 3000)
+        entry = Entry("登記", "とうき", pos_ids().noun, pos_ids().noun, 3000)
         self.s._lex = replace(self.lex, by_reading={"とうき": [entry]}, prefixes={"と", "とう", "とうき"})
         self.s.predict_index = P.ReadingIndex()
         self.s.predict_index.keys(self.s._lex)

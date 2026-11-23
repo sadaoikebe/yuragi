@@ -40,7 +40,7 @@ import sys
 import time
 
 from yuragi.lattice.alternation import Plan
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex
+from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_ids
 from .bunsetsu import (Bunsetsu, Candidate, ZenzEvidence, from_words, learnable, learned_row,
                        normal_bunsetsu, word_piece)
 
@@ -465,7 +465,7 @@ class LearningStore:
                 cost, lid, rid = e.cost, e.lid, e.rid
             else:
                 user_word = True
-                cost, lid, rid = USER_WORD_COST, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID
+                cost, lid, rid = USER_WORD_COST, pos_ids().noun, pos_ids().noun
         # Numeral connection IDs are local to the loaded lexicon.
         return Confirmation(c.reading, c.surface, now, cost, lex.base_pos(lid),
                             lex.base_pos(rid), user_word, prev=prev, choice=True)

@@ -21,7 +21,7 @@ from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline
 from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter, spell
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID
+from yuragi.lattice.mozc_dict import pos_ids
 from yuragi.lattice.table import load_table
 
 ENTER, SPACE, ESC = 0x0D, 0x20, 0x1B
@@ -64,7 +64,7 @@ class Review:
 
 
 def word(reading, surface, *, cost=5200, kind="dictionary"):
-    return Candidate(surface, reading, 0, DEFAULT_NOUN_ID, DEFAULT_NOUN_ID, kind, cost)
+    return Candidate(surface, reading, 0, pos_ids().noun, pos_ids().noun, kind, cost)
 
 
 class ContextLearningTest(unittest.TestCase):
@@ -490,7 +490,7 @@ class ContextLearningTest(unittest.TestCase):
         # prev, which reads as none; one from before choices were told apart,
         # no "choice"), equal times, the clock moving backwards.
         legacy = dict(reading="こうせい", surface="公正", timestamp=1000, cost=5200,
-                      lid=DEFAULT_NOUN_ID, rid=DEFAULT_NOUN_ID, left="原稿の")
+                      lid=pos_ids().noun, rid=pos_ids().noun, left="原稿の")
         with self.path.open("w", encoding="utf-8") as stream:
             for prev in (None, "", ["原稿の"]):
                 row = {**legacy, "reading": "こう", "surface": "公", "prev": prev,

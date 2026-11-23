@@ -4,20 +4,46 @@ from __future__ import annotations
 from array import array
 
 from yuragi.chord.fsm import Plain
-from yuragi.ime import bunsetsu
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession, Literal
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex, finish_lex
+from yuragi.lattice import mozc_dict
+from yuragi.lattice.mozc_dict import Entry, MozcLex, finish_lex, pos_ids
 from yuragi.lattice.table import load_table
 
 VK_RETURN, VK_SPACE, VK_DOWN = 0x0D, 0x20, 0x28
 
-# Importing this module replaces Mozc's id.def with the parts of speech the tests use.
-bunsetsu._pos_names = lambda: {
-    12: ("副詞",), **dict.fromkeys((680, 684, 701, 731, 765), ("動詞", "自立")),
-    1841: ("名詞", "サ変接続"), 1851: ("名詞", "一般"), 1922: ("名詞", "固有名詞", "人名", "名"),
-    1931: ("名詞", "形容動詞語幹"), 2011: ("名詞", "接尾", "助数詞"), 2044: ("名詞", "数"),
-    2047: ("名詞", "数"), 2051: ("名詞", "数"), 2121: ("名詞", "非自立"), 2620: ("接頭詞", "名詞接続")}
+# Importing this module replaces Mozc's id.def with its lines for the parts of speech the tests use.
+ID_DEF = """1 その他,間投,*,*,*,*,*
+12 副詞,一般,*,*,*,*,*
+283 助詞,係助詞,*,*,*,*,は
+327 助詞,副詞化,*,*,*,*,に
+332 助詞,接続助詞,*,*,*,*,が
+349 助詞,接続助詞,*,*,*,*,で
+379 助詞,格助詞,一般,*,*,*,を
+433 助詞,連体化,*,*,*,*,の
+680 動詞,自立,*,*,一段,基本形,*
+684 動詞,自立,*,*,一段,基本形,出る
+701 動詞,自立,*,*,一段,連用形,*
+731 動詞,自立,*,*,五段・カ行促音便,基本形,行く
+765 動詞,自立,*,*,五段・ラ行,基本形,なる
+1841 名詞,サ変接続,*,*,*,*,*
+1851 名詞,一般,*,*,*,*,*
+1920 名詞,固有名詞,一般,*,*,*,*
+1921 名詞,固有名詞,人名,一般,*,*,*
+1922 名詞,固有名詞,人名,名,*,*,*
+1923 名詞,固有名詞,人名,姓,*,*,*
+1924 名詞,固有名詞,地域,一般,*,*,*
+1929 名詞,固有名詞,組織,*,*,*,*
+1931 名詞,形容動詞語幹,*,*,*,*,*
+2011 名詞,接尾,助数詞,*,*,*,*
+2016 名詞,接尾,助数詞,*,*,*,月
+2044 名詞,数,アラビア数字,*,*,*,*
+2047 名詞,数,漢数字,*,*,*,万
+2051 名詞,数,漢数字,*,*,*,十
+2121 名詞,非自立,一般,*,*,*,点
+2620 接頭詞,名詞接続,*,*,*,*,御"""
+mozc_dict.pos_names = lambda: {int(i): tuple(name.split(","))
+                               for i, name in (line.split() for line in ID_DEF.splitlines())}
 
 
 def plain_table(reading: str) -> dict:
@@ -50,7 +76,7 @@ def small_lex(words: str) -> MozcLex:
     lex = MozcLex({}, set(), array("h", [1]) * size * size, size)
     for line in words.strip().splitlines():
         reading, surface, cost, *pos = line.split()
-        pos = int(pos[0]) if pos else DEFAULT_NOUN_ID
+        pos = int(pos[0]) if pos else pos_ids().noun
         lex.by_reading.setdefault(reading, []).append(Entry(surface, reading, pos, pos, int(cost)))
         lex.prefixes.update(reading[:i] for i in range(1, len(reading) + 1))
     finish_lex(lex)

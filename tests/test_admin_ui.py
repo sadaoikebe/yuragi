@@ -15,6 +15,7 @@ from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import read_words
 from yuragi.lattice.mozc_dict import Entry, MozcLex
+from tests import support  # noqa: F401 (Mozc の品詞名)
 
 POS = 2000
 

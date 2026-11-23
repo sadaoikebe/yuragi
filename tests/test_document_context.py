@@ -14,7 +14,7 @@ from yuragi.ime.lm_async import ConnectionPipeline
 from yuragi.ime.server import dispatch, process_request
 from yuragi.ime.session import ImeSession
 from yuragi.ime.zenz import ZenzConverter
-from yuragi.lattice.mozc_dict import BOS_ID, NUMBER_ID, Entry, MozcLex
+from yuragi.lattice.mozc_dict import BOS_ID, Entry, MozcLex, pos_ids
 from yuragi.lattice.table import load_table
 
 ENTER, SPACE, BACK, ESC, DOWN = 0x0D, 0x20, 0x08, 0x1B, 0x28
@@ -22,9 +22,9 @@ HEAD, ALTERNATE = 2, 3
 
 
 def context_session():
-    size = NUMBER_ID + 1
+    size = pos_ids().number + 1
     matrix = array("h", [0]) * (size * size)
-    for rid in (HEAD, ALTERNATE, NUMBER_ID):
+    for rid in (HEAD, ALTERNATE, pos_ids().number):
         matrix[rid * size + 1] = 300  # after these, 川 is cheaper than 河
     words = {
         "と": [Entry("語尾", "と", 1, HEAD, 10), Entry("別語尾", "と", 1, ALTERNATE, 50)],
@@ -269,7 +269,7 @@ class PipelineContextTest(ContextCase):
         before, after = prefetch.request, job.request
         self.assertEqual((before.lm_context, before.parts, before.prev, before.repeat),
                          (after.lm_context, after.parts, after.prev, after.repeat))
-        self.assertEqual((before.left_id, after.left_id), (BOS_ID, NUMBER_ID))
+        self.assertEqual((before.left_id, after.left_id), (BOS_ID, pos_ids().number))
 
     def test_deadline_keeps_the_display_and_candidate_order(self):
         k = self.keys

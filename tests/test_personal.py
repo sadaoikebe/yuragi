@@ -11,7 +11,7 @@ from tests.support import Keys
 from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word
 from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession
-from yuragi.lattice.mozc_dict import DEFAULT_NOUN_ID, Entry, MozcLex
+from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_ids
 
 
 class TempFile(unittest.TestCase):
@@ -33,7 +33,7 @@ class PersonalFileTest(TempFile):
         self.assertFalse(self.path.exists())
 
     def test_personal_word_appears_in_conversion_until_removed(self):
-        size = DEFAULT_NOUN_ID + 1
+        size = pos_ids().noun + 1
         lex = MozcLex({}, set(), array("h", [0]) * (size * size), size)
         session = ImeSession(_lex=lex,
                              personal=PersonalLexicon(self.path), prediction="off")
@@ -52,8 +52,8 @@ class PersonalFileTest(TempFile):
         self.assertEqual(keys.tap(SPACE)["composition"], "かか")
 
     def test_registering_a_known_word_while_typing_puts_it_first(self):
-        size = DEFAULT_NOUN_ID + 1
-        noun = DEFAULT_NOUN_ID
+        size = pos_ids().noun + 1
+        noun = pos_ids().noun
         lex = MozcLex({"かか": [Entry("佳歌", "かか", noun, noun, 3000),
                                Entry("花歌", "かか", noun, noun, 5000)]},
                       {"か", "かか"}, array("h", [0]) * (size * size), size)
@@ -66,7 +66,7 @@ class PersonalFileTest(TempFile):
         self.assertEqual(keys.tap(SPACE)["composition"], "花歌")
 
     def test_conversion_survives_an_unreadable_personal_dictionary(self):
-        size = DEFAULT_NOUN_ID + 1
+        size = pos_ids().noun + 1
         lex = MozcLex({}, set(), array("h", [0]) * (size * size), size)
         args = argument_parser().parse_args([
             "--personal-file", str(self.path), "--learning", "off", "--prediction", "tab",
