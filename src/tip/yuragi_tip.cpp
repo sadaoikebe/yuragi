@@ -37,6 +37,7 @@
 #include "resource.h"
 #include "tip_json.h"
 #include "tip_logic.h"
+#include "tip_peer.h"
 #include "tip_popup.h"
 
 #ifndef YURAGI_TAG
@@ -371,11 +372,13 @@ static bool SamePath(const std::wstring& a, const std::wstring& b) {
 // pipe of that name while there was no broker. Its executable is yuragi-broker.exe beside
 // this DLL, or in another version's folder beside this one's (an application that stays
 // open across an update keeps the old DLL, DESIGN「インストールと更新」).
+// An application in an AppContainer (UWP, the Start menu's search box) may not open the
+// broker's process: there, the pipe's maker is checked instead (tip_peer::MadeByThisUser).
 static bool ServedByBroker(HANDLE pipe) {
     ULONG pid = 0;
     if (!GetNamedPipeServerProcessId(pipe, &pid)) return false;
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process) return false;
+    if (!process) return GetLastError() == ERROR_ACCESS_DENIED && tip_peer::MadeByThisUser(pipe);
     wchar_t path[MAX_PATH];
     DWORD size = MAX_PATH;
     bool named = QueryFullProcessImageNameW(process, 0, path, &size);

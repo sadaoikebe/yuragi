@@ -10,9 +10,11 @@
 | `tip_logic.h` | TSF に依存しない判断: 返事の読み取り（知らない項目は無視、無い項目は既定値）、食べるかどうか、返事の順序、状態と表示 |
 | `tip_popup.h` | 候補ウィンドウと 1 行の通知の描画（同じ GDI の窓を使う） |
 | `tip_json.h` | 小さな JSON 解析器（ブローカーと共有） |
+| `tip_peer.h` | パイプを作った者の確認（所有者と整合性レベル）。相手のプロセスを開けないアプリコンテナーの中で、つないだ相手を確かめる（DESIGN「通信」） |
 | `default_keymap.h`（ビルド時に生成） | 同梱の `ms-ime.json` から作る食べる表（`python -m yuragi.ime.keymap`）。ブローカーから表が届くまで使う。ビルドに Python が要る |
 | `yuragi_tip.rc` `resource.h` | 製品アイコン（`assets/icon/yuragi.ico`）を DLL に持たせる。登録時に `RegisterProfile` がこの DLL とリソース番号を渡し、入力方式の切り替え一覧に出る。言語バーの「ゆ/Y」は実行時に描くモード表示で、これとは別 |
 | `tests/tip_logic_test.cpp` `tests/tip_json_test.cpp` | 上の 2 つの単体試験（どの OS でも動く） |
+| `tests/tip_peer_test.cpp` | `tip_peer.h` の試験（Windows だけ）。自分の写しをアプリコンテナーと整合性レベル低で動かす |
 | `tests/mingw/ctffunc.h` | Linux で llvm-mingw を使って型検査するときだけの補い（製品のビルドでは使わない） |
 
 設定ファイルは `%USERPROFILE%\.yuragi-ime\tip.json`。各項目の既定値を示す。

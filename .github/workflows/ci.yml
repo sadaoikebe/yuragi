@@ -88,7 +88,7 @@ jobs:
           ctest --test-dir build/broker -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "broker core test failed" }
 
-      - name: TIP のビルド (MSVC, Release) と判断の試験 (tip_logic, tip_json)
+      - name: TIP のビルド (MSVC, Release) と判断の試験 (tip_logic, tip_json, tip_peer)
         shell: pwsh
         run: |
           cmake -S src/tip -B build/tip -A x64
