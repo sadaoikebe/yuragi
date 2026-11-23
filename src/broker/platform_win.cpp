@@ -335,6 +335,8 @@ private:
         if (message == WM_APP_CLEAR) {
             stopped_ = false;
             RemoveIcon();
+            // Its "もう一度試す" would now restart a running engine.
+            if (dialog_) SendMessageW(dialog_, TDM_CLICK_BUTTON, IDCLOSE, 0);
             return 0;
         }
         if (message == WM_APP_EXIT || message == WM_ENDSESSION) {
@@ -393,6 +395,12 @@ private:
     }
 
     void ShowDialog() {
+        // The notice can be clicked again while the dialog is open (its loop runs this window's
+        // messages): one dialog, brought to the front.
+        if (dialog_open_) {
+            if (dialog_) SetForegroundWindow(dialog_);
+            return;
+        }
         TASKDIALOG_BUTTON buttons[] = {
             {BUTTON_RETRY, L"もう一度試す"}, {BUTTON_LOGS, L"記録のフォルダを開く"}, {IDCLOSE, L"閉じる"}};
         TASKDIALOGCONFIG config = {};
@@ -404,13 +412,26 @@ private:
         config.pszContent = STOPPED_DETAIL;
         config.pButtons = buttons;
         config.cButtons = ARRAYSIZE(buttons);
+        config.pfCallback = &NotifyUi::DialogEvent;
+        config.lpCallbackData = reinterpret_cast<LONG_PTR>(this);
         int pressed = 0;
-        if (FAILED(TaskDialogIndirect(&config, &pressed, nullptr, nullptr))) return;
+        dialog_open_ = true;
+        HRESULT shown = TaskDialogIndirect(&config, &pressed, nullptr, nullptr);
+        dialog_open_ = false;
+        dialog_ = nullptr;
+        if (FAILED(shown)) return;
         if (pressed == BUTTON_RETRY) {
             PostQueuedCompletionStatus(iocp_, 0, KEY_UI, reinterpret_cast<LPOVERLAPPED>(UI_RETRY));
         } else if (pressed == BUTTON_LOGS) {
             ShellExecuteW(nullptr, L"open", logs_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
+    }
+
+    static HRESULT CALLBACK DialogEvent(HWND hwnd, UINT notification, WPARAM, LPARAM, LONG_PTR data) {
+        auto self = reinterpret_cast<NotifyUi*>(data);
+        if (notification == TDN_CREATED) self->dialog_ = hwnd;
+        if (notification == TDN_DESTROYED) self->dialog_ = nullptr;
+        return S_OK;
     }
 
     HANDLE iocp_;
@@ -420,6 +441,8 @@ private:
     UINT taskbar_created_ = 0;
     bool icon_ = false;
     bool stopped_ = false;
+    bool dialog_open_ = false;
+    HWND dialog_ = nullptr;  // once created
 };
 
 // -- the platform ----------------------------------------------------------------
