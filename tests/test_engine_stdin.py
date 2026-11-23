@@ -4,7 +4,7 @@ On Windows, while a thread waits on a synchronous read of the stdin pipe,
 loading numpy's OpenBLAS (torch's import) on another thread stalls until a
 message arrives. With nobody typing after sign-in the LM then never loaded.
 engine.Channel reserves the pipe and leaves NUL as the standard input.
-Windows only, and only where torch is installed (the dev environment).
+Windows only, and only where torch is installed (CI's Windows job installs it).
 """
 from __future__ import annotations
 

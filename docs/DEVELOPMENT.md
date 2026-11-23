@@ -53,6 +53,7 @@ cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release && cmake --build build/
   x86 の開発者環境でビルドすると、32 ビットのアプリ用の `yuragi_tip32.dll` になる）。
 - ブローカーを実プロセスで動かす試験は Windows だけ:
   `python -m unittest tests.test_broker`（`YURAGI_BROKER=dist\yuragi-broker.exe`）。
+  エンジンの標準入力の試験 `tests/test_engine_stdin.py` は Windows で torch があるときだけ走る（CI の Windows ジョブは torch を入れて回す）。
 
 Windows でのビルドと登録（DESIGN「開発時」）:
 
