@@ -445,7 +445,7 @@ class ImeSession:
             return False
         chord = Chord(vk, modifier_bits(mods, self._modifiers))
         command = self.keymap.lookup("empty", chord)
-        return chord.typing or (command is not None and command.id == "insert_alt_space")
+        return chord.typing or (command is not None and command.starts_input)
 
     def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
         self._partial = False

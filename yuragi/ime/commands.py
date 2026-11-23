@@ -33,6 +33,7 @@ class Command:
     run: Callable[[ImeSession], str | None] | None = None
     keeps_resizing: bool = False
     passes_at_edge: bool = False
+    starts_input: bool = False  # with no input, puts text in the document as a typed key does
 
 
 COMMANDS = MappingProxyType({c.id: c for c in (
@@ -45,10 +46,14 @@ COMMANDS = MappingProxyType({c.id: c for c in (
     Command("open_settings", "設定を開く", GLOBAL, where="tip"),
     Command("open_word_register", "単語登録を開く", GLOBAL | EMPTY, where="tip"),
     Command("open_menu", "IME メニューを開く", EMPTY, where="tip"),
-    Command("insert_space", "空白", EMPTY | COMPOSING, run=lambda s: s._insert_space("　")),
-    Command("insert_alt_space", "別幅空白", EMPTY, run=lambda s: s._insert_space(" ")),
-    Command("insert_full_space", "全角空白", KANA, run=lambda s: s._add_space("　")),
-    Command("insert_half_space", "半角空白", KANA, run=lambda s: s._add_space(" ")),
+    Command("insert_space", "空白", EMPTY | COMPOSING, run=lambda s: s._insert_space("　"),
+            starts_input=True),
+    Command("insert_alt_space", "別幅空白", EMPTY, run=lambda s: s._insert_space(" "),
+            starts_input=True),
+    Command("insert_full_space", "全角空白", KANA, run=lambda s: s._add_space("　"),
+            starts_input=True),
+    Command("insert_half_space", "半角空白", KANA, run=lambda s: s._add_space(" "),
+            starts_input=True),
     Command("undo_commit", "確定取り消し", EMPTY),
     Command("reconvert", "再変換", EMPTY | {"direct"}),
     Command("convert", "変換", COMPOSING | PREDICTING, run=lambda s: s._convert()),

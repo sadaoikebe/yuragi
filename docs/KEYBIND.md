@@ -114,6 +114,7 @@
 | `key` | キーの行き先。`eat`（食べる）／`pass`（アプリに通す）／`commit_pass`（確定してから通す） |
 | `where` | `engine`（エンジンが実行）／`tip`（TIP が自分で実行。オン/オフなど） |
 | `label` | 編集画面に出す日本語の名前 |
+| `starts_input` | 入力が無いときに文書へ文字を入れる（空白の 4 つ）。打鍵と同じく入力開始の down として、載せた `left_context`・`after_commit_seq` で左文脈を決め直す |
 
 コマンドの一覧。「作った」が × のものは、プリセットの行に書いてもキー表を作るときに無視する（§5.4）。
 局面の列の「composing 以降」は入力がある局面の全部、「converting 以降」は `converting`・`selecting`・`resizing`・`editing`、「selecting 以降」は `selecting`・`predicting`。
@@ -408,6 +409,7 @@ class Command:
     where: str = "engine"       # engine / tip
     run: Callable[[ImeSession], str | None] | None = None   # 確定した文字を返す。tip のコマンドは None
     keeps_resizing: bool = False  # 実行しても文節長変更を終えない（§6.3）
+    starts_input: bool = False    # 入力なしで文書に文字を入れる。打鍵と同じく左文脈を読み直す
 
 COMMANDS = {c.id: c for c in (
     Command("convert", "変換", COMPOSING | PREDICTING, run=lambda s: s._convert()),

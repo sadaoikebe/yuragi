@@ -95,6 +95,16 @@ class DocumentContextTest(ContextCase):
         k.tap("W", left_context=None, after_commit_seq=None)
         k.tap(SPACE)
         self.assertEqual(self.reviewer.calls[-1], ("", "か", "河"))
+        # A space with no input starts at the new position as a typed key does.
+        k.commit()
+        for mods in (["shift"], ["ctrl", "shift"]):
+            with self.subTest(mods=mods):
+                spaced = k.send("down", SPACE, mods, left_context=None, after_commit_seq=None)
+                k.up(SPACE, mods)
+                k.tap("W", left_context=None, after_commit_seq=spaced["seq"])
+                k.tap(SPACE)
+                self.assertEqual(self.reviewer.calls[-1][0], spaced["commit"])
+                k.commit()
 
     def test_observed_text_is_bounded_and_kept_out_of_logs(self):
         text = "先頭" + "𠮷" * 199 + "尾"
