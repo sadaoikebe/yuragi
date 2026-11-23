@@ -68,6 +68,13 @@ function Registered($view) {
 
 try {
     if ($Action -eq "install") {
+        # setup.ps1 sent quit to the user's broker just before this (this session): wait for it
+        # to end, so that its exe is replaced or removed with the rest of its version.
+        $deadline = (Get-Date).AddSeconds(15)
+        $session = (Get-Process -Id $PID).SessionId
+        foreach ($broker in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session })) {
+            [void]$broker.WaitForExit([Math]::Max(0, [int]($deadline - (Get-Date)).TotalMilliseconds))
+        }
         $dir = Join-Path $Root $Tag
         New-Item -ItemType Directory -Force $dir | Out-Null
         Place $DllSource (Join-Path $dir $Views[0].Name) $DllSha256
@@ -83,17 +90,9 @@ try {
             # DESIGN「守ること」6: registered is what the registry says, read back.
             if ((Registered $view) -ne $dll) { Write-Result $false "登録後のレジストリに $dll がありません" }
         }
-        $old = @(Get-ChildItem -LiteralPath $Root -Force | Where-Object { $_.Name -ne $Tag })
-        # setup.ps1 sent quit to the user's broker just before this: wait for a broker of a
-        # version being removed to end, so that its exe goes with the rest.
-        $deadline = (Get-Date).AddSeconds(15)
-        foreach ($broker in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue)) {
-            $exe = $broker.Path
-            if (@($old | Where-Object { $exe -and $exe.StartsWith("$($_.FullName)\", [StringComparison]::OrdinalIgnoreCase) }).Count) {
-                [void]$broker.WaitForExit([Math]::Max(0, [int]($deadline - (Get-Date)).TotalMilliseconds))
-            }
+        foreach ($old in @(Get-ChildItem -LiteralPath $Root -Force | Where-Object { $_.Name -ne $Tag })) {
+            Remove-Unused $old.FullName
         }
-        foreach ($dir in $old) { Remove-Unused $dir.FullName }
     } else {
         # A version from before the 32-bit build has the 64-bit one only.
         foreach ($view in $Views) {
