@@ -2,8 +2,7 @@
 
   python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE] [--dict-dir DIR]
 
---dict-dir is the dictionary the engine was given (the installer's shared copy);
-the 状態 tab checks the files there against the manifest.
+--dict-dir is the dictionary the engine was given (the installer's shared copy).
 
 A thin shell over personal, learning_admin and config, on the same files the
 engine uses. AdminModel holds everything the
@@ -23,7 +22,6 @@ import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 import io
-import json
 import os
 from pathlib import Path
 import sys
@@ -88,17 +86,6 @@ class SettingRow:
     edit: str  # what the list starts with
     choices: list[str]  # shown values to offer
     help: str
-
-
-def _dictionary_problem(problem: str) -> str:
-    kind, _, name = problem.partition(" ")
-    if kind == "missing":
-        return f"{name} がありません"
-    if kind == "changed":
-        return f"{name} が変わっています"
-    if kind == "unrecorded":
-        return f"{name.split(' ')[0]} は記録にないファイルです"
-    return problem
 
 
 class AdminModel:
@@ -247,7 +234,6 @@ class AdminModel:
 
     def status_rows(self, store: LearningStore | None = None) -> list[tuple[str, str]]:
         """What the 状態 tab shows (DESIGN「メニュー」), in Japanese."""
-        from yuragi.lattice import dict_manifest
         rows = []
         broker = broker_client.status()
         if broker is None:
@@ -261,15 +247,6 @@ class AdminModel:
                      f"{STOP_REASONS.get(stop['stopped'], stop['stopped'])}"
                      f"（{stop['time'].replace('T', ' ')}）"
                      if stop else "なし"))
-
-        manifest = dict_manifest.MANIFEST
-        if manifest.exists():
-            problems = dict_manifest.verify(json.loads(manifest.read_text(encoding="utf-8")))
-            rows.append(("辞書", "正常" if not problems else
-                         "記録と違うファイルがあります: "
-                         + "、".join(map(_dictionary_problem, problems))))
-        else:
-            rows.append(("辞書", "照合の記録（マニフェスト）がありません"))
 
         rows.append(("学習", LEARNING_STATES[self.learning_state()]))
         if store is None:
