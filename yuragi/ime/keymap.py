@@ -81,10 +81,13 @@ class Keymap:
                 continue
             rows[phase][chord.code] = command
 
-        # Keep global fallbacks separate from bindings scoped to a phase.
+        # Keep global fallbacks separate from bindings scoped to a phase. A phase
+        # inherits only the parent's rows whose command works in it (KEYBIND §5.4).
         for phase, parent in PARENT.items():
             if parent != "global":
-                rows[phase] = rows[parent] | rows[phase]
+                inherited = {code: command for code, command in rows[parent].items()
+                             if phase in command.phases}
+                rows[phase] = inherited | rows[phase]
         self._rows = MappingProxyType({phase: MappingProxyType(row) for phase, row in rows.items()})
 
     def lookup(self, phase: str, chord: Chord) -> Command | None:

@@ -1134,8 +1134,6 @@ class ImeSession:
         self._set_cursor(stop if end else start, stop)
 
     def _set_cursor(self, position: int, end: int) -> None:
-        if self.predicting:  # cursor aliases inherited by the focused prediction list
-            return
         self._cursor = None if position == end else position
         if not self.editing and not self._reading_edit and self._cursor is not None:
             self._reading_edit = True

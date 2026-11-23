@@ -90,6 +90,17 @@ class KeymapFileTest(unittest.TestCase):
         self.assertEqual(set(settings.overrides), {("global", Chord.parse("Alt+F5")),
                                                    ("editing", Chord.parse("Space"))})
 
+    def test_a_composing_row_does_not_run_in_the_prediction_list(self):
+        # predicting inherits composing's rows; a composing-only command there
+        # would edit the input while the prediction list is focused.
+        rows = [["composing", "Ctrl+J", "delete_before"]]
+        (self.dir / "keymap.json").write_text(json.dumps(
+            {"use": "custom", "custom": {"base": "ms-ime", "overrides": rows}}), encoding="utf-8")
+        compiled = keymap.load_keymap(self.dir).compile()
+        self.assertEqual(compiled.command_for("composing", Chord.parse("Ctrl+J")).id, "delete_before")
+        self.assertEqual(compiled.command_for("predicting", Chord.parse("Ctrl+J")).id,
+                         "commit_and_pass")
+
     def test_unreadable_keymap_json_is_an_error(self):
         (self.dir / "keymap.json").write_text('{"use": "custom",', encoding="utf-8")
         self.assertIsNotNone(keymap.load_keymap(self.dir).error)
