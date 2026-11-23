@@ -62,7 +62,6 @@
     ["composing", "Ctrl+'", "input_to_half_alnum"],
     ["composing", "Ctrl+A", "input_to_half_alnum"],
 
-    ["predicting", "Space", "convert"],
     ["predicting", "Tab", "next_candidate"],
     ["predicting", "Down", "next_candidate"],
     ["predicting", "Ctrl+N", "next_candidate"],
