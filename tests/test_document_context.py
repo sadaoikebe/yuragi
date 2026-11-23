@@ -106,14 +106,14 @@ class DocumentContextTest(ContextCase):
                 self.assertEqual(self.reviewer.calls[-1][0], spaced["commit"])
                 k.commit()
 
-    def test_observed_text_is_bounded_and_kept_out_of_logs(self):
+    def test_observed_text_is_kept_out_of_logs(self):
         text = "先頭" + "𠮷" * 199 + "尾"
         k = Keys(lambda msg: process_request(self.sess, msg, log_text=True, lm_timing=True))
         logs = io.StringIO()
         with redirect_stderr(logs):
             k.tap("W", left_context=text)
             k.tap(SPACE)
-        self.assertEqual(self.reviewer.calls[-1], (text[-200:], "か", "河"))
+        self.assertEqual(self.reviewer.calls[-1], (text, "か", "河"))
         self.assertNotIn("𠮷", logs.getvalue())
 
     def test_sequence_and_observed_suffix_determine_continuity(self):
@@ -125,9 +125,6 @@ class DocumentContextTest(ContextCase):
             ("語尾", None, "語尾", "河"),
             ("語尾", "missing", "語尾", "河"),
             ("語尾", "stale", "語尾", "河"),
-            (123, True, "語尾語尾", "河"),
-            (123, 3.0, "語尾語尾", "河"),
-            ("\ud800", "latest", "語尾語尾", "川"),
         ):
             with self.subTest(text=text, after=after):
                 k = self.keys

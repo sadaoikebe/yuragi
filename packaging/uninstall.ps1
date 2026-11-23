@@ -31,7 +31,6 @@ Set-Location $env:USERPROFILE   # 自分を含むフォルダを消すので外�
 
 # 管理者権限で動かすのは、インストール時に Program Files に置いた elevated.ps1。
 # 登録されている DLL と同じフォルダのものを使う。
-$ProgramRoot = Join-Path $env:ProgramFiles "yuragi-ime"
 $elevatedPath = $null
 $registeredDll = (Get-ItemProperty -LiteralPath $InprocKey -ErrorAction SilentlyContinue).'(default)'
 if ($registeredDll) {
@@ -56,10 +55,6 @@ function Say([string]$msg) { Write-Host $msg }
 function Fail([string]$msg) { Write-Host "エラー: $msg" -ForegroundColor Red; exit 1 }
 
 # ---------------------------------------------------------------- 1
-$createdNew = $false
-$maintenance = New-Object System.Threading.Mutex($true, "Local\yuragi-ime-maintenance", [ref]$createdNew)
-if (-not $createdNew) { Fail "別のインストールまたはアンインストールが実行中です。" }
-
 # -RemoveData の確認は最初に (途中で止まらないように)。
 if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     $size = (Get-ChildItem -LiteralPath $UserData -Recurse -Force -File | Measure-Object -Property Length -Sum).Sum
@@ -107,7 +102,6 @@ foreach ($b in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue
 Say "  OK"
 
 # ---------------------------------------------------------------- 4
-$result = [pscustomobject]@{ ok = $true; message = "not registered"; left = @() }
 if ($elevatedPath) {
 Say "== Windows からの登録解除とプログラムの削除 (管理者権限の確認が出ます)"
 $resultFile = Join-Path $env:TEMP ("yuragi-elevated-" + [Guid]::NewGuid().ToString("N") + ".json")
@@ -119,7 +113,6 @@ try {
 if (-not (Test-Path -LiteralPath $resultFile)) { Fail "管理者権限の処理が結果を返さずに終了しました (終了コード $($p.ExitCode))。" }
 $result = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
 Remove-Item -LiteralPath $resultFile -Force
-# DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
 if (-not $result.ok) { Fail "登録解除またはプログラムの削除に失敗しました: $($result.message)" }
 Say "  OK"
 } else {
@@ -132,15 +125,7 @@ Say "  OK"
 if (Test-Path -LiteralPath $ProductKey) { Remove-Item -LiteralPath $ProductKey -Recurse -Force }
 $userTip = "HKCU:\SOFTWARE\Microsoft\CTF\TIP\$Clsid"
 if (Test-Path -LiteralPath $userTip) { Remove-Item -LiteralPath $userTip -Recurse -Force }
-$maintenance.ReleaseMutex()
-$maintenance.Dispose()
-$left = @()
-if (Test-Path -LiteralPath $Local) {
-    foreach ($item in @(Get-ChildItem -LiteralPath $Local -Force)) {
-        try { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop } catch { $left += $item.FullName }
-    }
-    if (-not $left.Count) { Remove-Item -LiteralPath $Local -Recurse -Force -ErrorAction SilentlyContinue }
-}
+Remove-Item -LiteralPath $Local -Recurse -Force -ErrorAction SilentlyContinue
 if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     Remove-Item -LiteralPath $UserData -Recurse -Force
     Say "  削除: $UserData"
@@ -149,10 +134,6 @@ if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
 # ---------------------------------------------------------------- 6
 Say ""
 Say "アンインストールが完了しました。"
-if (@($result.left).Count) {
-    Say "  使用中のファイル $(@($result.left).Count) 個は残しました ($ProgramRoot)。登録は外れているので使われません。アプリを閉じたあとに削除できます。"
-}
-if ($left.Count) { Say "  削除できなかったファイル: $($left -join ', ')" }
 if (-not $RemoveData) {
     Say "学習データ・登録した単語・設定は残っています: $UserData"
     Say "  これらも削除するには、README の「全部消す場合」の1行 (-RemoveData 付き) を実行します。"

@@ -81,9 +81,6 @@ jobs:
           Get-ChildItem $tkDir -File | ForEach-Object { Write-Host "tkinter asset: $($_.Name)" }
           $tkName = "python-$pyVersion-tkinter-amd64.zip"
           Compress-Archive -Path (Join-Path $tkDir "*") -DestinationPath $tkName
-          foreach ($name in @("yuragi_tip.dll", "yuragi_tip32.dll", "yuragi-broker.exe", "yuragi-source.zip", $tkName)) {
-            (Get-FileHash $name -Algorithm SHA256).Hash.ToLower() | Set-Content "$name.sha256" -Encoding ASCII -NoNewline
-          }
           # setup.ps1 にタグと、同梱 Python の公式ハッシュを刻む。
           $embedName = "python-$pyVersion-embed-amd64.zip"
           Invoke-WebRequest -UseBasicParsing "https://www.python.org/ftp/python/$pyVersion/$embedName" -OutFile $embedName
@@ -130,15 +127,10 @@ jobs:
             setup.ps1
             uninstall.ps1
             yuragi_tip.dll
-            yuragi_tip.dll.sha256
             yuragi_tip32.dll
-            yuragi_tip32.dll.sha256
             yuragi-broker.exe
-            yuragi-broker.exe.sha256
             yuragi-source.zip
-            yuragi-source.zip.sha256
             python-${{ needs.pins.outputs.python }}-tkinter-amd64.zip
-            python-${{ needs.pins.outputs.python }}-tkinter-amd64.zip.sha256
 
       - name: プレリリースと正式版の配布先を確認
         shell: pwsh

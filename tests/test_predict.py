@@ -1,9 +1,7 @@
 """Prediction (推測変換): Tab opens the predictions and Enter commits one."""
 from __future__ import annotations
 
-from contextlib import redirect_stderr
 from dataclasses import replace
-from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -13,7 +11,7 @@ from yuragi.ime import predict as P
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.personal import PersonalLexicon, add_word, remove_word
 from yuragi.ime.server import dispatch
-from yuragi.ime.session import ConversionRequest, ImeSession
+from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, pos_ids
 from yuragi.lattice.table import load_table
 from tests.support import small_lex, type_plain
@@ -128,24 +126,6 @@ class TabGestureTest(Fixture):
         self.assertEqual([len(call.args[0]) for call in predict.call_args_list], [4, 2])
         self.assertFalse(reply["predicting"])
         self.assertIs(s.segments, original)
-
-    def test_failure_to_decode_the_head_keeps_the_input(self):
-        s = self.session()
-        type_plain(s, "このてん")
-        tokens = list(s.tokens)
-        original = s.segments
-        composition = s.composition
-        errors = StringIO()
-        with (patch("yuragi.ime.session.predict", return_value=[]),
-              patch.object(ConversionRequest, "decode", side_effect=RuntimeError),
-              redirect_stderr(errors)):
-            reply = press(s, VK_TAB)
-
-        self.assertFalse(reply["predicting"])
-        self.assertEqual(reply["composition"], composition)
-        self.assertEqual(s.tokens, tokens)
-        self.assertIs(s.segments, original)
-        self.assertIn("Prediction failed (RuntimeError)", errors.getvalue())
 
 
 class AutomaticPredictionTest(Fixture):

@@ -24,14 +24,14 @@ project (MIT).
 
 ## Mozc open-source dictionary
 
-Location: `%LOCALAPPDATA%\yuragi-ime\shared\dict\<hash of the manifest's file list>\` when installed;
+Location: `%LOCALAPPDATA%\yuragi-ime\shared\dict\<id>\` when installed;
 `third_party/mozc_oss_dict/` in a development checkout.
 
 All files (`dictionary*.txt`, `connection_single_column.txt`, `suffix.txt`,
 `id.def`, `evaluation.tsv`, `README.txt`, `README.md`) are fetched from
 `src/data/dictionary_oss/` at the upstream commit pinned in
-`data/dictionary-manifest.json` by `python -m tools.eval.fetch_mozc_dict`
-and checked against the SHA-256 in that manifest. None of these files is
+`data/dictionary-manifest.json` by `python -m tools.eval.fetch_mozc_dict`.
+None of these files is
 stored in git. Runtime conversion uses this dictionary.
 
 Upstream: https://github.com/google/mozc  

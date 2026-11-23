@@ -330,7 +330,7 @@ enum class Mode { Normal, Preparing, Stopped, Excluded };
 enum class Link { Connected, Connecting, Unreachable, NotAllowed };
 //   Connecting   waiting for the pipe (a broker was just started)
 //   Unreachable  no broker, and starting one did not give a pipe in time
-//   NotAllowed   this process must not start one (DESIGN「ブローカーを起動する条件」: another version, maintenance,
+//   NotAllowed   this process must not start one (DESIGN「ブローカーを起動する条件」: another version,
 //                sandboxed or elevated): it only ever connects; or the pipe's server is not the broker
 
 inline Mode ModeFor(Link link, const std::string& state) {
@@ -609,11 +609,10 @@ private:
 // often it is started; there is no count.
 struct SpawnFacts {
     bool tag_matches = false;  // HKCU\Software\yuragi-ime\Tag == this DLL's tag
-    bool maintenance = false;  // Local\yuragi-ime-maintenance exists
     bool medium_integrity = false;  // not sandboxed (AppContainer/low), not elevated
 };
 inline bool MaySpawn(const SpawnFacts& f) {
-    return f.tag_matches && !f.maintenance && f.medium_integrity;
+    return f.tag_matches && f.medium_integrity;
 }
 
 // Keep the candidate list below the caret unless its bottom would leave the work area.

@@ -12,7 +12,6 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from itertools import islice
 from math import isfinite
-import sys
 import time
 from typing import Callable
 import unicodedata
@@ -184,12 +183,7 @@ class ConversionRequest:
             if len(rows) < 2:
                 continue
             started = time.perf_counter()
-            try:
-                scores = converter.model.candidate_nll(context, rows)
-            except RuntimeError as exc:
-                print(f"LM candidate scoring failed ({type(exc).__name__})",
-                      file=sys.stderr, flush=True)
-                continue
+            scores = converter.model.candidate_nll(context, rows)
             finished = time.perf_counter()
             for key, value in (("candidate_ms", (finished - started) * 1000),
                                ("candidate_rows", len(rows))):
@@ -701,10 +695,7 @@ class ImeSession:
                          converter: ZenzConverter | None = None) -> None:
         if converter is not None:
             converter.last = {}
-            try:
-                picks = request.decode(self._lex, converter)
-            except Exception as exc:
-                print(f"LM conversion failed ({type(exc).__name__})", file=sys.stderr, flush=True)
+            picks = request.decode(self._lex, converter)
         self.converted = True
         self._input_script = None
         self._cursor = None
@@ -790,37 +781,34 @@ class ImeSession:
         self.suggest_at = None
         if busy or self._lex is None:
             return
-        try:
-            budget = PreviewBudget()
-            lattice = self._lattice()
-            end = len(lattice)
-            learning = self._learning_view
-            if self._learning is not None and learning is not None:
-                if self._learning.revision != learning.revision:
-                    learning = None
-            added_readings = self.personal.added_readings if self.personal is not None else ()
-            # Use only already decoded clause boundaries. Opening the explicit
-            # list can afford to decode a head split in the middle of a clause.
-            tail_begin = max(0, end - PREVIEW_TAIL_TOKENS)
-            for pos in range(end - 1, tail_begin - 1, -1):
-                if lattice[pos]["kind"] == "literal":
-                    tail_begin = pos + 1
-                    break
-            starts = [(i, s.start) for i, s in enumerate(self.segments)
-                      if tail_begin <= s.start <= end - HISTORY_MIN_KANA]
-            for index, start in starts[-MAX_TAILS:]:
-                if budget.exhausted():
-                    return
-                tail = restrict(lattice, start, end, press_pins(lattice, start, end, self.segments[:index]))
-                rows = predict(tail, self._lex, self.predict_index, learning,
-                               added_readings=added_readings, budget=budget)
-                if rows:
-                    self.suggestion = Suggestion(index, rows,
-                                                 self.personal.revision if self.personal else None,
-                                                 learning.revision if learning else None)
-                    return
-        except Exception as exc:
-            print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
+        budget = PreviewBudget()
+        lattice = self._lattice()
+        end = len(lattice)
+        learning = self._learning_view
+        if self._learning is not None and learning is not None:
+            if self._learning.revision != learning.revision:
+                learning = None
+        added_readings = self.personal.added_readings if self.personal is not None else ()
+        # Use only already decoded clause boundaries. Opening the explicit
+        # list can afford to decode a head split in the middle of a clause.
+        tail_begin = max(0, end - PREVIEW_TAIL_TOKENS)
+        for pos in range(end - 1, tail_begin - 1, -1):
+            if lattice[pos]["kind"] == "literal":
+                tail_begin = pos + 1
+                break
+        starts = [(i, s.start) for i, s in enumerate(self.segments)
+                  if tail_begin <= s.start <= end - HISTORY_MIN_KANA]
+        for index, start in starts[-MAX_TAILS:]:
+            if budget.exhausted():
+                return
+            tail = restrict(lattice, start, end, press_pins(lattice, start, end, self.segments[:index]))
+            rows = predict(tail, self._lex, self.predict_index, learning,
+                           added_readings=added_readings, budget=budget)
+            if rows:
+                self.suggestion = Suggestion(index, rows,
+                                             self.personal.revision if self.personal else None,
+                                             learning.revision if learning else None)
+                return
 
     def _predict_key(self) -> None:
         """Open the predictions for the trailing reading, if there are any."""
@@ -845,22 +833,18 @@ class ImeSession:
             index = next(i for i, s in enumerate(self.segments) if s.end > start)
             head = self.segments[:index]
             head_request = None
-            try:
-                if self.segments[index].start != start:
-                    # Inside a clause (いい|天気): decode the typed head alone.
-                    head_request = self._conversion_input(self._parts(lattice[:start]))
-                    head_picks = head_request.decode(self._lex)
-                    head = display_segments(head_request.parts, head_picks)
-                    for segment in head:
-                        segment.mark_shown()
-                # A press crossing into the tail keeps the head's direction.
-                tail = restrict(lattice, start, len(lattice),
-                                press_pins(lattice, start, len(lattice), head))
-                found = predict(tail, self._lex, self.predict_index, learning,
-                                added_readings=added_readings)
-            except Exception as exc:
-                print(f"Prediction failed ({type(exc).__name__})", file=sys.stderr, flush=True)
-                return
+            if self.segments[index].start != start:
+                # Inside a clause (いい|天気): decode the typed head alone.
+                head_request = self._conversion_input(self._parts(lattice[:start]))
+                head_picks = head_request.decode(self._lex)
+                head = display_segments(head_request.parts, head_picks)
+                for segment in head:
+                    segment.mark_shown()
+            # A press crossing into the tail keeps the head's direction.
+            tail = restrict(lattice, start, len(lattice),
+                            press_pins(lattice, start, len(lattice), head))
+            found = predict(tail, self._lex, self.predict_index, learning,
+                            added_readings=added_readings)
             if not found:
                 continue
             if head_request is not None:

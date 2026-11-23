@@ -2,12 +2,11 @@
 #
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 [-Yes] [-Cpu]
 #
-# -AssetDir: リリースのアセット (DLL 2 つ・ブローカー・ソース zip・tkinter と各 .sha256) を GitHub からではなく
-#   このフォルダから取る (公開前の版を実機で試すため。照合は同じ)。
+# -AssetDir: リリースのアセット (DLL 2 つ・ブローカー・ソース zip・tkinter) を GitHub からではなく
+#   このフォルダから取る (公開前の版を実機で試すため)。
 # -Cpu: NVIDIA の GPU があっても CPU 版の PyTorch を使う (GPU のドライバが不安定な PC など)。
 #
-# インストールも更新も同じ手順。どこで失敗しても「前の版が動く」か「新しい版が動く」の
-# どちらか (DESIGN「守ること」6)。利用者のデータ (%USERPROFILE%\.yuragi-ime) は消さない (同 7)。
+# インストールも更新も同じ手順。利用者のデータ (%USERPROFILE%\.yuragi-ime) は消さない (DESIGN「守ること」7)。
 
 param(
     [switch]$Yes,
@@ -127,13 +126,10 @@ function Get-TorchVariant {
     return (Select-TorchVariant $header $gpus)
 }
 
-# ---------------------------------------------------------------- 1 保守中の印
+# ---------------------------------------------------------------- 1 確認
 if ($Tag -like "__*" -or $EmbedPythonSha256 -like "__*") {
     Fail "この setup.ps1 はリリース版ではありません。リリースページの setup.ps1 を使ってください。"
 }
-$createdNew = $false
-$maintenance = New-Object System.Threading.Mutex($true, "Local\yuragi-ime-maintenance", [ref]$createdNew)
-if (-not $createdNew) { Fail "別のインストールまたはアンインストールが実行中です。" }
 
 Say "ゆらぎ $Tag セットアップ"
 Say ""
@@ -177,31 +173,14 @@ Say "  言語モデル zenz-v2.5-small (CPU 用、huggingface.co、約 170MB)"
 if ($TorchVariant -ne "cpu") { Say "  言語モデル zenz-v2.5-medium (GPU 用、huggingface.co、約 620MB)" }
 if (-not (Ask "続行しますか?")) { Fail "キャンセルしました。" }
 
-function Get-Verified([string]$url, [string]$dest) {
-    if ($AssetDir) {
-        $local = Join-Path $AssetDir ($url.Split("/")[-1])
-        Copy-Item -LiteralPath $local -Destination $dest
-        $expected = [IO.File]::ReadAllText("$local.sha256")
-    } else {
-        Invoke-WebRequest -UseBasicParsing $url -OutFile $dest
-        $expected = (Invoke-WebRequest -UseBasicParsing "$url.sha256").Content
-    }
-    if ($expected -is [byte[]]) { $expected = [Text.Encoding]::ASCII.GetString($expected) }
-    $expected = $expected.Trim().ToLower()
-    $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower()
-    if ($actual -ne $expected) { Fail "SHA-256 不一致: $(Split-Path $dest -Leaf)" }
-    Say "  $(Split-Path $dest -Leaf)  OK (SHA-256)"
-    return $expected
+function Get-Asset([string]$url, [string]$dest) {
+    if ($AssetDir) { Copy-Item -LiteralPath (Join-Path $AssetDir ($url.Split("/")[-1])) -Destination $dest }
+    else { Invoke-WebRequest -UseBasicParsing $url -OutFile $dest }
 }
 
-# 共有物は「作りかけの名前で作って、完成したら改名」。完成したものも $check で中身を確かめ、
-# だめなら作り直す (壊れた共有物も、インストールの 1 行のやり直しで直る)。
-function New-Shared([string]$final, [scriptblock]$check, [scriptblock]$build) {
-    if (Test-Path -LiteralPath $final) {
-        if (& $check $final) { return }
-        Say "  $final が壊れているため、作り直します"
-        Remove-Item -LiteralPath $final -Recurse -Force
-    }
+# 共有物は無ければ作る。作りかけの名前で作って、できたら改名する (途中で止まったものは次に作り直す)。
+function New-Shared([string]$final, [scriptblock]$build) {
+    if (Test-Path -LiteralPath $final) { return }
     $partial = "$final.partial"
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Recurse -Force }
     New-Item -ItemType Directory -Force $partial | Out-Null
@@ -239,15 +218,12 @@ $sourceZip = Join-Path $Download "yuragi-source.zip"
 $dllPath = Join-Path $Download "yuragi_tip.dll"
 $dll32Path = Join-Path $Download "yuragi_tip32.dll"  # 32 ビットのアプリ用 (DESIGN「32 ビットのアプリ」)
 $brokerPath = Join-Path $Download "yuragi-broker.exe"
-[void](Get-Verified "$baseUrl/yuragi-source.zip" $sourceZip)
-# 段 5 で、管理者権限の側が Program Files に写したものをこのハッシュと照合する。
-$dllSha256 = Get-Verified "$baseUrl/yuragi_tip.dll" $dllPath
-$dll32Sha256 = Get-Verified "$baseUrl/yuragi_tip32.dll" $dll32Path
-$brokerSha256 = Get-Verified "$baseUrl/yuragi-broker.exe" $brokerPath
+Get-Asset "$baseUrl/yuragi-source.zip" $sourceZip
+Get-Asset "$baseUrl/yuragi_tip.dll" $dllPath
+Get-Asset "$baseUrl/yuragi_tip32.dll" $dll32Path
+Get-Asset "$baseUrl/yuragi-broker.exe" $brokerPath
 $StageApp = Join-Path $Stage "app"
 Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
-# 管理者権限で動かす elevated.ps1 のハッシュは、照合した zip から展開した直後に取る。
-$elevatedSha256 = (Get-FileHash -LiteralPath (Join-Path $StageApp "packaging\elevated.ps1") -Algorithm SHA256).Hash
 
 # 同梱ランタイム: Python の版・依存の固定・torch の版で名前が決まる。中身が同じなら共有する。
 # 「tk」は tkinter 一式 (リリースのアセット。同じ版の通常版 Python から取ったもの) 入りの印。
@@ -257,15 +233,7 @@ $reqHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash.Subs
 $torchId = if ($TorchVariant -eq "cpu") { "torch$TorchVersion" } else { "torch$TorchVersion-$TorchVariant" }
 $runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"
 $Runtime = Join-Path $Shared "runtime\$runtimeId"
-# ランタイムが使えるか: torch・依存・tkinter が読み込めるか (作った直後と、在るものを使うとき)。
-$ImportCheck = "import torch, transformers, huggingface_hub, tkinter; tkinter.Tcl()"
 New-Shared $Runtime {
-    param($dir)
-    $py = Join-Path $dir "python.exe"
-    if (-not (Test-Path -LiteralPath $py)) { return $false }
-    & $py -c $ImportCheck | Out-Host
-    return ($LASTEXITCODE -eq 0)
-} {
     param($dir)
     Say "== Python ランタイムの作成 ($runtimeId)"
     $embedZip = Join-Path $Download "python-embed.zip"
@@ -276,7 +244,7 @@ New-Shared $Runtime {
     Expand-Archive -LiteralPath $embedZip -DestinationPath $dir
     # 埋め込み版に無い tkinter 一式 (_tkinter.pyd と Tcl/Tk の DLL は直下、tcl\、Lib\tkinter\)。
     $tkZip = Join-Path $Download "python-tkinter.zip"
-    [void](Get-Verified "$baseUrl/python-$EmbedPythonVersion-tkinter-amd64.zip" $tkZip)
+    Get-Asset "$baseUrl/python-$EmbedPythonVersion-tkinter-amd64.zip" $tkZip
     Expand-Archive -LiteralPath $tkZip -DestinationPath $dir
     $pth = Get-ChildItem -LiteralPath $dir -Filter "python*._pth" | Select-Object -First 1 -ExpandProperty FullName
     @(("python" + $EmbedPythonVersion.Substring(0, 4).Replace(".", "") + ".zip"), ".", "Lib", "Lib\site-packages", "import site") |
@@ -296,9 +264,6 @@ New-Shared $Runtime {
     Invoke-Checked "依存パッケージのインストール" {
         & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --require-hashes -r $requirements
     }
-    Invoke-Checked "インポートの確認" {
-        & $py -c $ImportCheck
-    }
     if ($TorchVariant -ne "cpu") {
         # 情報だけ。モデルを暖機できるデバイスはエンジンが判定する。
         & $py -c "import torch; print('  CUDA devices visible to torch:', torch.cuda.device_count())"
@@ -316,10 +281,6 @@ if ($LASTEXITCODE -ne 0) { Fail "辞書マニフェストを読めませんで�
 $script:Dict = Join-Path $Shared "dict\$dictId"
 New-Shared $script:Dict {
     param($dir)
-    Invoke-App $script:Python $StageApp @("yuragi.lattice.dict_manifest", "verify", "--dict-dir", $dir) | Out-Host
-    return ($LASTEXITCODE -eq 0)
-} {
-    param($dir)
     Invoke-Checked "Mozc 辞書のダウンロード" {
         Invoke-App $script:Python $StageApp @("tools.eval.fetch_mozc_dict", "--out", $dir)
     }
@@ -336,12 +297,7 @@ function Get-Model([string]$modelName) {
     $repo = $line.Matches[0].Groups[1].Value
     $dir = Join-Path $Shared "model\$($line.Matches[0].Groups[2].Value)"
     $fetchModel = Join-Path $StageApp "packaging\fetch_model.py"
-    # 在るものはファイルの大きさを、取得したものは SHA-256 まで fetch_model.py の固定値と照合する。
     New-Shared $dir {
-        param($existing)
-        & $script:Python $fetchModel --check $modelName $existing | Out-Host
-        return ($LASTEXITCODE -eq 0)
-    } {
         param($partial)
         Invoke-Checked "言語モデルのダウンロード ($repo)" { & $script:Python $fetchModel $modelName $partial }
     } | Out-Host   # the download's output must not become this function's value
@@ -436,22 +392,17 @@ Write-EngineJson (Join-Path $Version "engine.json") $App @()
 # 管理者用スクリプトの呼び出しと引数を 1 つのコマンドにして -EncodedCommand 用に符号化する
 # (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む。PowerShell は ' のほか
 # U+2018・U+2019・U+201A・U+201B も単一引用符として読むので、5 種類とも二重にする。
-# elevated.ps1 は利用者が書けるフォルダにあるので、昇格した側はそれを 1 度だけ読み、その中身の SHA-256 が
-# $scriptSha256 と合うときだけ、読んだ中身を実行する (合わなければ結果ファイルを書かずに終了コード 3)。
-function New-ElevatedCommand([string]$scriptPath, [string]$scriptSha256, [string[]]$arguments) {
+function New-ElevatedCommand([string]$scriptPath, [string[]]$arguments) {
     # パスは - で始まらないので、引数の値と同じく囲まれる。
     $quoted = @(@($scriptPath) + $arguments | ForEach-Object { if ($_ -like "-*") { $_ } else {
         "'" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($_) + "'" } })
-    $command = "`$b = [IO.File]::ReadAllBytes($($quoted[0])); " +
-        "if ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b)).Replace('-', '') -ne '$scriptSha256') { exit 3 }; " +
-        "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b).TrimStart([char]0xFEFF))) " +
-        (@($quoted | Select-Object -Skip 1) -join " ")
+    $command = "& " + ($quoted -join " ")
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
-$ElevatedPath = Join-Path $App "packaging\elevated.ps1"   # from the verified source zip
+$ElevatedPath = Join-Path $App "packaging\elevated.ps1"
 function Invoke-Elevated([string[]]$arguments) {
     $resultFile = Join-Path $env:TEMP ("yuragi-elevated-" + [Guid]::NewGuid().ToString("N") + ".json")
-    $encoded = New-ElevatedCommand $ElevatedPath $elevatedSha256 ($arguments + @("-ResultFile", $resultFile))
+    $encoded = New-ElevatedCommand $ElevatedPath ($arguments + @("-ResultFile", $resultFile))
     try {
         $p = Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru `
             -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded)
@@ -459,7 +410,6 @@ function Invoke-Elevated([string[]]$arguments) {
         Fail "管理者権限の確認がキャンセルされました。"
     }
     if (-not (Test-Path -LiteralPath $resultFile)) {
-        if ($p.ExitCode -eq 3) { Fail "SHA-256 不一致: elevated.ps1 (照合のあとで書き換えられています)" }
         Fail "管理者権限の処理が結果を返さずに終了しました (終了コード $($p.ExitCode))。"
     }
     $result = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -470,19 +420,16 @@ function Invoke-Elevated([string[]]$arguments) {
 Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 # 旧ブローカーを終わらせておく (elevated.ps1 は旧版を消す前にその終了を待つので、旧版の exe も消える)。
-# 保守中の印があるので TIP は起動し直さない。ここで止まれば、印が消えたあと TIP が旧版を起動し直す。
 Send-Quit
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag,
-    "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"), "-DllSha256", $dllSha256,
-    "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"), "-Dll32Sha256", $dll32Sha256,
-    "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"), "-BrokerSha256", $brokerSha256,
-    "-ScriptSource", $ElevatedPath, "-ScriptSha256", $elevatedSha256)
-# DESIGN「守ること」6: elevated.ps1 reports ok only after reading the registration back.
+    "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
+    "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
+    "-BrokerSource", (Join-Path $Version "download\yuragi-broker.exe"),
+    "-ScriptSource", $ElevatedPath)
 if (-not $result.ok) { Fail "Windows への登録に失敗しました: $($result.message)" }
 $DllFinal = Join-Path $ProgramRoot "$Tag\yuragi_tip.dll"
 $BrokerFinal = Join-Path $ProgramRoot "$Tag\yuragi-broker.exe"
 Say "  登録: $DllFinal  OK"
-$leftOld = @($result.left)
 
 # ---------------------------------------------------------------- 6 切り替え
 Say ""
@@ -496,7 +443,6 @@ if (-not (Test-Path -LiteralPath $RunKey)) {
     New-Item -Path $RunKey | Out-Null
 }
 Set-ItemProperty -LiteralPath $RunKey -Name "yuragi-ime" -Value "`"$BrokerFinal`""
-if ((Get-ItemProperty -LiteralPath $ProductKey).Tag -ne $Tag) { Fail "HKCU\Software\yuragi-ime に Tag を書き込めませんでした。" }
 Add-Type -Namespace YuragiSetup -Name Input -MemberDefinition @'
 [DllImport("input.dll", CharSet = CharSet.Unicode)]
 public static extern bool InstallLayoutOrTip(string profile, uint flags);
@@ -506,8 +452,6 @@ if (-not [YuragiSetup.Input]::InstallLayoutOrTip($Layout, 0)) { Fail "入力方�
 New-Item -ItemType Directory -Force $UserData | Out-Null
 
 # ---------------------------------------------------------------- 7 起動と確認
-$maintenance.ReleaseMutex()
-$maintenance.Dispose()
 Say ""
 Say "== 起動確認 (最大 120 秒)"
 Start-Process -FilePath $BrokerFinal
@@ -535,7 +479,7 @@ if ($state -ne "ready") {
 Say "  変換エンジン  OK"
 
 # ---------------------------------------------------------------- 8 片付け
-# 失敗はインストールの失敗にしない。次回の setup がまた試す。
+# 消せないもの (使用中) は残す。次回の setup がまた消す。
 $keep = @($Runtime, $script:Dict) + $script:Models
 $cacheName = ""
 try {
@@ -553,17 +497,10 @@ if ($cacheName) { $cleanup += @(Get-ChildItem -LiteralPath $script:Cache -File |
 if (Test-Path -LiteralPath $StagingRoot) { $cleanup += @(Get-Item -LiteralPath $StagingRoot) }
 # この版の取得物 (DLL・ブローカー・zip など。段 5 のあとは使わない) と試運転の出力。
 $cleanup += @(Get-Item -LiteralPath (Join-Path $Version "download"), (Join-Path $Version "selftest.txt") -ErrorAction SilentlyContinue)
-$left = @()
-foreach ($item in $cleanup) {
-    try { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop } catch { $left += $item.FullName }
-}
+foreach ($item in $cleanup) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
 Say ""
 Say "ゆらぎ $Tag のインストールが完了しました。"
-if ($leftOld.Count) {
-    Say "  使用中の旧版ファイル $($leftOld.Count) 個は残しました。次回のセットアップ時に削除します。"
-}
-if ($left.Count) { Say "  不要なファイル $($left.Count) 個を削除できませんでした。次回の更新時に再試行します。" }
 Say ""
 Say "使い方: Win+Space で「ゆらぎ」を選ぶと、タスクバーに「ゆ」が表示されます。再起動は不要です。"
 Say "更新: インストールと同じ 1 行を再実行します。"

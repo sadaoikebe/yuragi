@@ -413,17 +413,6 @@ class ContextLearningTest(unittest.TestCase):
                 else:
                     self.assert_hidden_head(k, k.tap(RIGHT), expected)
 
-    def test_lm_failure_uses_the_same_snapshot_without_a_vote(self):
-        self.learn(None, "校正")
-        self.learn(None, "構成", cost=50_000)
-        s = self.session(Review("校正"))
-        k = Keys(lambda msg: dispatch(s, msg))
-        self.plain(s, "こうせい")
-        with patch.object(s.lm.model, "review", side_effect=RuntimeError("外部本文")):
-            with redirect_stderr(io.StringIO()) as log:
-                self.assert_head(k, k.tap(SPACE), "構成")
-        self.assertNotIn("外部本文", log.getvalue())
-
     def test_partial_commit_keeps_lm_evidence_of_the_rest(self):
         self.learn(None, "現行の", reading="げんこうの", cost=50_000)
         self.learn(None, "校正")

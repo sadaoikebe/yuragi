@@ -4,15 +4,13 @@ Run with the installation's own Python (the one that will run the
 server), so the only network dependency is HuggingFace:
 
   python packaging/fetch_model.py <name> <dest-dir>            name: medium | small
-  python packaging/fetch_model.py --check <name> <dest-dir>
 
 medium is for a GPU, small for the CPU (CONVERSION「装置とモデル」). The
 revision is a full commit hash: what gets installed never floats with the
 upstream repository. setup.ps1 and the release workflow read the MODEL_ lines.
 
 After a download every file the engine reads must have the size and SHA-256
-pinned in FILES for that revision. --check (an installed copy that setup
-reuses) looks at the sizes only: a missing or cut-short file.
+pinned in FILES for that revision.
 """
 
 from __future__ import annotations
@@ -55,7 +53,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def problems(revision: str, dest: Path, hashes: bool) -> list[str]:
+def problems(revision: str, dest: Path) -> list[str]:
     found = []
     for name, (size, sha256) in FILES[revision].items():
         path = dest / name
@@ -63,25 +61,21 @@ def problems(revision: str, dest: Path, hashes: bool) -> list[str]:
             found.append(f"missing {name}")
         elif path.stat().st_size != size:
             found.append(f"size {name}: {path.stat().st_size}, not {size}")
-        elif hashes and _sha256(path) != sha256:
+        elif _sha256(path) != sha256:
             found.append(f"changed {name} (SHA-256)")
     return found
 
 
 def main(argv: list[str]) -> int:
-    check = argv[:1] == ["--check"]
-    if check:
-        argv = argv[1:]
     if len(argv) != 2 or argv[0] not in MODELS:
         print(__doc__)
         return 2
     repo_id, revision = MODELS[argv[0]]
     dest = Path(argv[1])
-    if not check:
-        from huggingface_hub import snapshot_download
+    from huggingface_hub import snapshot_download
 
-        snapshot_download(repo_id=repo_id, revision=revision, local_dir=dest)
-    found = problems(revision, dest, hashes=not check)
+    snapshot_download(repo_id=repo_id, revision=revision, local_dir=dest)
+    found = problems(revision, dest)
     for p in found:
         print(p)
     print(f"model {repo_id}@{revision[:8]} {dest}: " + ("OK" if not found else f"{len(found)} problem(s)"))

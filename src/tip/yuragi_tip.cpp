@@ -72,7 +72,6 @@ static HINSTANCE g_hinst = nullptr;
 static bool g_log = false;  // tip.json "log": true
 
 static const wchar_t kProductKey[] = L"Software\\yuragi-ime";
-static const wchar_t kMaintenanceMutex[] = L"Local\\yuragi-ime-maintenance";
 
 // Only when tip.json asks for it: every application writes here.
 static void Log(const wchar_t* fmt, ...) {
@@ -287,13 +286,6 @@ static bool TagMatches() {
     return Utf8ToWide(YURAGI_TAG) == value;
 }
 
-static bool MaintenanceActive() {
-    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, kMaintenanceMutex);
-    if (!mutex) return false;
-    CloseHandle(mutex);
-    return true;
-}
-
 // Medium integrity exactly, and not an app container: neither sandboxed (it
 // could not read the dictionary) nor elevated (the broker must not run as admin).
 static bool MediumIntegrity() {
@@ -321,7 +313,6 @@ static bool MediumIntegrity() {
 static bool MaySpawn() {
     tip_logic::SpawnFacts facts;
     facts.tag_matches = TagMatches();
-    facts.maintenance = MaintenanceActive();
     facts.medium_integrity = MediumIntegrity();
     return tip_logic::MaySpawn(facts);
 }

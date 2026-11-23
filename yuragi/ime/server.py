@@ -41,7 +41,6 @@ from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
 from yuragi.ime import power
 from yuragi.ime.config import DEFAULTS, SETTINGS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
-from yuragi.ime.zenz import CONTEXT_CHARS
 
 
 def dispatch(sess: ImeSession, msg: dict) -> dict:
@@ -73,18 +72,8 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
     if op in ("down", "up"):
         down, vk, mods = op == "down", int(msg["vk"]), msg.get("mods")
         if down and sess.starts_input(vk, mods):
-            text = msg.get("left_context")
-            if isinstance(text, str):
-                try:
-                    text.encode("utf-8")  # json.loads also accepts lone surrogates
-                except UnicodeEncodeError:
-                    text = None
-                else:
-                    text = text[-CONTEXT_CHARS:]
-            else:
-                text = None
             after = msg.get("after_commit_seq")
-            sess.start_input(text, after if type(after) is int else None,
+            sess.start_input(msg.get("left_context"), after if type(after) is int else None,
                              disconnected=after is None and "after_commit_seq" in msg)
         commit = sess.on_key(down, vk, t, mods=mods) or ""
     elif op == "timeout":
