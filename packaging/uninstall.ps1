@@ -43,11 +43,13 @@ if ($registeredDll) {
 }
 
 # 管理者用スクリプトの呼び出しと引数を 1 つのコマンドにして -EncodedCommand 用に符号化する
-# (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む (中の ' は '' に)。
+# (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む。PowerShell は ' のほか
+# U+2018・U+2019・U+201A・U+201B も単一引用符として読むので、5 種類とも二重にする。
 function New-ElevatedCommand([string]$scriptPath, [string[]]$arguments) {
-    $quoted = @($arguments | ForEach-Object {
-        if ($_ -like "-*") { $_ } else { "'" + $_.Replace("'", "''") + "'" } })
-    $command = "& '" + $scriptPath.Replace("'", "''") + "' " + ($quoted -join " ")
+    # パスは - で始まらないので、引数の値と同じく囲まれる。
+    $quoted = @(@($scriptPath) + $arguments | ForEach-Object { if ($_ -like "-*") { $_ } else {
+        "'" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($_) + "'" } })
+    $command = "& " + ($quoted -join " ")
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
 function Say([string]$msg) { Write-Host $msg }

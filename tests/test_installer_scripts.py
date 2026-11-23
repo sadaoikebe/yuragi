@@ -33,6 +33,11 @@ def pwsh(script: str) -> str:
     return result.stdout
 
 
+def ps_quote(text: str) -> str:
+    """A PowerShell single-quoted string (it reads U+2018, U+2019, U+201A and U+201B as ' too)."""
+    return "'" + "".join(c * 2 if c in "'\u2018\u2019\u201a\u201b" else c for c in text) + "'"
+
+
 def function_text(path: Path, name: str) -> str:
     """One function's definition, taken from the script by PowerShell's own parser."""
     out = pwsh(
@@ -70,7 +75,8 @@ class PowerShellTest(unittest.TestCase):
     def test_elevated_arguments_survive_encoding(self):
         odd = {
             "Tag": "v0.2.0",
-            "DllSource": r"C:\Users\テスト user\AppData\Local\yuragi-ime\versions\v0.2.0\download\yuragi_tip.dll",
+            # PowerShell reads U+2019 (and U+2018, U+201A, U+201B) as a single quote too.
+            "DllSource": r"C:\Users\O’Brien; Write-Output INJECTED #\テスト user\versions\v0.2.0\download\yuragi_tip.dll",
             "BrokerSource": r"C:\Users\O'Brien\AppData\Local\yuragi-ime\versions\v0.2.0\download\yuragi-broker.exe",
             "ResultFile": "",
         }
@@ -78,7 +84,7 @@ class PowerShellTest(unittest.TestCase):
             result = Path(tmp) / "result dir" / "r.json"
             result.parent.mkdir()
             odd["ResultFile"] = str(result)
-            fake = Path(tmp) / "O'Brien の script" / "elevated.ps1"
+            fake = Path(tmp) / "O'Brien ’s の script" / "elevated.ps1"
             fake.parent.mkdir()
             fake.write_text("param([string]$Action, [string]$ResultFile, [string]$Tag, "
                             "[string]$DllSource, [string]$BrokerSource)\n"
@@ -90,9 +96,8 @@ class PowerShellTest(unittest.TestCase):
                     args = ["-Action", "install"]
                     for key, value in odd.items():
                         args += [f"-{key}", value]
-                    listed = ", ".join("'" + a.replace("'", "''") + "'" for a in args)
-                    path_quoted = str(fake).replace("'", "''")
-                    encoded = pwsh(f"{func}\nNew-ElevatedCommand '{path_quoted}' @({listed})").strip()
+                    listed = ", ".join(ps_quote(a) for a in args)
+                    encoded = pwsh(f"{func}\nNew-ElevatedCommand {ps_quote(str(fake))} @({listed})").strip()
                     command = base64.b64decode(encoded).decode("utf-16-le")
                     self.assertTrue(command.startswith("& '"))
                     run = subprocess.run([PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass",
