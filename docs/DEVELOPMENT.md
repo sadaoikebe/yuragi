@@ -19,7 +19,7 @@ TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/b
 ### Linux（変換エンジン・ブローカー・TIP の判断の試験）
 
 Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても、Python の試験（ブローカーを実プロセスで
-動かす `tests/test_broker.py` は Windows だけ）、ブローカーの中核（`broker_core`）の試験、TIP の判断
+動かす `tests/test_broker.py` は Windows だけ）、ブローカーの中核（`broker_core`）と上限付きログ・`engine.json` の試験、TIP の判断
 （`tip_logic.h`）の試験が回る。CI の Linux ジョブと同じ。
 
 `tests/test_installer_scripts.py` の PowerShell の部分は、`YURAGI_PWSH` で指定したもの、無ければ `pwsh`、それも無ければ Windows PowerShell 5.1（`powershell`）を使う（どれも無ければ飛ばす）。
@@ -48,7 +48,7 @@ cmake -S src/broker -B build/broker -DCMAKE_BUILD_TYPE=Release && cmake --build 
 cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release && cmake --build build/tip && ctest --test-dir build/tip
 ```
 
-- ブローカーと TIP の CMake は、Linux では単体試験（`broker_core_test`、`tip_logic_test`、`tip_json_test`）だけを
+- ブローカーと TIP の CMake は、Linux では単体試験（`broker_core_test`、`support_test`、`tip_logic_test`、`tip_json_test`）だけを
   ビルドする。Windows では `yuragi-broker.exe` と `yuragi_tip.dll` もできる（TIP とブローカーのタグは `-DYURAGI_TAG=<tag>`。
   x86 の開発者環境でビルドすると、32 ビットのアプリ用の `yuragi_tip32.dll` になる）。
 - ブローカーを実プロセスで動かす試験は Windows だけ:

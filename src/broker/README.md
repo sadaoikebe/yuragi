@@ -10,5 +10,6 @@
 | `platform_win.cpp` | Windows: 名前付きパイプ + IOCP、ジョブ、環境ブロック、通知とダイアログ |
 | `broker.rc` `broker.manifest` | Windows の exe に入れるもの: マニフェスト（Common Controls 6、asInvoker）と製品アイコン（`assets/icon/yuragi.ico`） |
 | `tests/broker_core_test.cpp` | 中核の単体試験（偽の Platform と時計） |
+| `tests/support_test.cpp` | 上限付きログ、`notices.log`、`engine.json` の読み込みの試験 |
 | `tests/fake_engine.py` | 偽エンジン（Windows の試験用） |
 | `../../tests/test_broker.py` | Windows だけの試験。偽 TIP と偽エンジンを実プロセスで動かす |
