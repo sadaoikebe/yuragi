@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -70,6 +71,27 @@ class ModelTest(Base):
         with mock.patch.object(broker_client, "reload_keymap",
                                return_value={"keymap_reload": "failed", "reason": "壊れた行"}):
             self.assertFalse(m.save_keys(m.key_settings()).ok)
+
+
+@unittest.skipUnless(sys.platform == "win32", "uses Windows named objects")
+class ActivationTest(unittest.TestCase):
+    def test_open_during_startup_signals_existing_instance(self):
+        import _winapi
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            with admin_ui._windows_activation(path) as event:
+                self.assertIsNotNone(event)
+                self.assertEqual(_winapi.WaitForSingleObject(event, 0), _winapi.WAIT_TIMEOUT)
+                # The owner has no Tk window yet. A second entry point must only signal it.
+                command = ("from yuragi.ime import admin_ui\n"
+                           "admin_ui._run_window = lambda *args: 1\n"
+                           "raise SystemExit(admin_ui.main())")
+                subprocess.run([sys.executable, "-c", command, "--config", str(path)],
+                               check=True, timeout=10)
+                self.assertEqual(_winapi.WaitForSingleObject(event, 0), _winapi.WAIT_OBJECT_0)
+            with admin_ui._windows_activation(path) as event:
+                self.assertIsNotNone(event)
 
 
 class FakeVar:

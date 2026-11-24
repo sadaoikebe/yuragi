@@ -21,6 +21,7 @@ import argparse
 import contextlib
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -593,15 +594,79 @@ class AdminWindow:
         self._fill(self.status_tree, self.model.status_rows(store))
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--runtime-dir", type=Path, default=None)
-    parser.add_argument("--config", type=Path, default=None)
-    parser.add_argument("--dict-dir", type=Path, default=None)
-    args = parser.parse_args(argv)
-    if args.dict_dir is not None:
+@contextlib.contextmanager
+def _windows_activation(config_file: Path):
+    """Own this config's window, or signal its owner and yield None."""
+    import _winapi
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateEventW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+
+    path = os.path.normcase(str(config_file.resolve()))
+    name = "Local\\yuragi-ime-admin-" + hashlib.sha256(os.fsencode(path)).hexdigest()
+    with contextlib.ExitStack() as handles:
+        # Create the event first so a second launch can signal us during startup.
+        event = kernel32.CreateEventW(None, False, False, name + "-activate")
+        if not event:
+            raise ctypes.WinError(ctypes.get_last_error())
+        handles.callback(_winapi.CloseHandle, event)
+        mutex = kernel32.CreateMutexW(None, False, name)
+        if not mutex:
+            raise ctypes.WinError(ctypes.get_last_error())
+        handles.callback(_winapi.CloseHandle, mutex)
+        if _winapi.WaitForSingleObject(mutex, 0) == _winapi.WAIT_TIMEOUT:
+            if not kernel32.SetEvent(event):
+                raise ctypes.WinError(ctypes.get_last_error())
+            yield None
+            return
+        handles.callback(kernel32.ReleaseMutex, mutex)
+        yield event
+
+
+def _raise_windows_admin(root):
+    import ctypes
+    from ctypes import wintypes
+
+    if root.state() in ("iconic", "withdrawn"):
+        root.deiconify()
+    # An already active window can still be covered by an inactive one.
+    root.lift()
+    user32 = ctypes.WinDLL("user32")
+    user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetLastActivePopup.argtypes = [wintypes.HWND]
+    user32.GetLastActivePopup.restype = wintypes.HWND
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT, Tk's outer window
+    popup = user32.GetLastActivePopup(hwnd)
+    target = popup if popup and user32.IsWindowVisible(popup) else hwnd
+    if not user32.SetForegroundWindow(target):
+        # The background broker may start us without permission to take focus.
+        # Move above regular windows and immediately return to the normal Z order.
+        root.attributes("-topmost", True)
+        root.attributes("-topmost", False)
+
+
+def _watch_windows_activation(root, event):
+    import _winapi
+
+    if _winapi.WaitForSingleObject(event, 0) == _winapi.WAIT_OBJECT_0:
+        _raise_windows_admin(root)
+    root.after(100, _watch_windows_activation, root, event)
+
+
+def _run_window(model: AdminModel, dict_dir: Path | None, event=None) -> int:
+    if dict_dir is not None:
         from yuragi.lattice import mozc_dict
-        mozc_dict.DICT_DIR = args.dict_dir
+        mozc_dict.DICT_DIR = dict_dir
     try:
         import tkinter as tk
     except ImportError:
@@ -609,9 +674,28 @@ def main(argv=None) -> int:
         return 1
     declare_dpi_aware()
     root = tk.Tk()
-    AdminWindow(root, AdminModel(args.runtime_dir, args.config))  # opens on 単語登録
+    AdminWindow(root, model)  # opens on 単語登録
+    if event is not None:
+        root.update_idletasks()
+        _raise_windows_admin(root)
+        root.after(100, _watch_windows_activation, root, event)
     root.mainloop()
     return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--runtime-dir", type=Path, default=None)
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--dict-dir", type=Path, default=None)
+    args = parser.parse_args(argv)
+    model = AdminModel(args.runtime_dir, args.config)
+    if sys.platform != "win32":
+        return _run_window(model, args.dict_dir)
+    with _windows_activation(model.config_file) as event:
+        if event is None:
+            return 0
+        return _run_window(model, args.dict_dir, event)
 
 
 if __name__ == "__main__":
