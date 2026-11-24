@@ -94,7 +94,7 @@ class KeyDispatchTest(EngineCase):
         self.assertEqual(reply["phase"], "empty")
         self.assertGreater(reply["timer"], 101)
 
-        reply = self.request(engine, 1, {"op": "down", "vk": 0x14, "t": 101, "mods": ["shift"]})
+        reply = self.request(engine, 1, {"op": "down", "vk": 0xF0, "t": 101, "mods": ["shift"]})
         self.assertIs(reply["eat"], True)
         self.assertEqual((reply["phase"], reply["composition"], reply["commit"]),
                          ("composing", "宇", ""))
@@ -103,7 +103,7 @@ class KeyDispatchTest(EngineCase):
     def test_shift_caps_lock_without_input_requests_toggle(self):
         engine = self.engine()
         self.open(engine, 1)
-        reply = self.request(engine, 1, {"op": "down", "vk": 0x14, "mods": ["shift"]})
+        reply = self.request(engine, 1, {"op": "down", "vk": 0xF0, "mods": ["shift"]})
         self.assertIs(reply["eat"], False)
         self.assertEqual(reply["global"], "ime_toggle")
         self.assertEqual((reply["phase"], reply["commit"]), ("empty", ""))

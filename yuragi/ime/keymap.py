@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
 from yuragi.chord.keys import (
-    ALT, DEFAULT_KEYBOARD, KEYBOARDS, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, Keyboard,
+    ALT, DEFAULT_KEYBOARD, KEYBOARDS, MODE_KEYS, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, Keyboard,
     modifier_bits,
 )
 from . import config
@@ -20,7 +20,8 @@ PRESET_PATH = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime
 DEFAULT_PRESET = "ms-ime"
 KEYMAP_NAME = "keymap.json"
 CUSTOM = "custom"
-DEFAULT_TOGGLE = Chord("`", ALT)
+DEFAULT_TOGGLE = Chord("`", ALT)  # tip.json's default: Alt+` as pressed, which Windows makes 漢字
+KANJI = Chord("漢字")
 
 PARENT = {
     "direct": "global",
@@ -40,7 +41,8 @@ type Bindings = dict[BindingKey, str | None]
 def chord_allowed(phase: str, chord: Chord) -> bool:
     """The same on every keyboard (KEYBIND §4.2)."""
     return not (
-        (chord.alt_only and phase != "global")
+        (chord.key in MODE_KEYS and chord.mods)  # Windows makes these with the modifier
+        or (chord.alt_only and phase != "global")
         or (chord.character and phase in ("empty", "composing"))
         or (chord.typing and phase in ("global", "direct"))
     )
@@ -225,7 +227,7 @@ def _legacy_overrides(data_dir: Path) -> Bindings:
         Chord.parse(str(chord))
     except ValueError:
         return {}
-    return {("global", DEFAULT_TOGGLE): None, ("global", chord): "ime_toggle"}
+    return {("global", KANJI): None, ("global", chord): "ime_toggle"}
 
 
 @dataclass

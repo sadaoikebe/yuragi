@@ -354,7 +354,7 @@ class DeadlineTest(unittest.TestCase):
         keys = Typist().kana("きしゃ").space()
         for event in keys.events:
             pipe.handle(event)
-        requests = ((11, VK_RETURN, []), (12, 0x14, ["shift"]), (13, VK_RETURN, []))
+        requests = ((11, VK_RETURN, []), (12, 0xF0, ["shift"]), (13, VK_RETURN, []))
         for seq, vk, mods in requests:
             reply = pipe.handle({"op": "down", "vk": vk, "mods": mods, "seq": seq,
                                  "t": keys.t + seq})
@@ -426,7 +426,7 @@ class DeadlineTest(unittest.TestCase):
 
     def test_the_current_keys_global_passes_through_the_pipeline(self):
         pipe, _, _ = self.pipeline(prefetch="off")
-        reply = pipe.handle({"op": "down", "vk": 0x14, "mods": ["shift"], "t": 0})
+        reply = pipe.handle({"op": "down", "vk": 0xF0, "mods": ["shift"], "t": 0})
         self.assertEqual((reply["eat"], reply["global"]), (False, "ime_toggle"))
 
     def test_while_the_lm_loads_the_conversion_does_not_wait(self):

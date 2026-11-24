@@ -18,7 +18,7 @@ from tests.support import Keys, small_lex, type_plain
 
 VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
-VK_CAPITAL, VK_PAGEUP = 0x14, 0x21
+VK_EISU, VK_PAGEUP = 0xF0, 0x21  # Shift+CapsLock on US delivers 英数
 
 
 class PartialCommitTest(unittest.TestCase):
@@ -517,7 +517,7 @@ class PartialCommitTest(unittest.TestCase):
     def test_shift_capslock_types_alphanumerics_and_the_end_turns_the_ime_off(self):
         k = Keys(self.session())
         k.send("down", ord("K"))  # awaiting the chord decision
-        held = k.press(VK_CAPITAL, ["shift"])
+        held = k.press(VK_EISU, ["shift"])
         k.send("up", ord("K"))
         self.assertEqual((held["phase"], held["eat"], held["composition"]),
                          ("composing", True, "き"))
@@ -530,16 +530,16 @@ class PartialCommitTest(unittest.TestCase):
 
     def test_shift_capslock_ends_when_backspace_empties_the_input(self):
         k = self.typed("きし")
-        k.press(VK_CAPITAL, ["shift"])
+        k.press(VK_EISU, ["shift"])
         self.assertEqual([k.press(0x08).get("global") for _ in range(2)], [None, "ime_off"])
         self.assertEqual(k.committed, "")
 
     def test_ctrl_capslock_after_shift_capslock_types_kana_again(self):
         k = Keys(self.session())
         k.plain("k")
-        k.press(VK_CAPITAL, ["shift"])
+        k.press(VK_EISU, ["shift"])
         k.plain("a")
-        dispatch(k.s, {"op": "set_mode", "mode": "hiragana"})  # the TIP's Ctrl+CapsLock
+        dispatch(k.s, {"op": "set_mode", "mode": "hiragana"})  # the TIP's ひらがな (Ctrl+CapsLock)
         k.plain("k")
         k.idle()
         done = k.press(VK_RETURN)
@@ -551,7 +551,7 @@ class PartialCommitTest(unittest.TestCase):
             k.plain(letter)
         k.convert()
         listed = k.convert()
-        held = k.press(VK_CAPITAL, ["shift"])
+        held = k.press(VK_EISU, ["shift"])
         self.assertEqual((held["phase"], held["composition"]), ("selecting", listed["composition"]))
         self.assertEqual(k.convert()["cand_index"], 2)  # the candidate keys still work
         ended = k.press(ord("W"))  # MS-IME commits and drops the character
@@ -564,7 +564,7 @@ class PartialCommitTest(unittest.TestCase):
         k = self.typed("わたしはがっこうにいく")
         k.convert()
         k.press(VK_LEFT, ["shift"])
-        self.assertEqual(k.press(VK_CAPITAL, ["shift"])["phase"], "resizing")
+        self.assertEqual(k.press(VK_EISU, ["shift"])["phase"], "resizing")
         self.assertEqual(k.convert()["phase"], "converting")
 
     # Shift+↓ before conversion commits the first press: MS-IME commits the
@@ -603,7 +603,7 @@ class PartialCommitTest(unittest.TestCase):
 
         k = Keys(self.session())
         k.plain("k")
-        k.press(VK_CAPITAL, ["shift"])
+        k.press(VK_EISU, ["shift"])
         k.plain("b")
         done = k.press(VK_DOWN, ["shift"])  # under Shift+CapsLock: all of it, then off
         self.assertEqual((done["commit"], done.get("global")), ("きb", "ime_off"))

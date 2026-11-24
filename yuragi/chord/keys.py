@@ -17,6 +17,12 @@ VK_IME_ON = 0x16
 VK_IME_OFF = 0x1A
 VK_CONVERT = 0x1C
 VK_NONCONVERT = 0x1D
+VK_KANJI = 0x19
+VK_DBE_ALPHANUMERIC = 0xF0  # 英数
+VK_DBE_KATAKANA = 0xF1
+VK_DBE_HIRAGANA = 0xF2
+VK_DBE_SBCSCHAR = 0xF3  # 半角/全角
+VK_DBE_DBCSCHAR = 0xF4  # 半角/全角 too: the key alternates its two codes
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12  # Alt
@@ -49,11 +55,12 @@ _MOD_BITS = {name.lower(): bit for name, bit, _ in _MODIFIERS}
 # The numeric keypad types the same on every keyboard.
 NUMPAD = {**dict(zip(range(0x60, 0x6A), "0123456789")), 0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"}
 
-# The keys other than character keys (docs/KEYBIND.md §4.1).
+# The keys other than character keys, by the names in MS-IME's key table (docs/KEYBIND.md §4.1).
 KEY_NAMES = {
     VK_SPACE: "Space", VK_RETURN: "Enter", VK_BACK: "Backspace", 0x09: "Tab",
     VK_IME_ON: "ImeOn", VK_IME_OFF: "ImeOff",
-    VK_CONVERT: "Convert", VK_NONCONVERT: "NonConvert",
+    VK_CONVERT: "変換", VK_NONCONVERT: "無変換", VK_KANJI: "漢字", VK_DBE_SBCSCHAR: "半角/全角",
+    VK_DBE_ALPHANUMERIC: "英数", VK_DBE_HIRAGANA: "ひらがな", VK_DBE_KATAKANA: "カタカナ",
     VK_ESCAPE: "Esc", 0x2E: "Delete", 0x2D: "Insert", 0x24: "Home", 0x23: "End",
     0x21: "PageUp", 0x22: "PageDown", 0x25: "Left", 0x27: "Right", 0x26: "Up",
     0x28: "Down", 0x14: "CapsLock", **{0x6F + n: f"F{n}" for n in range(1, 25)},
@@ -66,6 +73,12 @@ KEY_NAMES = {
 # fsm.THUMB_SIDE.
 THUMBS = {VK_SPACE: "space", VK_NONCONVERT: "muhenkan", VK_CONVERT: "henkan"}
 THUMB_VK = {key: vk for vk, key in THUMBS.items()}
+
+# Windows makes these from a key and a modifier (Alt+` is 漢字, Shift+CapsLock is 英数,
+# Shift+カタカナひらがなローマ字 is カタカナ): one row each, with no modifier.
+MODE_KEYS = frozenset({"漢字", "英数", "ひらがな", "カタカナ"})
+# The two a keyboard makes with Alt: TSF hands them to the IME as PreservedKeys only.
+ALT_MADE_KEYS = frozenset({"漢字", "カタカナ"})
 
 # Faces decided by the character, not the keyboard (docs/JIS.md §2).
 _KANA_SHIFT = {'"': "”", "'": "’"}  # the quotes as MS-IME types them
@@ -115,7 +128,7 @@ class Chord:
     @property
     def alt_only(self) -> bool:
         """Pressed with Alt and not Ctrl: TSF gives it to the IME only as a PreservedKey."""
-        return self.mods & (CTRL | ALT) == ALT
+        return self.mods & (CTRL | ALT) == ALT or self.key in ALT_MADE_KEYS
 
 
 SPACE = Chord("Space")
@@ -159,9 +172,14 @@ class Keyboard:
         return f"Keyboard({self.name!r})"
 
     def chord(self, vk: int, mods: int) -> Chord:
-        """The chord a key event is looked up by: the key's name on this keyboard."""
+        """The chord a key event is looked up by: Windows made the modifier part of a mode key."""
+        if vk == VK_DBE_DBCSCHAR:
+            vk = VK_DBE_SBCSCHAR
         key = self._by_vk.get(vk)
-        return Chord(key.name if key else KEY_NAMES.get(vk, f"VK_{vk:02X}"), mods)
+        name = key.name if key else KEY_NAMES.get(vk, f"VK_{vk:02X}")
+        if name in MODE_KEYS:
+            mods &= WIN
+        return Chord(name, mods)
 
     def code(self, chord: Chord) -> int | None:
         """The chord as the TIP sees it, or None for a key this keyboard lacks."""

@@ -400,20 +400,24 @@ inline bool ModifierVk(uint32_t vk) {
            (vk >= 0xA0 && vk <= 0xA5);
 }
 
+// keys.Keyboard.chord: Windows makes the mode keys 漢字, 英数, カタカナ and ひらがな from a key and
+// a modifier (Alt+` is 漢字), so the table has them without one. 半角/全角 alternates two codes.
 inline Chord NormalizeKey(uint32_t vk, Mods mods) {
-    // kbd101 reports the translated virtual key even if GetKeyState
-    // has moved on. Recover the modifiers from that event's VK.
-    Mods shift{}, ctrl{}, alt{};
-    shift.shift = ctrl.ctrl = alt.alt = true;
-    shift.win = ctrl.win = alt.win = mods.win;
     switch (vk) {
-        case 0x19: return {0xC0, alt};   // VK_KANJI
-        case 0xF0: return {0x14, shift}; // VK_DBE_ALPHANUMERIC
-        case 0xF1: return {0x14, alt};   // VK_DBE_KATAKANA
-        case 0xF2: return {0x14, ctrl};  // VK_DBE_HIRAGANA
-        case 0xF3: case 0xF4: return {0xC0, ctrl}; // VK_DBE_SBCSCHAR / DBCSCHAR
+        case 0x19: case 0xF0: case 0xF1: case 0xF2: {
+            Mods win{};
+            win.win = mods.win;
+            return {vk, win};
+        }
+        case 0xF4: return {0xF3, mods};
         default: return {vk, mods};
     }
+}
+
+// Chord.alt_only: TSF gives these to the IME only as PreservedKeys. A keyboard makes 漢字 and
+// カタカナ with Alt.
+inline bool AltOnly(Chord chord) {
+    return (chord.mods.alt && !chord.mods.ctrl) || chord.vk == 0x19 || chord.vk == 0xF1;
 }
 
 // Generated from the same keyboard as the engine's key table (data/keyboards).
@@ -464,7 +468,7 @@ inline bool UntranslatedJisKey(uint32_t vk, uint32_t flags) {
 inline bool HoldDuringCarry(Chord chord, uint32_t raw_vk, uint32_t flags, bool is_global) {
     return !chord.mods.win && !ModifierVk(raw_vk) && !KanaLockKey(raw_vk, flags) &&
            !UntranslatedJisKey(raw_vk, flags) &&
-           (!chord.mods.alt || chord.mods.ctrl || is_global);
+           (!AltOnly(chord) || is_global);
 }
 
 // A replay opens a window between the echoed down and the next pump. Once
@@ -527,8 +531,8 @@ inline GlobalUse UseGlobal(unsigned code, const Local& local, const KeyTable& ta
 enum class Take { Pass, Send };
 
 inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
-    if (local.phase == Phase::Direct || chord.mods.win || ModifierVk(chord.vk) ||
-        (chord.mods.alt && !chord.mods.ctrl)) return Take::Pass;
+    if (local.phase == Phase::Direct || chord.mods.win || ModifierVk(chord.vk) || AltOnly(chord))
+        return Take::Pass;
     switch (UseGlobal(chord.Code(), local, table)) {
         case GlobalUse::Run: return Take::Pass;
         case GlobalUse::Ask: return Take::Send;

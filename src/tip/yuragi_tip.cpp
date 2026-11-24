@@ -1220,7 +1220,7 @@ public:
         if (toggle != default_toggle && !(mods & 8) && !tip_logic::ModifierVk(settings_.toggle_vk) &&
             !tip_logic::Typing({settings_.toggle_vk, {(mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, false}})) {
             keymap_.rev.clear(); // the broker's copy takes precedence when received
-            keymap_.global.erase(default_toggle);
+            keymap_.global.erase(VK_KANJI);  // the row Alt+` reaches
             keymap_.global[toggle] = tip_logic::GlobalCommand::Toggle;
         }
         g_log = settings_.log;
@@ -2512,13 +2512,13 @@ private:
         UnpreserveKeys(km);
         for (const auto& [code, command] : keymap_.global) {
             unsigned mods = code >> 8;
-            if ((mods & 6) != 4 || preserved_.size() == 40) continue;  // Alt without Ctrl
+            UINT vk = code & 0xFF;
+            const tip_logic::Chord chord{vk, {bool(mods & 1), bool(mods & 2), bool(mods & 4), false}};
+            if (!tip_logic::AltOnly(chord) || preserved_.size() == 40) continue;
             GUID guid = GUID_YuragiToggle;
             guid.Data1 += (ULONG)preserved_.size();
-            UINT vk = code & 0xFF;
-            UINT flags = TF_MOD_ALT | ((mods & 1) ? TF_MOD_SHIFT : 0);
-            if (vk == VK_OEM_3 && mods == 4) { vk = VK_KANJI; flags = TF_MOD_IGNORE_ALL_MODIFIER; }
-            if (vk == VK_CAPITAL && mods == 4) { vk = 0xF1; flags = TF_MOD_IGNORE_ALL_MODIFIER; }
+            // A made key (漢字, カタカナ) is caught whatever modifier made it (windows.md §3.6).
+            UINT flags = mods ? TF_MOD_ALT | ((mods & 1) ? TF_MOD_SHIFT : 0) : TF_MOD_IGNORE_ALL_MODIFIER;
             TF_PRESERVEDKEY preserved{vk, flags};
             if (SUCCEEDED(km->PreserveKey(client_, guid, &preserved, nullptr, 0)))
                 preserved_.push_back({guid, preserved, code});

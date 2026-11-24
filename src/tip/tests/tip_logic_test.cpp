@@ -82,14 +82,15 @@ static void EatingKeys() {
     assert(take('C', win, Phase::Composing) == Take::Pass);
     assert(take('A', none, Phase::Direct) == Take::Pass);
 
-    auto kanji = NormalizeKey(0x19, none);
-    assert(kanji.vk == 0xC0 && kanji.mods.alt);
+    auto kanji = NormalizeKey(0x19, alt);  // Alt+`
+    assert(kanji.Code() == 0x19 && AltOnly(kanji));
     assert(table.global.at(kanji.Code()) == GlobalCommand::Toggle);
-    assert(NormalizeKey(0xF3, none).Code() == NormalizeKey(0xF4, none).Code());
-    assert(take(0xF3, none, Phase::Composing) == Take::Pass);
+    assert(NormalizeKey(0xF3, ctrl).Code() == NormalizeKey(0xF4, ctrl).Code());
+    assert(take(0xF4, ctrl, Phase::Composing) == Take::Pass);  // Ctrl+`: Ctrl+半角/全角
     assert(take(0xC0, none, Phase::Composing) == Take::Send);
-    auto caps = NormalizeKey(0xF0, none);
-    auto ctrl_caps = NormalizeKey(0x14, ctrl);
+    auto caps = NormalizeKey(0xF0, shift);  // Shift+CapsLock: 英数
+    auto ctrl_caps = NormalizeKey(0xF2, ctrl);  // Ctrl+CapsLock: ひらがな
+    assert(caps.Code() == 0xF0 && ctrl_caps.Code() == 0xF2);
     assert(UseGlobal(caps.Code(), {Phase::Empty, true}, table) == GlobalUse::Ask);
     assert(UseGlobal(ctrl_caps.Code(), {Phase::Empty, true}, table) == GlobalUse::Run);
     assert(UseGlobal(caps.Code(), {Phase::Empty, false}, table) == GlobalUse::Run);
@@ -219,7 +220,8 @@ static void HeldKeysRespectScopeAndSystemKeys() {
     assert(!HoldDuringCarry({0x15, {}}, 0x15, 0x3A << 16, false));
     assert(!HoldDuringCarry({'F', alt}, 'F', 0, false));
     assert(HoldDuringCarry({'F', ctrl_alt}, 'F', 0, false));
-    assert(HoldDuringCarry({0xC0, alt}, 0x19, 0, true));
+    assert(HoldDuringCarry({0x19, {}}, 0x19, 0, true));
+    assert(!HoldDuringCarry({0x19, {}}, 0x19, 0, false));
 }
 
 static void HeldKeysDrainInOrderAfterTab() {
@@ -342,7 +344,7 @@ static int CompareEngineKeys() {
         assert(it != kPhaseNames.end());
         auto phase = static_cast<Phase>(it - kPhaseNames.begin());
         Mods mods{bool(flags & 1), bool(flags & 2), bool(flags & 4), bool(flags & 8)};
-        if ((WantKey({vk, mods}, {phase, false}, table) == Take::Send) != sends) {
+        if ((WantKey(NormalizeKey(vk, mods), {phase, false}, table) == Take::Send) != sends) {
             std::fprintf(stderr, "%s vk=%u mods=%u disagrees with engine\n", name.c_str(), vk, flags);
             return 1;
         }

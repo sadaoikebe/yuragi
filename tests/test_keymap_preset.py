@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yuragi.chord.keys import CTRL, KEYBOARDS, SHIFT, Chord
+from yuragi.chord.keys import CTRL, KEYBOARDS, SHIFT, VK_DBE_ALPHANUMERIC, VK_DBE_DBCSCHAR, Chord
 from yuragi.ime import keymap
 
 ANSI, JIS = KEYBOARDS["ansi101"], KEYBOARDS["jis106"]
@@ -144,6 +144,17 @@ class OneTableTest(unittest.TestCase):
         self.assertEqual(ANSI.code(ctrl_semicolon), 0xBA | CTRL << 8)
         self.assertEqual(JIS.code(ctrl_semicolon), 0xBB | CTRL << 8)
         self.assertEqual(JIS.chord(0xBA, CTRL), Chord(":", CTRL))
+
+    def test_mode_keys_are_looked_up_without_the_modifier_that_made_them(self):
+        self.assertEqual(ANSI.chord(VK_DBE_ALPHANUMERIC, SHIFT), Chord("英数"))  # Shift+CapsLock
+        self.assertEqual(ANSI.chord(VK_DBE_DBCSCHAR, CTRL), Chord("半角/全角", CTRL))  # Ctrl+`
+        self.assertFalse(keymap.chord_allowed("global", Chord.parse("Shift+英数")))
+
+    def test_the_rules_do_not_depend_on_the_keyboard(self):
+        allowed = {name: keymap.chord_allowed(phase, Chord.parse(name))
+                   for phase, name in (("global", "変換"), ("composing", "漢字"),
+                                       ("composing", "'"), ("converting", "Ctrl+@"))}
+        self.assertEqual(allowed, {"変換": False, "漢字": False, "'": False, "Ctrl+@": True})
 
     def test_a_key_the_keyboard_lacks_keeps_its_row(self):
         rows = [["converting", "Ctrl+'", "commit"], ["converting", "Ctrl+@", "commit"]]

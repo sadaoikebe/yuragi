@@ -31,7 +31,7 @@ Windows の設定とキーボードの対応は次のスキャンコードで見
 
 ## 3. TIP とエンジンの接続
 
-- `tip_logic.h` と `yuragi_tip.cpp` のキー正規化と文字キー判定をプロファイルで引く。JIS の通常の文字キーは Windows の VK で識別し、`VK_OEM_102` を含める。半角/全角（`0x29`）、英数（`0x3A`）、カタカナひらがなローマ字（`0x70`）、変換（`0x79`）、無変換（`0x7B`）は、スキャンコード・打鍵時の修飾・生 VK から論理キーへ戻す。和音は基底 VK と修飾の組で表す。Windows の Caps Lock、かなロック、その他の専用ショートカットが、単独の IME キーとして再解釈されないようにする。[WDK の NLS 表](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L467-L571)
+- `tip_logic.h` と `yuragi_tip.cpp` の文字キー判定をプロファイルで引く。JIS の通常の文字キーは Windows の VK で識別し、`VK_OEM_102` を含める。IME 用のキーも、Windows が届けた VK のまま和音にする（[KEYBIND.md](KEYBIND.md#41-和音の書き方) §4.1）。Windows の Caps Lock、かなロック、その他の専用ショートカットが、単独の IME キーとして再解釈されないようにする。[WDK の NLS 表](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L467-L571)
 - 特殊キーの解放は押下時に決めた論理キーに対応させる。押下と解放で異なる DBE の VK が届くため、対応付けにはスキャンコードと拡張ビットを使う。普通のキーでスキャンコードがない場合は VK を使う。識別できない特殊イベントは通す。JIS の Alt+半角/全角は `VK_KANJI` の PreservedKey を使い、`keyprobe` で受け取れる登録形を確定する。登録が機能する経路では同じ打鍵を通常のキーコールバックから重ねて実行しない。対象外の入力欄、フォーカス移動、キーの送り直しには既存の規則を適用する。[PreserveKey](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfkeystrokemgr-preservekey) [Windows のキー入力](keybind/windows.md)
 - CMake がプロファイルごとの既定キー表と文字キー集合を Python の表から生成する。TIP は接続前から自分の配列の既定表を使い、動作できる範囲を既存の準備中の規則で決める。JIS のキー処理はエンジンと配列が一致してから有効にする。
 - プロトコル 1 の `keymap` に `layout` を加え、`rev` に含める。ブローカーは既存の hello と更新通知でオブジェクトを運ぶ。JIS の打鍵・タイマー・モード変更要求には `layout: "jis106"` を付ける。ANSI の既存メッセージでは省略時を `ansi101` と扱う。配列が異なる要求は入力状態を変更せず、打鍵には `eat: false` を返す。Caps Lock は `caps_lock` を打鍵に付け、省略時はオフとする。JIS を利用するには新しい TIP とエンジンを組み合わせ、更新時は開いているアプリを再起動する。[通信の互換規則](DESIGN.md#互換の規則)

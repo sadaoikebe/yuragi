@@ -308,6 +308,12 @@ Shift+↓ の 1 文字確定・先頭確定、Ctrl+↓・Ctrl+N の文節確定�
 （Hiragana key＝ひらがなキー、Input Method＝入力方式、Reconv＝再変換、Katakana key＝カタカナキー、ToggleKana＝かな変換、FullAlphanumeric＝全角英数）。
 「IME オフ」は画面の「IME OFF」。
 
+この PC（Windows 11）のレジストリにある同じテンプレートの表（`HKCU\SOFTWARE\Microsoft\IME\15.0\IMEJP\StyleList\NATURAL` の値 `key`。Shift_JIS の「キー名=状態ごとのコード」が 65 行）も見た。
+
+- 表は 1 つの値だけで、キーボードの種類ごとの値は無い。
+- 専用キーの行は 半角/全角・漢字・英数・変換・無変換・カタカナ・Shift+カタカナ・ひらがな・ローマ字。カタカナと Shift+カタカナは同じコード。
+- US キーボードの押し方（Alt+`` ` ``、Shift+CapsLock など）の行も、記号キーの行も無い。
+
 ### 2.3 カーソル・文節操作（矢印、Home/End、PageUp/Down）
 
 | キー | ①なし | ②入力のみ | ③変換済み | ④候補一覧 | ⑤文節長変更 | ⑥文節内入力 |

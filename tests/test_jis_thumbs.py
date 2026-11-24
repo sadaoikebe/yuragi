@@ -17,7 +17,7 @@ from yuragi.lattice.table import load_table
 from tests.support import Keys
 
 JIS = KEYBOARDS["jis106"]
-MUHENKAN, HENKAN, ENTER = Chord("NonConvert"), Chord("Convert"), Chord("Enter")
+MUHENKAN, HENKAN, ENTER = Chord("無変換"), Chord("変換"), Chord("Enter")
 BINDINGS = {
     ("empty", SPACE): "insert_space",
     ("empty", MUHENKAN): "cycle_kana_mode",
@@ -227,8 +227,8 @@ class LoneThumbKeyTest(unittest.TestCase):
 
     def test_with_a_modifier_it_is_a_command_key(self):
         k = Typist()
-        k.s.keymap = Keymap({**BINDINGS, ("composing", Chord("Convert", SHIFT)): "commit"})
-        self.assertEqual(JIS.chord(VK_CONVERT, SHIFT), Chord.parse("Shift+Convert"))
+        k.s.keymap = Keymap({**BINDINGS, ("composing", Chord("変換", SHIFT)): "commit"})
+        self.assertEqual(JIS.chord(VK_CONVERT, SHIFT), Chord.parse("Shift+変換"))
         k.play("w+0 w-50")
         reply = k.send("down", VK_CONVERT, ["shift"])
         self.assertEqual((reply["commit"], k.s.fsm.state, k.s.fsm.held), ("か", "S1", {}))

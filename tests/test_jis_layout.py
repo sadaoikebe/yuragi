@@ -7,7 +7,7 @@ from yuragi.chord.keys import (
     KEYBOARDS, VK_OEM_1, VK_OEM_102, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_PLUS,
     VK_SPACE, Chord,
 )
-from yuragi.ime.keymap import Keymap
+from yuragi.ime.keymap import Keymap, default_keymap
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table
 from tests.support import Keys, small_lex
@@ -39,7 +39,8 @@ class JisKeyboardTest(unittest.TestCase):
         self.assertEqual(ANSI.literal_character(VK_OEM_7, True), "”")
 
     def test_names_are_the_engravings(self):
-        for name in ("@", "^", "¥", ";", ":", "]", "\\", "Shift+0", "Ctrl+[", "Ctrl+'"):
+        for name in ("@", "^", "¥", ";", ":", "]", "\\", "Shift+0", "Ctrl+[", "半角/全角", "Ctrl+半角/全角",
+                     "英数", "ひらがな", "カタカナ", "漢字", "変換", "Shift+無変換", "Ctrl+'"):
             self.assertEqual(str(Chord.parse(name)), name)
         self.assertEqual(JIS.chord(VK_SEMI, 0), Chord(";"))
         self.assertEqual(JIS.chord(VK_YEN, 0), Chord("¥"))
@@ -152,3 +153,34 @@ class JisTypingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JisImeKeyTest(unittest.TestCase):
+    """The IME keys of a JIS keyboard in the one key table (docs/KEYBIND.md §4.1)."""
+
+    def keys(self):
+        return jis_keys(default_keymap())
+
+    def test_mode_keys(self):
+        k = self.keys()
+        for vk, mods, command in ((0xF3, None, "ime_toggle"), (0x19, ["alt"], "ime_toggle"),
+                                  (0xF0, None, "ime_toggle"), (0xF2, None, "mode_hiragana"),
+                                  (0xF1, ["shift"], "mode_katakana")):
+            reply = k.press(vk, mods)
+            self.assertEqual((reply["eat"], reply.get("global")), (False, command), hex(vk))
+
+    def test_hankaku_zenkaku_keeps_the_input_and_types_alphanumerics(self):
+        k = self.keys()
+        k.tap(ord("S"))
+        k.idle()
+        reply = k.press(0xF3)
+        self.assertEqual((reply["eat"], reply["phase"], reply["commit"]), (True, "composing", ""))
+        k.tap(ord("A"))
+        self.assertEqual(k.idle()["composition"], "しa")
+
+    def test_ctrl_hankaku_zenkaku_passes_without_committing(self):
+        k = self.keys()
+        k.tap(ord("S"))
+        k.idle()
+        reply = k.press(0xF3, ["ctrl"])
+        self.assertEqual((reply["eat"], reply["commit"], reply["phase"]), (False, "", "composing"))
