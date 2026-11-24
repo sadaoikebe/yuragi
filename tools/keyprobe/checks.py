@@ -382,9 +382,176 @@ def check_late_alt():
     check_late({"`+Alt", "CapsLock+Alt"})
 
 
+# -- kbd106: the JIS IME keys (docs/JIS.md §3). Run with the Japanese keyboard setting (kbd106). -----------
+
+JIS_SC = {"半角/全角": 0x29, "英数": 0x3A, "ひらがな": 0x70, "変換": 0x79, "無変換": 0x7B}
+JIS_MODS = (("", 0), ("Shift+", SHIFT), ("Ctrl+", CTRL), ("Alt+", ALT), ("Ctrl+Shift+", CTRL | SHIFT),
+            ("Alt+Shift+", ALT | SHIFT), ("Ctrl+Alt+", CTRL | ALT))
+JIS_VKS = (0x19, 0x14, 0x15, 0x1C, 0x1D, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6)
+# Alt chords reach the TIP only as PreservedKeys, so register every VK they may become.
+JIS_PRESERVE = [(vk, m) for m in (ALT, ALT | SHIFT, ALT | CTRL) for vk in JIS_VKS]
+
+
+def _jis_layout():
+    import ctypes
+    n = L.user32.GetKeyboardLayoutList(0, None)
+    hkls = (ctypes.c_void_p * n)()
+    L.user32.GetKeyboardLayoutList(n, hkls)
+    japanese = [h for h in hkls if h and h & 0xFFFF == 0x0411]
+    if not japanese or any(L.user32.MapVirtualKeyExW(0x29, 3, ctypes.c_void_p(h)) != 0xF3 for h in japanese):
+        raise L.Aborted("the keyboard setting is not kbd106 (scan 0x29 is not VK 0xF3)")
+
+
+def _jis_unstick():
+    """Send the up of any IME VK or lock key the layout left down, then undo caps and kana lock."""
+    for vk in JIS_VKS:
+        if L.user32.GetAsyncKeyState(vk) & 0x8000:
+            L.guard()
+            L.send(vk, True)
+    st = L.key_state(EXE)
+    for name, vk in (("ks_capital", L.VK_CAPITAL), ("ks_kana", 0x15)):
+        if st.get(name, 0) & 1:
+            L.chord(vk)
+    return L.key_state(EXE)
+
+
+def _jis_rows(offset):
+    """Key callbacks other than the modifiers: the IME keys need not keep their scan code in lParam."""
+    return [r for r in L.key_rows(offset, EXE) if r.get("vk") not in ("0x10", "0x11", "0x12", "0xA0", "0xA1",
+                                                                       "0xA2", "0xA3", "0xA4", "0xA5")]
+
+
+def _jis_describe(rows):
+    out = []
+    for r in rows:
+        if r["what"] == "PreservedKey":
+            out.append(L.describe([r], JIS_PRESERVE))
+        else:
+            out.append(f"{r['what']}:{r['vk']}/{r.get('scan')}{'e' if r.get('ext') == '1' else ''}")
+    return " ".join(out) or "(nothing)"
+
+
+def _jis_held():
+    return " ".join(f"{vk:#04x}" for vk in JIS_VKS if L.user32.GetAsyncKeyState(vk) & 0x8000) or "-"
+
+
+# Ctrl+Shift and Alt+Shift pressed and released with no other key between are Windows hotkeys that switch the
+# input method (orders C and D give exactly that). A switch is recorded on the row and undone.
+def _jis_hkl(tk):
+    return L.user32.GetKeyboardLayout(L.user32.GetWindowThreadProcessId(tk.hwnd, None)) & 0xFFFFFFFF
+
+
+def _jis_restore_hkl(tk, before):
+    """Undo an input method switch: "" when none happened, else what it was and whether it came back."""
+    after = _jis_hkl(tk)
+    if after == before:
+        return ""
+    L.user32.PostMessageW(tk.hwnd, 0x0050, 0, before)  # WM_INPUTLANGCHANGEREQUEST
+    time.sleep(0.5)
+    back = _jis_hkl(tk)
+    return f" | SWITCHED {before:#010x}->{after:#010x}, restored={'ok' if back == before else f'NG {back:#010x}'}"
+
+
+VK_F13 = 0x7C
+
+
+def _jis_tip_alive():
+    """The probe TIP logs a harmless F13: it is the input method of the window."""
+    off = L.log_size()
+    L.chord(VK_F13, settle=0.3)
+    return any(r.get("vk") == "0x7C" for r in L.key_rows(off, EXE))
+
+
+def _jis_restore_tip(tk, hkl):
+    """Undo a switch away from the probe TIP: the language (WM_INPUTLANGCHANGEREQUEST), then Ctrl+Shift, which
+    steps to the next input method of the language. Returns what happened, for the row."""
+    notes = []
+    if _jis_hkl(tk) != hkl:
+        notes.append(f"language {hkl:#010x}->{_jis_hkl(tk):#010x}")
+        L.user32.PostMessageW(tk.hwnd, 0x0050, 0, hkl)  # WM_INPUTLANGCHANGEREQUEST
+        time.sleep(0.5)
+    if _jis_tip_alive():
+        return f" | SWITCHED ({', '.join(notes)}), restored=ok" if notes else ""
+    notes.append("probe TIP off")
+    for tries in range(1, 5):
+        L.guard()
+        for vk, up, scan in ((L.VK_CONTROL, False, L.SC["ctrl"]), (L.VK_SHIFT, False, L.SC["shift"]),
+                             (L.VK_SHIFT, True, L.SC["shift"]), (L.VK_CONTROL, True, L.SC["ctrl"])):
+            L.send(vk, up, scan)
+        time.sleep(0.6)
+        if _jis_tip_alive():
+            return f" | SWITCHED ({', '.join(notes)}), restored=ok after {tries} Ctrl+Shift"
+    raise L.Aborted(f"could not get back to the probe TIP ({', '.join(notes)})")
+
+
+def check_jis_codes():
+    """JIS.md §3: what each JIS IME key with each modifier delivers on down and up, in all four release orders."""
+    _jis_layout()
+    L.probe()
+    tk = L.tk_target("keyprobe-jis-codes")
+    try:
+        L.probe(preserve=JIS_PRESERVE, exe=EXE)
+        _jis_unstick()
+        if not _jis_tip_alive():
+            raise L.Aborted("the probe TIP is not the input method of the window")
+        hkl = _jis_hkl(tk)
+        say(f"-- window input method {hkl:#010x}")
+        for key, scan in JIS_SC.items():
+            for prefix, mods in JIS_MODS:
+                for order in ORDERS + (("C", "D") if mods else ()):
+                    off, toff = L.log_size(), tk.size()
+                    if order in ("C", "D"):
+                        _late(scan, mods, order)
+                    else:
+                        L.chord(0, mods, scan=scan, order=order, settle=0.4)
+                    rows = _jis_rows(off)
+                    held = _jis_held()
+                    if mods & ALT:
+                        for _ in range(2):  # Alt released alone enters the window menu
+                            L.chord(L.VK_ESCAPE, settle=0.2)
+                    switched = _jis_restore_tip(tk, hkl)
+                    st = L.key_state(EXE)
+                    say(f"-- {prefix + key:22} {order:10}: {_jis_describe(rows)} | "
+                        f"app: {L.tk_text(tk, toff)} | held after: {held} | "
+                        f"caps={st.get('ks_capital', 0) & 1} kana={st.get('ks_kana', 0) & 1}{switched}")
+                    _jis_unstick()
+    finally:
+        L.probe()
+        tk.close()
+
+
+def check_jis_kanji():
+    """JIS.md §3: which PreservedKey form catches Alt+半角/全角, in all four orders."""
+    _jis_layout()
+    forms = {"{VK_KANJI, any}": [(0x19, ANY)], "{VK_KANJI, Alt}": [(0x19, ALT)],
+             "{0xF3, Alt}": [(0xF3, ALT)], "{0xF4, Alt}": [(0xF4, ALT)], "{0xF3, any}": [(0xF3, ANY)]}
+    L.probe()
+    tk = L.tk_target("keyprobe-jis-kanji")
+    try:
+        for name, keys in forms.items():
+            L.probe(preserve=keys, exe=EXE)
+            _jis_unstick()
+            for order in ORDERS + ("C", "D"):
+                off = L.log_size()
+                if order in ("C", "D"):
+                    _late(JIS_SC["半角/全角"], ALT, order)
+                else:
+                    L.chord(0, ALT, scan=JIS_SC["半角/全角"], order=order, settle=0.4)
+                rows = L.key_rows(off, EXE, scan=JIS_SC["半角/全角"])
+                for _ in range(2):
+                    L.chord(L.VK_ESCAPE, settle=0.2)
+                hits = sum(r["what"] == "PreservedKey" for r in rows)
+                say(f"-- {name:16} {order:10}: PreservedKey hits={hits} | {L.describe(rows, keys)} | held after: {_jis_held()}")
+                _jis_unstick()
+    finally:
+        L.probe()
+        tk.close()
+
+
 CHECKS = {"apps": check_apps, "test-only": check_test_only, "alt": check_alt, "preserve": check_preserve,
           "repeat": check_repeat, "capture": check_capture, "codes": check_codes, "kanji": check_kanji,
-          "toggle": check_toggle, "late": check_late, "late-alt": check_late_alt, "hold": check_hold}
+          "toggle": check_toggle, "late": check_late, "late-alt": check_late_alt, "hold": check_hold,
+          "jis-codes": check_jis_codes, "jis-kanji": check_jis_kanji}
 
 # -- a window for a person ----------------------------------------------------------------------------------
 
