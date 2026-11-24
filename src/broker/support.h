@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "broker_core.h"
@@ -12,7 +13,7 @@ namespace broker {
 
 namespace fs = std::filesystem;
 
-constexpr uintmax_t LOG_MAX_BYTES = 1024 * 1024;  // DESIGN「定数」: 1MB x 2 generations
+constexpr uintmax_t LOG_MAX_BYTES = 1024 * 1024;  // 1 MiB per generation
 
 // What a platform event loop drives: the Broker, or the SelfTest.
 class Handler {
@@ -46,20 +47,16 @@ private:
     Broker& broker_;
 };
 
-// A log file of at most LOG_MAX_BYTES.
-//  Rotating (broker.log): when full, it becomes <prev> and a new one starts.
-//  Trimming (engine.log): Rotate() at each engine start moves the last run's
-//  log to <prev>; when full, the oldest half of the current one is dropped.
+// Keep two generations of up to LOG_MAX_BYTES each. Rotate before a new line
+// would overflow the current one. The engine also rotates when it starts.
 class BoundedLog {
 public:
-    BoundedLog(fs::path path, fs::path prev, bool trim) : path_(path), prev_(prev), trim_(trim) {}
-    void Write(const std::string& line);  // one line, '\n' added
-    void Rotate();
+    BoundedLog(fs::path path, fs::path prev) : path_(path), prev_(prev) {}
+    void Write(std::string_view line);  // one line, '\n' added
+    bool Rotate();
 
 private:
-    void Limit();
     fs::path path_, prev_;
-    bool trim_;
 };
 
 std::string Timestamp();  // local time, ISO 8601 with milliseconds

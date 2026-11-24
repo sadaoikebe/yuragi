@@ -22,35 +22,29 @@ void Write(const fs::path& path, const std::string& text) {
     std::ofstream(path, std::ios::binary) << text;
 }
 
-// Enough lines to pass LOG_MAX_BYTES; the last one is "last".
-void Fill(BoundedLog& log) {
-    const std::string line(999, 'x');
-    for (uintmax_t written = 0; written <= LOG_MAX_BYTES; written += line.size() + 1) log.Write(line);
-    log.Write("last");
-}
-
-// DESIGN「定数」: 1MB x 2 generations. broker.log goes to broker.prev.log when full.
 void RotatingLogKeepsTwoGenerations(const fs::path& dir) {
-    BoundedLog log(dir / "broker.log", dir / "broker.prev.log", false);
-    Fill(log);
-    assert(fs::file_size(dir / "broker.prev.log") > LOG_MAX_BYTES);
+    BoundedLog log(dir / "broker.log", dir / "broker.prev.log");
+    const std::string full(LOG_MAX_BYTES - 1, 'x');
+    log.Write(full);
+    assert(fs::file_size(dir / "broker.log") == LOG_MAX_BYTES);
+    assert(!fs::exists(dir / "broker.prev.log"));
+    log.Write("last");
+    assert(Read(dir / "broker.prev.log") == full + '\n');
     assert(Read(dir / "broker.log") == "last\n");
+    log.Write(std::string(LOG_MAX_BYTES, 'x'));
+    assert(Read(dir / "broker.log") == "last\n[log line exceeded the size limit; dropped]\n");
 }
 
-// engine.log: the last run's log goes to engine.prev.log at a start; a full one drops its older half.
-void TrimmingLogDropsItsOlderHalf(const fs::path& dir) {
+void EngineLogRotatesAtStartAndWhenFull(const fs::path& dir) {
     Write(dir / "engine.log", "the last run\n");
-    BoundedLog log(dir / "engine.log", dir / "engine.prev.log", true);
-    log.Rotate();
+    BoundedLog log(dir / "engine.log", dir / "engine.prev.log");
+    assert(log.Rotate());
     assert(Read(dir / "engine.prev.log") == "the last run\n");
-    Fill(log);
-    const std::string kept = Read(dir / "engine.log");
-    const std::string mark = "[earlier lines dropped: the log is kept under 1 MB]\n";
-    assert(kept.size() <= LOG_MAX_BYTES && kept.size() > LOG_MAX_BYTES / 2 - 1000);
-    assert(kept.compare(0, mark.size(), mark) == 0);
-    assert(kept.compare(mark.size(), 1000, std::string(999, 'x') + "\n") == 0);  // from a line start
-    assert(kept.compare(kept.size() - 5, 5, "last\n") == 0);
-    assert(Read(dir / "engine.prev.log") == "the last run\n");
+    const std::string full(LOG_MAX_BYTES - 1, 'x');
+    log.Write(full);
+    log.Write("last");
+    assert(Read(dir / "engine.prev.log") == full + '\n');
+    assert(Read(dir / "engine.log") == "last\n");
 }
 
 // The management window reads the last stop from logs/notices.log (broker_client.last_stop).
@@ -93,7 +87,7 @@ int main() {
     fs::remove_all(dir);
     fs::create_directories(dir);
     RotatingLogKeepsTwoGenerations(dir);
-    TrimmingLogDropsItsOlderHalf(dir);
+    EngineLogRotatesAtStartAndWhenFull(dir);
     StopsAreRecordedForTheManagementWindow(dir);
     EngineConfigIsRead(dir);
     fs::remove_all(dir);

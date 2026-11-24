@@ -30,44 +30,24 @@ std::string Timestamp() {
     return out;
 }
 
-void BoundedLog::Write(const std::string& line) {
-    {
-        std::ofstream out(path_, std::ios::binary | std::ios::app);
-        if (!out) return;  // no log directory: nothing else depends on the log
-        out << line << '\n';
-    }
-    Limit();
+void BoundedLog::Write(std::string_view line) {
+    if (line.size() >= LOG_MAX_BYTES) line = "[log line exceeded the size limit; dropped]";
+    std::error_code ec;
+    const uintmax_t size = fs::file_size(path_, ec);
+    // If rotation fails, keep the existing log and try again on the next write.
+    if (!ec && size > LOG_MAX_BYTES - line.size() - 1 && !Rotate()) return;
+    std::ofstream out(path_, std::ios::binary | std::ios::app);
+    out << line << '\n';
 }
 
-void BoundedLog::Rotate() {
+bool BoundedLog::Rotate() {
     std::error_code ec;
-    if (fs::exists(path_, ec)) fs::rename(path_, prev_, ec);
-}
-
-void BoundedLog::Limit() {
-    std::error_code ec;
-    uintmax_t size = fs::file_size(path_, ec);
-    if (ec || size <= LOG_MAX_BYTES) return;
-    if (!trim_) {
-        fs::rename(path_, prev_, ec);
-        return;
-    }
-    // Keep the newest half, from a line start.
-    std::string data;
-    {
-        std::ifstream in(path_, std::ios::binary);
-        data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    }
-    size_t from = data.size() - LOG_MAX_BYTES / 2;
-    size_t nl = data.find('\n', from);
-    from = nl == std::string::npos ? data.size() : nl + 1;
-    std::ofstream out(path_, std::ios::binary | std::ios::trunc);
-    out << "[earlier lines dropped: the log is kept under 1 MB]\n";
-    out.write(data.data() + from, (std::streamsize)(data.size() - from));
+    fs::rename(path_, prev_, ec);
+    return !ec;
 }
 
 void RecordStop(const fs::path& logs, Stop reason) {
-    BoundedLog(logs / "notices.log", logs / "notices.prev.log", false)
+    BoundedLog(logs / "notices.log", logs / "notices.prev.log")
         .Write("{\"time\":\"" + Timestamp() + "\",\"stopped\":\"" + StopName(reason) + "\"}");
 }
 

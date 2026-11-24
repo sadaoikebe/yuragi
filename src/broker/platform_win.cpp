@@ -485,8 +485,8 @@ class WinPlatform : public SelfTestPlatform {
 public:
     WinPlatform(fs::path data_dir, EngineConfig config, bool have_config)
         : data_dir_(data_dir), config_(config), have_config_(have_config),
-          broker_log_(data_dir / "logs" / "broker.log", data_dir / "logs" / "broker.prev.log", false),
-          engine_log_(data_dir / "logs" / "engine.log", data_dir / "logs" / "engine.prev.log", true) {
+          broker_log_(data_dir / "logs" / "broker.log", data_dir / "logs" / "broker.prev.log"),
+          engine_log_(data_dir / "logs" / "engine.log", data_dir / "logs" / "engine.prev.log") {
         std::error_code ec;
         fs::create_directories(data_dir / "logs", ec);
         iocp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);

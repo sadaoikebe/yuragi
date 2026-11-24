@@ -194,6 +194,7 @@ TIP → ブローカー（プロトコル 1）:
   `PYTHONPATH` `PYTHONHOME` を消す。
 - 標準入力・標準出力は無名パイプ（ブローカーとの通信）。標準エラーは `logs\engine.log`
   （起動のたびに前の分を `engine.prev.log` に回す）。
+- ブローカー・エンジン・停止通知のログは各 1 MiB で 2 世代。次の行で上限を超える前に現在のログを `*.prev.log` に回す。
 - 「ブローカーが死んだら子も死ぬ」ジョブ（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）に入れる。孤児を残さない。
 - 作業フォルダは `versions\<tag>\app`。
 
