@@ -31,6 +31,9 @@ class KeyTab:
         self.preset_box = window._combobox(top, tk.StringVar(), (), 30)
         self.preset_box.pack(side="left", padx=window.px(6))
         self.preset_box.bind("<<ComboboxSelected>>", self._select_preset)
+        self.rename_button = ttk.Button(top, text="名前を変更…", command=self._rename,
+                                        state="disabled")
+        self.rename_button.pack(side="left")
         self.notes_button = ttk.Button(top, command=self._show_notes, text="読み込みの記録",
                                        state="disabled")
         self.notes_button.pack(side="right")
@@ -66,7 +69,7 @@ class KeyTab:
             self.save_button.configure(state="normal")
         self._draw()
 
-    def _draw(self, chord=None):
+    def _draw_presets(self):
         settings = self.settings
         self.presets = list(settings.presets)
         labels = [preset.label for preset in settings.presets.values()]
@@ -75,9 +78,15 @@ class KeyTab:
             labels.append(settings.presets[keymap.DEFAULT_PRESET].label + "（従来の切り替えキー）")
         if settings.base is not None:
             self.presets.append(keymap.CUSTOM)
-            labels.append("ユーザー定義")
+            label = settings.custom_name or "ユーザー定義"
+            labels.append(label + "（ユーザー定義）" if label in labels else label)
         self.preset_box.configure(values=labels)
         self.preset_box.current(self.presets.index(None if settings.legacy else settings.use))
+        self.rename_button.configure(state="normal" if settings.use == keymap.CUSTOM else "disabled")
+
+    def _draw(self, chord=None):
+        self._draw_presets()
+        settings = self.settings
 
         count = len(settings.notes) + bool(settings.error)
         self.notes_button.configure(text=f"読み込みの記録（{count}）",
@@ -116,6 +125,28 @@ class KeyTab:
             self.settings.legacy.clear()
             self.save_button.configure(state="normal")
             self._draw()
+
+    def _rename(self):
+        dialog, body = self._dialog("キー設定の名前を変更")
+        name = self.window.tk.StringVar(value=self.settings.custom_name)
+        self.window.ttk.Label(body, text="表示名（空欄なら「ユーザー定義」）").pack(anchor="w")
+        entry = self.window.ttk.Entry(body, textvariable=name, width=30)
+        entry.pack(fill="x", pady=(0, self.window.px(8)))
+
+        def apply():
+            text = name.get().strip()
+            dialog.destroy()
+            if text != self.settings.custom_name:
+                self.settings.custom_name = text
+                self.save_button.configure(state="normal")
+                self._draw_presets()
+
+        self.window.ttk.Button(body, text="変更", command=apply).pack(side="right")
+        dialog.bind("<Return>", lambda _event: apply())
+        entry.selection_range(0, "end")
+        entry.focus_set()
+        self.window._keep_committed_text(dialog)
+        self._show_dialog(dialog)
 
     def _pick_cell(self, event):
         if self.tree.identify_region(event.x, event.y) == "cell":

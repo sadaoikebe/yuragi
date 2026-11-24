@@ -232,6 +232,7 @@ class KeymapSettings:
     legacy: Bindings = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     error: str | None = None
+    custom_name: str = ""
 
     def bindings(self) -> Bindings:
         if self.use == CUSTOM:
@@ -247,6 +248,7 @@ class KeymapSettings:
     def begin_custom(self) -> None:
         if self.use != CUSTOM:
             self.base, self.use = self.use, CUSTOM
+            self.custom_name = ""
             self.overrides = self.legacy.copy()
             self.legacy.clear()
 
@@ -257,6 +259,8 @@ class KeymapSettings:
                 [phase, str(chord), self.overrides[phase, chord]]
                 for phase, chord in sorted(self.overrides, key=lambda key: (key[0], str(key[1])))
             ]}
+            if self.custom_name:
+                raw["custom"]["name"] = self.custom_name
         config.write_json(data_dir / KEYMAP_NAME, raw)
 
 
@@ -289,6 +293,9 @@ def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings
                     if not isinstance(custom, dict) or not isinstance(custom.get("overrides"), list):
                         raise ValueError("ユーザー定義の形式が不正です")
                     settings.base = load_preset(custom.get("base"))
+                    name = custom.get("name")
+                    if isinstance(name, str):
+                        settings.custom_name = name.strip()
                     for index, row in enumerate(custom["overrides"], 1):
                         try:
                             key, command = _read_binding(row, allow_remove=True)

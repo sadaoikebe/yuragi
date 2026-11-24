@@ -72,6 +72,30 @@ class KeymapFileTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.dir = Path(directory.name)
 
+    def test_custom_name_survives_switching_presets(self):
+        path = self.dir / "keymap.json"
+        raw = {"use": "custom", "custom": {"base": "macos", "overrides": [
+            ["global", "Ctrl+M", "send_enter"],
+        ]}}
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        settings = keymap.load_keymap(self.dir)
+        self.assertEqual(settings.custom_name, "")
+        original = settings.compile().eat_table()
+
+        settings.custom_name = "親指シフト用"
+        settings.use = keymap.DEFAULT_PRESET
+        settings.save(self.dir)
+        settings = keymap.load_keymap(self.dir)
+        self.assertEqual(settings.custom_name, "親指シフト用")
+        settings.use = keymap.CUSTOM
+        self.assertEqual(settings.compile().eat_table(), original)
+
+        settings.use = keymap.DEFAULT_PRESET
+        settings.begin_custom()
+        self.assertEqual(settings.custom_name, "")
+        settings.save(self.dir)
+        self.assertNotIn("name", json.loads(path.read_text(encoding="utf-8"))["custom"])
+
     def test_rows_that_cannot_work_are_skipped_with_a_note(self):
         rows = [["composing", "Alt+F5", "commit"],                 # Alt chords are global only
                 ["global", "A", "ime_toggle"],                     # a typing key, everywhere
