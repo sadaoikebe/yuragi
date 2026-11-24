@@ -416,15 +416,9 @@ inline Chord NormalizeKey(uint32_t vk, Mods mods) {
     }
 }
 
-// session.py and chord/keys.py: the keys that enter the typing layer.
+// Generated from the same layout profile as the engine's key table.
 inline bool CharacterVk(uint32_t vk) {
-    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') ||
-        (vk >= 0x60 && vk <= 0x6F && vk != 0x6C)) return true;
-    switch (vk) {
-        case 0xBA: case 0xBB: case 0xBC: case 0xBD: case 0xBE: case 0xBF: case 0xC0:
-        case 0xDB: case 0xDC: case 0xDD: case 0xDE: return true;
-        default: return false;
-    }
+    return std::binary_search(kCharacterVks.begin(), kCharacterVks.end(), vk);
 }
 
 inline bool Typing(Chord chord) {

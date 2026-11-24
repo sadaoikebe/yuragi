@@ -18,8 +18,7 @@ import unicodedata
 
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
 from yuragi.chord.keys import (
-    ALT_VKS, MODIFIER_VKS, SHIFT, SPACE, VK_BACK, VK_RETURN, Chord, alnum_character,
-    classify, literal_character, modifier_bits,
+    ALT_VKS, MODIFIER_VKS, SHIFT, SPACE, VK_BACK, VK_RETURN, Chord, LayoutProfile, modifier_bits,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
@@ -387,6 +386,10 @@ class ImeSession:
     max_tokens: int | None = None
 
     @property
+    def profile(self) -> LayoutProfile:
+        return self.keymap.profile
+
+    @property
     def phase(self) -> str:
         if self.direct:
             return "direct"
@@ -404,7 +407,7 @@ class ImeSession:
 
     def load(self) -> None:
         if not self._table:
-            self._table = load_table()
+            self._table = load_table(self.profile.face_table)
         if self._lex is None:
             self._lex = load_lex()
         if self._symbols is None:
@@ -441,7 +444,7 @@ class ImeSession:
             return False
         chord = Chord(vk, modifier_bits(mods, self._modifiers))
         command = self.keymap.lookup("empty", chord)
-        return chord.typing or (command is not None and command.starts_input)
+        return self.profile.is_typing(chord) or (command is not None and command.starts_input)
 
     def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
         self._partial = False
@@ -535,12 +538,12 @@ class ImeSession:
             if vk not in self._fsm_down:
                 return None
             self._fsm_down.remove(vk)
-            kind, key = classify(vk)
+            kind, key = self.profile.classify(vk)
             return self._then(self.flush_timeout(now_ms),
                               lambda: self._ingest(self.fsm.on_up(kind, key, now_ms)))
 
         chord = Chord(vk, modifier_bits(mods, self._modifiers))
-        if chord.typing:
+        if self.profile.is_typing(chord):
             return self._then(self.flush_timeout(now_ms),
                               lambda: self._type_key(chord, now_ms))
         return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
@@ -550,7 +553,7 @@ class ImeSession:
         if self.direct or vk in MODIFIER_VKS:
             return False
         chord = Chord(vk, modifier_bits(mods, self._modifiers))
-        if chord.typing:
+        if self.profile.is_typing(chord):
             return True
         commands = (self.keymap.command_for(phase, chord) for phase in KANA)
         return any(command.key == "eat" and command.where == "engine" for command in commands)
@@ -566,14 +569,16 @@ class ImeSession:
         return self._run_command(command)
 
     def _type_key(self, chord: Chord, now_ms: int) -> str | None:
+        profile = self.profile
+        character = profile.is_character(chord)
         # Plain Space is looked up only on ThumbTap. A Space that forms
         # a NICOLA chord must keep its original timing in every phase.
-        if chord.character and (self.phase in CONVERTED or self.predicting):
+        if character and (self.phase in CONVERTED or self.predicting):
             if self.keymap.lookup(self.phase, chord) is not None:
                 return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
 
         self.key_eat = True
-        kind, key = classify(chord.vk)
+        kind, key = profile.classify(chord.vk)
         if self._alnum_held and self.converted and not self.editing and chord.vk != SPACE.vk:
             # MS-IME commits the conversion and drops the character: the IME is off.
             self._forget_fsm_down(chord.vk)
@@ -587,11 +592,12 @@ class ImeSession:
             if self._alnum_held:
                 return self._then(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
             return self._then(pending, lambda: self._ingest([ThumbTap()]))
-        literal = literal_character(chord.vk, bool(chord.mods & SHIFT))
+        shift = bool(chord.mods & SHIFT)
+        literal = profile.literal_character(chord.vk, shift)
         if self.input_mode == "full_alnum" and not self._alnum_held and kind == "M":
-            literal = to_full_width(alnum_character(chord.vk, bool(chord.mods & SHIFT)))
+            literal = to_full_width(profile.alnum_character(chord.vk, shift))
         elif alnum and kind == "M":
-            literal = alnum_character(chord.vk, bool(chord.mods & SHIFT))
+            literal = profile.alnum_character(chord.vk, shift)
         if literal is not None:
             pending = self._finish_pending()
             self._forget_fsm_down(chord.vk)
@@ -600,7 +606,7 @@ class ImeSession:
 
         assert key is not None
         insert = ""
-        if chord.character and self.converted and not self.editing:
+        if character and self.converted and not self.editing:
             # Preserve a pending Space chord while starting the next input.
             insert = self._commit(reset_input=False)
         self._fsm_down.add(chord.vk)
@@ -608,14 +614,14 @@ class ImeSession:
 
     def _space_in_alnum(self, literal: Literal) -> str | None:
         command = self.keymap.lookup(self.phase, SPACE)
-        if command == default_keymap().lookup(self.phase, SPACE):
+        if command == default_keymap(self.profile).lookup(self.phase, SPACE):
             return self._ingest([literal])
         return self._run_command(command)
 
     def _forget_fsm_down(self, vk: int) -> None:
         if vk in self._fsm_down:
             self._fsm_down.remove(vk)
-            _, key = classify(vk)
+            _, key = self.profile.classify(vk)
             self.fsm.pressed_at.pop(key, None)
 
     def _run_command(self, command: Command | None) -> str | None:

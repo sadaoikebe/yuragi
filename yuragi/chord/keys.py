@@ -1,8 +1,10 @@
-"""US ANSI virtual-key → NICOLA-A key id, and the Shift (little finger) layer."""
+"""Win32 chords and the ANSI 101 layout profile."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+
 from yuragi.text import to_full_width
 
 # Win32 VK
@@ -31,8 +33,7 @@ VK_OEM_5 = 0xDC  # \
 VK_OEM_6 = 0xDD  # ]
 VK_OEM_7 = 0xDE  # '
 
-# letter key id as in data/nicola_a.json
-VK_TO_M: dict[int, str] = {
+_ANSI_KEY_IDS = {
     0x51: "q",
     0x57: "w",
     0x45: "e",
@@ -89,7 +90,7 @@ _MOD_BITS = {name.lower(): bit for name, bit, _ in _MODIFIERS}
 # Shift is the little-finger layer and never joins a chord:
 # Shift+letters are the native upper-case letters; Shift+digits/symbols give
 # the upper engraving in full width, with ' giving ”.
-ANSI_SHIFTED = {
+_ANSI_SHIFTED = {
     VK_OEM_1: ":", VK_OEM_PLUS: "+", VK_OEM_COMMA: "<", VK_OEM_MINUS: "_",
     VK_OEM_PERIOD: ">", VK_OEM_2: "?", VK_OEM_3: "~", VK_OEM_4: "{",
     VK_OEM_5: "|", VK_OEM_6: "}", VK_OEM_7: '"',
@@ -97,13 +98,7 @@ ANSI_SHIFTED = {
 }
 
 
-SHIFT_FACES: dict[int, str] = {vk: to_full_width(ch) for vk, ch in ANSI_SHIFTED.items()}
-SHIFT_FACES[VK_OEM_7] = "\u201d"  # ”, not ＂
-
-NUMPAD = dict(zip(range(0x60, 0x6A), "0123456789"))
-NUMPAD.update({0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"})
-_NAMES = {
-    **{vk: name.upper() for vk, name in VK_TO_M.items()},
+_KEY_NAMES = {
     VK_SPACE: "Space", VK_RETURN: "Enter", VK_BACK: "Backspace", 0x09: "Tab",
     VK_IME_ON: "ImeOn", VK_IME_OFF: "ImeOff",
     VK_CONVERT: "Convert", VK_NONCONVERT: "NonConvert",
@@ -114,8 +109,6 @@ _NAMES = {
     0x6A: "NumpadMultiply", 0x6B: "NumpadAdd", 0x6D: "NumpadSubtract",
     0x6E: "NumpadDecimal", 0x6F: "NumpadDivide",
 }
-_VKS = {name.lower(): vk for vk, name in _NAMES.items()}
-KEY_NAMES = tuple(_NAMES.values())
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,20 +118,11 @@ class Chord:
 
     @classmethod
     def parse(cls, name: str) -> Chord:
-        *modifiers, key = name.lower().split("+")
-        if key not in _VKS or len(set(modifiers)) != len(modifiers):
-            raise ValueError(f"invalid chord: {name}")
-        bits = 0
-        for modifier in modifiers:
-            bit = _MOD_BITS.get(modifier, 0)
-            if not bit or bit == WIN:
-                raise ValueError(f"invalid chord: {name}")
-            bits |= bit
-        return cls(_VKS[key], bits)
+        chord = ANSI_101.parse_chord(name)
+        return cls(chord.vk, chord.mods)
 
     def __str__(self) -> str:
-        return "+".join([name for name, bit, _ in _MODIFIERS if self.mods & bit]
-                        + [_NAMES.get(self.vk, f"VK_{self.vk:02X}")])
+        return ANSI_101.format_chord(self)
 
     @property
     def code(self) -> int:
@@ -150,46 +134,104 @@ class Chord:
 
     @property
     def character(self) -> bool:
-        return self.mods in (0, SHIFT) and (self.vk in VK_TO_M or self.vk in NUMPAD)
+        return ANSI_101.is_character(self)
 
     @property
     def typing(self) -> bool:
-        return self.character or self == SPACE
+        return ANSI_101.is_typing(self)
 
 
 SPACE = Chord(VK_SPACE)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class LayoutProfile:
+    name: str
+    face_table: Path
+    key_ids: dict[int, str]
+    shifted: dict[int, str]
+    shift_faces: dict[int, str]
+    numpad: dict[int, str]
+    key_names: dict[int, str]
+    _vks_by_name: dict[str, int] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_vks_by_name",
+                           {name.lower(): vk for vk, name in self.key_names.items()})
+
+    def parse_chord(self, name: str) -> Chord:
+        *modifiers, key = name.lower().split("+")
+        if key not in self._vks_by_name or len(set(modifiers)) != len(modifiers):
+            raise ValueError(f"invalid chord: {name}")
+        bits = 0
+        for modifier in modifiers:
+            bit = _MOD_BITS.get(modifier, 0)
+            if not bit or bit == WIN:
+                raise ValueError(f"invalid chord: {name}")
+            bits |= bit
+        return Chord(self._vks_by_name[key], bits)
+
+    def format_chord(self, chord: Chord) -> str:
+        names = [name for name, bit, _ in _MODIFIERS if chord.mods & bit]
+        names.append(self.key_names.get(chord.vk, f"VK_{chord.vk:02X}"))
+        return "+".join(names)
+
+    def is_character(self, chord: Chord) -> bool:
+        return chord.mods in (0, SHIFT) and (chord.vk in self.key_ids or chord.vk in self.numpad)
+
+    def is_typing(self, chord: Chord) -> bool:
+        return self.is_character(chord) or chord == SPACE
+
+    def classify(self, vk: int) -> tuple[str, str | None]:
+        """Return (kind, key_id) for the chord FSM."""
+        if vk == VK_SPACE:
+            return "O", "space"
+        if vk in self.key_ids:
+            return "M", self.key_ids[vk]
+        if vk in MODIFIER_VKS:
+            return "MOD", None
+        return "OTHER", None
+
+    def literal_character(self, vk: int, shift: bool) -> str | None:
+        """The character a key gives outside the chord FSM: numpad or Shift."""
+        if vk in self.numpad:
+            return self.numpad[vk]
+        if not shift:
+            return None
+        if ord("A") <= vk <= ord("Z"):
+            return chr(vk)
+        return self.shift_faces.get(vk)
+
+    def alnum_character(self, vk: int, shift: bool) -> str:
+        """A letter or symbol's half-width engraving in 英数の続き."""
+        if not shift:
+            return self.key_ids[vk]
+        return self.shifted.get(vk, chr(vk))
+
+
+ANSI_101 = LayoutProfile(
+    name="ansi101",
+    face_table=Path(__file__).resolve().parents[2] / "data" / "nicola_a.json",
+    key_ids=_ANSI_KEY_IDS,
+    shifted=_ANSI_SHIFTED,
+    shift_faces={**{vk: to_full_width(ch) for vk, ch in _ANSI_SHIFTED.items()}, VK_OEM_7: "”"},
+    numpad={**dict(zip(range(0x60, 0x6A), "0123456789")),
+            0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"},
+    key_names={**{vk: key.upper() for vk, key in _ANSI_KEY_IDS.items()}, **_KEY_NAMES},
+)
+
+# The default ANSI view used by replay tools and callers without a profile.
+VK_TO_M = ANSI_101.key_ids
+ANSI_SHIFTED = ANSI_101.shifted
+SHIFT_FACES = ANSI_101.shift_faces
+NUMPAD = ANSI_101.numpad
+KEY_NAMES = tuple(ANSI_101.key_names.values())
+classify = ANSI_101.classify
+literal_character = ANSI_101.literal_character
+alnum_character = ANSI_101.alnum_character
 
 
 def modifier_bits(mods: list[str] | None, held: set[int]) -> int:
     if mods is None:
         return sum(bit for _, bit, vks in _MODIFIERS if vks & held)
     return sum({_MOD_BITS[mod] for mod in mods if mod in _MOD_BITS})
-
-
-def literal_character(vk: int, shift: bool) -> str | None:
-    """The character a key gives outside the chord FSM: numpad or Shift."""
-    if vk in NUMPAD:
-        return NUMPAD[vk]
-    if not shift:
-        return None
-    if ord("A") <= vk <= ord("Z"):
-        return chr(vk)
-    return SHIFT_FACES.get(vk)
-
-
-def alnum_character(vk: int, shift: bool) -> str:
-    """A letter or symbol's half-width engraving in 英数の続き."""
-    if not shift:
-        return VK_TO_M[vk]
-    return ANSI_SHIFTED.get(vk, chr(vk))
-
-
-def classify(vk: int) -> tuple[str, str | None]:
-    """Return (kind, key_id): M (a character key), O (Space), MOD (a modifier) or OTHER."""
-    if vk == VK_SPACE:
-        return "O", "space"
-    if vk in VK_TO_M:
-        return "M", VK_TO_M[vk]
-    if vk in MODIFIER_VKS:
-        return "MOD", None
-    return "OTHER", None

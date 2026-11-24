@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from yuragi.chord.keys import ALT, CTRL, SHIFT, Chord, KEY_NAMES
+from yuragi.chord.keys import ALT, CTRL, SHIFT, Chord
 from . import keymap
 from .commands import COMMANDS
 
@@ -93,11 +93,12 @@ class KeyTab:
                                     state="normal" if count else "disabled")
         rows = settings.bindings()
         keys = self.added | {key for _, key in rows}
-        self.chords = {str(key.code): key for key in sorted(keys, key=lambda k: str(k).casefold())}
+        label = settings.profile.format_chord
+        self.chords = {str(key.code): key for key in sorted(keys, key=lambda k: label(k).casefold())}
         self.tree.delete(*self.tree.get_children())
         for iid, key in self.chords.items():
             cells = [self._cell(rows, phase, key) for phase in PHASES]
-            self.tree.insert("", "end", iid=iid, values=(str(key), *cells))
+            self.tree.insert("", "end", iid=iid, values=(label(key), *cells))
         if chord is not None and str(chord.code) in self.chords:
             iid = str(chord.code)
             self.tree.selection_set(iid)
@@ -210,8 +211,10 @@ class KeyTab:
             return
         chord = self.chords[selection[0]]
         phase = self._phase_id()
-        if not keymap.chord_allowed(phase, chord):
-            self.window.message.set(f"{chord} は「{PHASES[phase]}」に割り当てられません")
+        profile = self.settings.profile
+        label = profile.format_chord(chord)
+        if not keymap.chord_allowed(phase, chord, profile):
+            self.window.message.set(f"{label} は「{PHASES[phase]}」に割り当てられません")
             return
 
         preset = "プリセットに従う"
@@ -226,7 +229,7 @@ class KeyTab:
             picked = remove
             if active[key] is not None:
                 picked = COMMANDS[active[key]].label
-        dialog, body = self._dialog(f"{chord} ／ {PHASES[phase]}")
+        dialog, body = self._dialog(f"{label} ／ {PHASES[phase]}")
         choice = self.window.tk.StringVar(value=picked)
         box = self.window._combobox(body, choice, (preset, remove, *choices), 44)
         box.pack(fill="x", pady=(0, self.window.px(8)))
@@ -261,18 +264,19 @@ class KeyTab:
             ttk.Label(body, text=label).pack(side="left")
             widget.pack(side="left", padx=self.window.px(6))
         existing = set(self.chords.values())
+        profile = self.settings.profile
 
         def update(_event=None):
             mods = MODIFIERS[modifier.get()]
-            values = [name for name in KEY_NAMES if Chord(Chord.parse(name).vk, mods) not in existing]
+            values = [name for vk, name in profile.key_names.items() if Chord(vk, mods) not in existing]
             key_box.configure(values=values)
             key.set(values[0] if values else "")
 
         def add():
             if not key.get():
                 return
-            chord = Chord(Chord.parse(key.get()).vk, MODIFIERS[modifier.get()])
-            if not keymap.chord_allowed(self._phase_id(), chord):
+            chord = Chord(profile.parse_chord(key.get()).vk, MODIFIERS[modifier.get()])
+            if not keymap.chord_allowed(self._phase_id(), chord, profile):
                 self.phase.set(PHASES["global" if chord.alt_only else "converting"])
             self.added.add(chord)
             dialog.destroy()

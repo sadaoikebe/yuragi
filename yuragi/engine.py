@@ -241,7 +241,7 @@ class Engine:
             except (OSError, ValueError) as exc:  # not UTF-8, a bad line, cannot be opened
                 log(where(exc))
                 fatal("dictionary-unreadable")
-            loaded = server.load_session(settings, lex=lex)
+            loaded = server.load_session(settings, lex=lex, keymap=self.keymap)
         store = loaded._learning
         if store is not None:
             log(f"learning on: {store.lines} lines, "
@@ -323,7 +323,7 @@ class Engine:
         from yuragi.ime.server import process_request
         start = time.perf_counter()
         sess = self.new_session()
-        sess.keymap = default_keymap()  # the scripted conversion always uses Space
+        sess.keymap = default_keymap(sess.profile)  # the scripted conversion always uses Space
         t = 0
         for vk in WARM_KEYS:
             process_request(sess, {"op": "down", "vk": vk, "t": t})
@@ -371,7 +371,7 @@ class Engine:
 
     def reload_keymap(self) -> dict:
         from yuragi.ime.keymap import load_keymap
-        settings = load_keymap(self.data_dir)
+        settings = load_keymap(self.data_dir, profile=self.keymap.profile)
         keymap = self.read_keymap(settings)
         if settings.error:
             return {"keymap_reload": "failed", "reason": settings.error}

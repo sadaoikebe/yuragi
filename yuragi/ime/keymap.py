@@ -9,7 +9,9 @@ from functools import cache
 from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
-from yuragi.chord.keys import ALT, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, modifier_bits
+from yuragi.chord.keys import (
+    ALT, ANSI_101, MODIFIER_VKS, SPACE, VK_OEM_3, WIN, Chord, LayoutProfile, modifier_bits,
+)
 from . import config
 from .commands import COMMANDS, Command, INPUT, SEND_KEYS
 
@@ -34,11 +36,11 @@ type BindingKey = tuple[str, Chord]
 type Bindings = dict[BindingKey, str | None]
 
 
-def chord_allowed(phase: str, chord: Chord) -> bool:
+def chord_allowed(phase: str, chord: Chord, profile: LayoutProfile = ANSI_101) -> bool:
     return not (
         (chord.alt_only and phase != "global")
-        or (chord.character and phase in ("empty", "composing"))
-        or (chord.typing and phase in ("global", "direct"))
+        or (profile.is_character(chord) and phase in ("empty", "composing"))
+        or (profile.is_typing(chord) and phase in ("global", "direct"))
     )
 
 
@@ -74,7 +76,9 @@ def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
 
 
 class Keymap:
-    def __init__(self, bindings: Bindings, unbound_input: str = "commit_and_pass"):
+    def __init__(self, bindings: Bindings, unbound_input: str = "commit_and_pass", *,
+                 profile: LayoutProfile = ANSI_101):
+        self.profile = profile
         self._unbound_input = COMMANDS[unbound_input]
         rows: dict[str, dict[int, Command]] = {phase: {} for phase in (*PARENT, "global")}
         for (phase, chord), command_id in bindings.items():
@@ -114,7 +118,7 @@ class Keymap:
             row = {"eat": [], "pass": []}
             for code, command in sorted(commands.items()):
                 chord = Chord(code & 0xFF, code >> 8)
-                if not chord.typing:
+                if not self.profile.is_typing(chord):
                     row["pass" if command.key == "pass" else "eat"].append(code)
             if phase in INPUT:
                 row["rest"] = "eat"
@@ -142,7 +146,7 @@ def _read_object(path: Path) -> dict:
     return raw
 
 
-def _read_binding(row, *, allow_remove: bool) -> tuple[BindingKey, str | None]:
+def _read_binding(row, *, allow_remove: bool, profile: LayoutProfile) -> tuple[BindingKey, str | None]:
     if (not isinstance(row, list) or len(row) != 3
             or not isinstance(row[0], str) or not isinstance(row[1], str)
             or not (isinstance(row[2], str) or (allow_remove and row[2] is None))):
@@ -151,10 +155,10 @@ def _read_binding(row, *, allow_remove: bool) -> tuple[BindingKey, str | None]:
     if phase not in PARENT and phase != "global":
         raise ValueError(f"知らない局面: {phase!r}")
     try:
-        chord = Chord.parse(name)
+        chord = profile.parse_chord(name)
     except ValueError as exc:
         raise ValueError(f"読めないキー: {name!r}") from exc
-    if not chord_allowed(phase, chord):
+    if not chord_allowed(phase, chord, profile):
         raise ValueError(f"{name} は {phase} に割り当てられません")
     if command_id is not None:
         command = COMMANDS.get(command_id)
@@ -172,7 +176,7 @@ class Preset:
     unbound_input: str
 
 
-def _read_preset(name: str) -> Preset:
+def _read_preset(name: str, profile: LayoutProfile = ANSI_101) -> Preset:
     if name == DEFAULT_PRESET:
         path = PRESET_PATH
     elif name != CUSTOM and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
@@ -186,22 +190,22 @@ def _read_preset(name: str) -> Preset:
     unbound_input = raw.get("unbound_input", "commit_and_pass")
     if unbound_input not in ("commit_and_pass", "noop"):
         raise ValueError(f"割り当ての無いキーの機能が不正です: {unbound_input!r}")
-    return Preset(label, dict(_read_binding(row, allow_remove=False) for row in bindings),
-                  unbound_input)
+    rows = dict(_read_binding(row, allow_remove=False, profile=profile) for row in bindings)
+    return Preset(label, rows, unbound_input)
 
 
 @cache
-def _default_preset() -> Preset:
-    return _read_preset(DEFAULT_PRESET)
+def _default_preset(profile: LayoutProfile) -> Preset:
+    return _read_preset(DEFAULT_PRESET, profile)
 
 
 @cache
-def default_keymap() -> Keymap:
-    preset = _default_preset()
-    return Keymap(preset.bindings, preset.unbound_input)
+def default_keymap(profile: LayoutProfile = ANSI_101) -> Keymap:
+    preset = _default_preset(profile)
+    return Keymap(preset.bindings, preset.unbound_input, profile=profile)
 
 
-def _legacy_overrides(data_dir: Path) -> Bindings:
+def _legacy_overrides(data_dir: Path, profile: LayoutProfile) -> Bindings:
     """Carry the previous tip.json toggle through to the negotiated table."""
     try:
         tip = _read_object(data_dir / "tip.json")
@@ -214,10 +218,10 @@ def _legacy_overrides(data_dir: Path) -> Bindings:
     if not isinstance(mods, list) or any(m not in ("shift", "ctrl", "alt") for m in mods):
         return {}
     chord = Chord(vk, modifier_bits(mods, set()))
-    if chord == DEFAULT_TOGGLE or chord.typing:
+    if chord == DEFAULT_TOGGLE or profile.is_typing(chord):
         return {}
     try:
-        Chord.parse(str(chord))
+        profile.parse_chord(profile.format_chord(chord))
     except ValueError:
         return {}
     return {("global", DEFAULT_TOGGLE): None, ("global", chord): "ime_toggle"}
@@ -233,6 +237,7 @@ class KeymapSettings:
     notes: list[str] = field(default_factory=list)
     error: str | None = None
     custom_name: str = ""
+    profile: LayoutProfile = ANSI_101
 
     def bindings(self) -> Bindings:
         if self.use == CUSTOM:
@@ -241,9 +246,9 @@ class KeymapSettings:
 
     def compile(self) -> Keymap:
         if self.use == DEFAULT_PRESET and not self.legacy:
-            return default_keymap()
+            return default_keymap(self.profile)
         preset = self.presets[self.base if self.use == CUSTOM else self.use]
-        return Keymap(self.bindings(), preset.unbound_input)
+        return Keymap(self.bindings(), preset.unbound_input, profile=self.profile)
 
     def begin_custom(self) -> None:
         if self.use != CUSTOM:
@@ -255,25 +260,27 @@ class KeymapSettings:
     def save(self, data_dir: Path) -> None:
         raw = {"version": 1, "use": self.use}
         if self.base is not None:
+            label = self.profile.format_chord
             raw["custom"] = {"base": self.base, "overrides": [
-                [phase, str(chord), self.overrides[phase, chord]]
-                for phase, chord in sorted(self.overrides, key=lambda key: (key[0], str(key[1])))
+                [phase, label(chord), self.overrides[phase, chord]]
+                for phase, chord in sorted(self.overrides, key=lambda key: (key[0], label(key[1])))
             ]}
             if self.custom_name:
                 raw["custom"]["name"] = self.custom_name
         config.write_json(data_dir / KEYMAP_NAME, raw)
 
 
-def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings:
+def load_keymap(data_dir: Path, *, list_presets: bool = False,
+                profile: LayoutProfile = ANSI_101) -> KeymapSettings:
     """Use the same parser for the engine and the editor; only the engine applies it to typing."""
-    settings = KeymapSettings({DEFAULT_PRESET: _default_preset()})
+    settings = KeymapSettings({DEFAULT_PRESET: _default_preset(profile)}, profile=profile)
 
     def load_preset(name) -> str:
         if not isinstance(name, str):
             raise ValueError("プリセット名がありません")
         if name not in settings.presets:
             try:
-                settings.presets[name] = _read_preset(name)
+                settings.presets[name] = _read_preset(name, profile)
             except (OSError, ValueError) as exc:
                 raise ValueError(f"プリセット {name!r} を使えません ({exc})") from exc
         return name
@@ -281,7 +288,7 @@ def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings
     try:
         raw = _read_object(data_dir / KEYMAP_NAME)
     except FileNotFoundError:
-        settings.legacy = _legacy_overrides(data_dir)
+        settings.legacy = _legacy_overrides(data_dir, profile)
     except (OSError, ValueError) as exc:
         settings.error = f"{KEYMAP_NAME} を読めません ({exc})"
     else:
@@ -298,7 +305,7 @@ def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings
                         settings.custom_name = name.strip()
                     for index, row in enumerate(custom["overrides"], 1):
                         try:
-                            key, command = _read_binding(row, allow_remove=True)
+                            key, command = _read_binding(row, allow_remove=True, profile=profile)
                         except ValueError as exc:
                             settings.notes.append(f"差分 {index} 行目: {exc}")
                             continue
@@ -329,7 +336,13 @@ if __name__ == "__main__":
     # CMake compiles this same preset into the TIP for use before hello.
     import sys
 
-    serialized = json.dumps(default_keymap().eat_table(), separators=(",", ":"))
+    keymap = default_keymap()
+    serialized = json.dumps(keymap.eat_table(), separators=(",", ":"))
+    vks = sorted(keymap.profile.key_ids.keys() | keymap.profile.numpad.keys())
+    character_keys = ", ".join(f"0x{vk:02X}" for vk in vks)
     Path(sys.argv[1]).write_text(
-        f'#pragma once\ninline constexpr char kDefaultKeyTable[] = R"keymap({serialized})keymap";\n',
+        '#pragma once\n#include <array>\n#include <cstdint>\n'
+        f'inline constexpr char kDefaultKeyTable[] = R"keymap({serialized})keymap";\n'
+        f'inline constexpr std::array<std::uint32_t, {len(vks)}> kCharacterVks = {{\n'
+        f'    {character_keys}\n}};\n',
         encoding="utf-8")
