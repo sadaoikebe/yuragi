@@ -10,9 +10,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yuragi.chord.keys import Chord
+from yuragi.chord.keys import CTRL, KEYBOARDS, Chord
 from yuragi.ime import keymap
 
+ANSI, JIS = KEYBOARDS["ansi101"], KEYBOARDS["jis106"]
 ROOT = Path(__file__).resolve().parents[1]
 CHILD = """
 from pathlib import Path
@@ -80,7 +81,7 @@ class KeymapFileTest(unittest.TestCase):
         path.write_text(json.dumps(raw), encoding="utf-8")
         settings = keymap.load_keymap(self.dir)
         self.assertEqual(settings.custom_name, "")
-        original = settings.compile().eat_table()
+        original = settings.compile().eat_table(ANSI)
 
         settings.custom_name = "親指シフト用"
         settings.use = keymap.DEFAULT_PRESET
@@ -88,7 +89,7 @@ class KeymapFileTest(unittest.TestCase):
         settings = keymap.load_keymap(self.dir)
         self.assertEqual(settings.custom_name, "親指シフト用")
         settings.use = keymap.CUSTOM
-        self.assertEqual(settings.compile().eat_table(), original)
+        self.assertEqual(settings.compile().eat_table(ANSI), original)
 
         settings.use = keymap.DEFAULT_PRESET
         settings.begin_custom()
@@ -130,15 +131,46 @@ class KeymapFileTest(unittest.TestCase):
         self.assertIsNotNone(keymap.load_keymap(self.dir).error)
 
 
+class OneTableTest(unittest.TestCase):
+    """One key table for every keyboard: rows name the keys Windows delivers (KEYBIND §4.1)."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+
+    def test_a_row_is_the_key_engraved_so_on_each_keyboard(self):
+        ctrl_semicolon = Chord.parse("Ctrl+;")
+        self.assertEqual(ANSI.code(ctrl_semicolon), 0xBA | CTRL << 8)
+        self.assertEqual(JIS.code(ctrl_semicolon), 0xBB | CTRL << 8)
+        self.assertEqual(JIS.chord(0xBA, CTRL), Chord(":", CTRL))
+
+    def test_a_key_the_keyboard_lacks_keeps_its_row(self):
+        rows = [["converting", "Ctrl+'", "commit"], ["converting", "Ctrl+@", "commit"]]
+        path = self.dir / "keymap.json"
+        path.write_text(json.dumps({"use": "custom", "custom": {"base": "ms-ime", "overrides": rows}}),
+                        encoding="utf-8")
+        settings = keymap.load_keymap(self.dir)
+        self.assertEqual(settings.notes, [])
+        settings.save(self.dir)
+        saved = json.loads(path.read_text(encoding="utf-8"))["custom"]["overrides"]
+        self.assertEqual(sorted(saved), sorted(rows))
+        compiled = settings.compile()
+        for keyboard, present, absent in ((ANSI, 0xDE, 0xC0), (JIS, 0xC0, 0xDE)):
+            eaten = compiled.eat_table(keyboard)["phases"]["converting"]["eat"]
+            self.assertIn(present | CTRL << 8, eaten, keyboard.name)
+            self.assertNotIn(absent | CTRL << 8, eaten, keyboard.name)
+            self.assertEqual(compiled.command_for("converting", keyboard.chord(present, CTRL)).id, "commit")
+
 
 class EatTableTest(unittest.TestCase):
     def test_typing_keys_stay_off_the_table_and_pass_keys_are_passed(self):
         one, shift_f6, enter = (Chord.parse(k) for k in ("1", "Shift+F6", "Enter"))
         phases = keymap.Keymap({("selecting", one): "select_candidate_1",
                                 ("composing", shift_f6): "pass_through",
-                                ("composing", enter): "commit"}).eat_table()["phases"]
-        self.assertNotIn(one.code, phases["selecting"]["eat"])  # the engine sees typing keys anyway
+                                ("composing", enter): "commit"}).eat_table(ANSI)["phases"]
+        self.assertNotIn(ANSI.code(one), phases["selecting"]["eat"])  # the engine sees typing keys anyway
         self.assertEqual((phases["composing"]["eat"], phases["composing"]["pass"]),
-                         ([enter.code], [shift_f6.code]))
+                         ([ANSI.code(enter)], [ANSI.code(shift_f6)]))
         self.assertEqual({phase for phase, row in phases.items() if row.get("rest") == "eat"},
                          set(phases) - {"empty"})

@@ -241,7 +241,7 @@ class Engine:
             except (OSError, ValueError) as exc:  # not UTF-8, a bad line, cannot be opened
                 log(where(exc))
                 fatal("dictionary-unreadable")
-            loaded = server.load_session(settings, lex=lex, keymap=self.keymap)
+            loaded = server.load_session(settings, lex=lex)
         store = loaded._learning
         if store is not None:
             log(f"learning on: {store.lines} lines, "
@@ -323,7 +323,7 @@ class Engine:
         from yuragi.ime.server import process_request
         start = time.perf_counter()
         sess = self.new_session()
-        sess.keymap = default_keymap(sess.profile)  # the scripted conversion always uses Space
+        sess.keymap = default_keymap()  # the scripted conversion always uses Space
         t = 0
         for vk in WARM_KEYS:
             process_request(sess, {"op": "down", "vk": vk, "t": t})
@@ -369,16 +369,21 @@ class Engine:
             self.channel.warning("keymap")
         return settings.compile()
 
+    def eat_table(self) -> dict:
+        """The TIPs' table, in the default keyboard's key codes (docs/JIS.md §2)."""
+        from yuragi.chord.keys import DEFAULT_KEYBOARD
+        return self.keymap.eat_table(DEFAULT_KEYBOARD)
+
     def reload_keymap(self) -> dict:
         from yuragi.ime.keymap import load_keymap
-        settings = load_keymap(self.data_dir, profile=self.keymap.profile)
+        settings = load_keymap(self.data_dir)
         keymap = self.read_keymap(settings)
         if settings.error:
             return {"keymap_reload": "failed", "reason": settings.error}
         self.keymap = keymap
         for connection in self.connections.values():
             connection.sess.keymap = keymap
-        self.channel.send({"event": "keymap", "keymap": keymap.eat_table()})
+        self.channel.send({"event": "keymap", "keymap": self.eat_table()})
         self.channel.clear_warning("keymap")
         return {"keymap_reload": "applied"}
 
@@ -492,7 +497,7 @@ def main(argv=None) -> int:
     if args.require_lm and not engine.worker.wait_until_loaded():
         engine.worker.thread.join()
         fatal("lm-unavailable")
-    channel.ready(engine.keymap.eat_table())
+    channel.ready(engine.eat_table())
     log(f"ready in {time.perf_counter() - started:.2f} s")
     if engine.worker is not None and not args.require_lm:
         threading.Thread(target=engine.watch_device, name="lm-device", daemon=True).start()

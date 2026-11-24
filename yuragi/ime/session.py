@@ -18,7 +18,8 @@ import unicodedata
 
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
 from yuragi.chord.keys import (
-    ALT_VKS, MODIFIER_VKS, SHIFT, SPACE, VK_BACK, VK_RETURN, Chord, LayoutProfile, modifier_bits,
+    ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, VK_SPACE, Chord, Keyboard,
+    modifier_bits,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
@@ -48,6 +49,8 @@ class Literal:
     text: str
     alnum: bool = False
     frozen: bool = False  # a spelling left before subsequent input by NonConvert
+    # The (half, full) faces of the key that typed it, when widening is not to_full_width (JIS ¥: \ and ￥).
+    faces: tuple[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not self.text or (len(self.text) != 1 and not self.frozen):
@@ -80,11 +83,17 @@ def kana_script(reading: str, script: str) -> str:
     return reading
 
 
-def alnum_spelling(keys: str, current: str | None, *, full: bool) -> str:
-    """F9/F10: the typed keys; again on the same width cycles the letter case."""
-    forms = [keys.lower(), keys.upper(), keys[:1].upper() + keys[1:].lower()]
+def alnum_spelling(keys: str | list[tuple[str, str]], current: str | None, *, full: bool) -> str:
+    """F9/F10: the typed keys; again on the same width cycles the letter case.
+    keys: each key's unshifted (half-width, full-width) alnum face, or a string of half-width faces."""
+    if isinstance(keys, str):
+        keys = [(c, to_full_width(c)) for c in keys]
+    half = "".join(h for h, _ in keys)
+    forms = [half.lower(), half.upper(), half[:1].upper() + half[1:].lower()]
     if full:
-        forms = [to_full_width(f) for f in forms]
+        # A key's own full-width face, so the JIS ¥ key's \ widens to ￥ (letters keep the cycled case).
+        forms = ["".join(to_full_width(c) if c.isalpha() else f for c, (_, f) in zip(form, keys))
+                 for form in forms]
     if current in forms:
         return forms[(forms.index(current) + 1) % len(forms)]
     return forms[0]
@@ -376,6 +385,7 @@ class ImeSession:
     # Keyed by the remaining tokens' press number, cleared on reset.
     _carry: dict[int, frozenset[str]] = field(default_factory=dict)
     keymap: Keymap = field(default_factory=default_keymap)
+    keyboard: Keyboard = DEFAULT_KEYBOARD  # what each key types (docs/JIS.md §2)
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
     key_global: str | None = field(default=None, init=False)
@@ -384,10 +394,6 @@ class ImeSession:
     _input_script: str | None = None  # current unconverted run styled with NonConvert
     _alnum_held: bool = False  # Shift+CapsLock: 英数の続き until the input ends
     max_tokens: int | None = None
-
-    @property
-    def profile(self) -> LayoutProfile:
-        return self.keymap.profile
 
     @property
     def phase(self) -> str:
@@ -407,7 +413,7 @@ class ImeSession:
 
     def load(self) -> None:
         if not self._table:
-            self._table = load_table(self.profile.face_table)
+            self._table = load_table(self.keyboard.kana)
         if self._lex is None:
             self._lex = load_lex()
         if self._symbols is None:
@@ -442,9 +448,9 @@ class ImeSession:
     def starts_input(self, vk: int, mods: list[str] | None) -> bool:
         if self.phase != "empty" or self._await is not None or self.fsm.state != "S1":
             return False
-        chord = Chord(vk, modifier_bits(mods, self._modifiers))
+        chord = self.keyboard.chord(vk, modifier_bits(mods, self._modifiers))
         command = self.keymap.lookup("empty", chord)
-        return self.profile.is_typing(chord) or (command is not None and command.starts_input)
+        return chord.typing or (command is not None and command.starts_input)
 
     def start_input(self, text: str | None, after: int | None, *, disconnected: bool) -> None:
         self._partial = False
@@ -538,90 +544,96 @@ class ImeSession:
             if vk not in self._fsm_down:
                 return None
             self._fsm_down.remove(vk)
-            kind, key = self.profile.classify(vk)
+            kind, key = self.keyboard.classify(vk)
             return self._then(self.flush_timeout(now_ms),
                               lambda: self._ingest(self.fsm.on_up(kind, key, now_ms)))
 
-        chord = Chord(vk, modifier_bits(mods, self._modifiers))
-        if self.profile.is_typing(chord):
+        chord = self.keyboard.chord(vk, modifier_bits(mods, self._modifiers))
+        if chord.typing:
             return self._then(self.flush_timeout(now_ms),
-                              lambda: self._type_key(chord, now_ms))
-        return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
+                              lambda: self._type_key(chord, vk, now_ms))
+        return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
     def pending_key_eat(self, vk: int, mods: list[str] | None) -> bool:
         """Reserve a queued down if it can be consumed after the LM resolves."""
         if self.direct or vk in MODIFIER_VKS:
             return False
-        chord = Chord(vk, modifier_bits(mods, self._modifiers))
-        if self.profile.is_typing(chord):
+        chord = self.keyboard.chord(vk, modifier_bits(mods, self._modifiers))
+        if chord.typing:
             return True
         commands = (self.keymap.command_for(phase, chord) for phase in KANA)
         return any(command.key == "eat" and command.where == "engine" for command in commands)
 
-    def _dispatch_chord(self, chord: Chord) -> str | None:
+    def _dispatch_chord(self, chord: Chord, vk: int) -> str | None:
         command = self.keymap.command_for(self.phase, chord)
         self.key_eat = command.key == "eat" and command.where == "engine"
         if command.where == "tip":
             self.key_global = command.id
-        self._forget_fsm_down(chord.vk)
+        self._forget_fsm_down(vk)
         if command.key == "pass" and self.phase == "empty":
             self._pass_empty_key(chord)
         return self._run_command(command)
 
-    def _type_key(self, chord: Chord, now_ms: int) -> str | None:
-        profile = self.profile
-        character = profile.is_character(chord)
+    def _type_key(self, chord: Chord, vk: int, now_ms: int) -> str | None:
+        keyboard = self.keyboard
         # Plain Space is looked up only on ThumbTap. A Space that forms
         # a NICOLA chord must keep its original timing in every phase.
-        if character and (self.phase in CONVERTED or self.predicting):
+        if chord.character and (self.phase in CONVERTED or self.predicting):
             if self.keymap.lookup(self.phase, chord) is not None:
-                return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord))
+                return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
         self.key_eat = True
-        kind, key = profile.classify(chord.vk)
-        if self._alnum_held and self.converted and not self.editing and chord.vk != SPACE.vk:
+        kind, key = keyboard.classify(vk)
+        if self._alnum_held and self.converted and not self.editing and vk != VK_SPACE:
             # MS-IME commits the conversion and drops the character: the IME is off.
-            self._forget_fsm_down(chord.vk)
+            self._forget_fsm_down(vk)
             return self._then(self._finish_pending(), self._commit)
         alnum = self._alnum_continues()
         if self.input_mode == "full_alnum" and not self._alnum_held and chord == SPACE:
             return self._then(self._finish_pending(), lambda: self._space_in_alnum(Literal("　")))
         if alnum and chord == SPACE:
             pending = self._finish_pending()
-            self._forget_fsm_down(chord.vk)
+            self._forget_fsm_down(vk)
             if self._alnum_held:
                 return self._then(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
             return self._then(pending, lambda: self._ingest([ThumbTap()]))
         shift = bool(chord.mods & SHIFT)
-        literal = profile.literal_character(chord.vk, shift)
-        if self.input_mode == "full_alnum" and not self._alnum_held and kind == "M":
-            literal = to_full_width(profile.alnum_character(chord.vk, shift))
-        elif alnum and kind == "M":
-            literal = profile.alnum_character(chord.vk, shift)
+        literal = keyboard.literal_character(vk, shift)
+        alnum_key = keyboard.alnum_key(vk)
+        if self.input_mode == "full_alnum" and not self._alnum_held and alnum_key:
+            literal = keyboard.alnum_character(vk, shift, full=True)
+        elif alnum and alnum_key:
+            literal = keyboard.alnum_character(vk, shift)
+        if literal == "":
+            # A key or face with nothing on it (JIS :, Shift+0): eaten, the input stays.
+            pending = self._finish_pending()
+            self._forget_fsm_down(vk)
+            return pending
         if literal is not None:
             pending = self._finish_pending()
-            self._forget_fsm_down(chord.vk)
-            continues = alnum or (kind == "M" and literal.isascii() and literal.isalpha())
-            return self._then(pending, lambda: self._ingest([Literal(literal, alnum=continues)]))
+            self._forget_fsm_down(vk)
+            continues = alnum or (alnum_key and literal.isascii() and literal.isalpha())
+            faces = keyboard.width_faces(vk) if not shift else None
+            return self._then(pending, lambda: self._ingest([Literal(literal, alnum=continues, faces=faces)]))
 
         assert key is not None
         insert = ""
-        if character and self.converted and not self.editing:
+        if chord.character and self.converted and not self.editing:
             # Preserve a pending Space chord while starting the next input.
             insert = self._commit(reset_input=False)
-        self._fsm_down.add(chord.vk)
+        self._fsm_down.add(vk)
         return insert + (self._ingest(self.fsm.on_down(kind, key, now_ms)) or "") or None
 
     def _space_in_alnum(self, literal: Literal) -> str | None:
         command = self.keymap.lookup(self.phase, SPACE)
-        if command == default_keymap(self.profile).lookup(self.phase, SPACE):
+        if command == default_keymap().lookup(self.phase, SPACE):
             return self._ingest([literal])
         return self._run_command(command)
 
     def _forget_fsm_down(self, vk: int) -> None:
         if vk in self._fsm_down:
             self._fsm_down.remove(vk)
-            _, key = self.profile.classify(vk)
+            _, key = self.keyboard.classify(vk)
             self.fsm.pressed_at.pop(key, None)
 
     def _run_command(self, command: Command | None) -> str | None:
@@ -886,7 +898,17 @@ class ImeSession:
             if isinstance(token, Literal) and token.frozen:
                 units.append(token.text)
                 continue
-            text = to_half_width(token.text) if isinstance(token, Literal) else token.key
+            if isinstance(token, Literal) and token.faces is not None:
+                units.append(token.faces[script == "full_alnum"])
+                continue
+            if isinstance(token, Literal):
+                text = to_half_width(token.text)
+            else:
+                half, full = self.keyboard.key_alnum(token.key)
+                if script == "full_alnum":
+                    units.append(full)
+                    continue
+                text = half
             if script == "full_alnum":
                 text = "　" if text == " " else to_full_width(text)
             units.append(text)
@@ -1009,8 +1031,9 @@ class ImeSession:
         if script == "half_katakana":
             surface, kind = half_katakana(hira.reading), "kana"
         else:
-            keys = [t.get("key", "") for t in self._lattice()[segment.start:segment.end]]
-            surface = alnum_spelling("".join(keys), segment.selected.surface
+            keys = [self.keyboard.key_alnum(t["key"]) for t in self._lattice()[segment.start:segment.end]
+                    if t.get("key")]
+            surface = alnum_spelling(keys, segment.selected.surface
                                      if segment.selected.kind == "alnum" else None,
                                      full=script == "full_alnum")
             kind = "alnum"
@@ -1261,9 +1284,9 @@ class ImeSession:
 
     def _pass_empty_key(self, chord: Chord) -> None:
         if chord.mods in (0, SHIFT):
-            if chord.vk == VK_RETURN:
+            if chord.key == "Enter":
                 return  # keep the context available to the next input
-            if chord.vk == VK_BACK:
+            if chord.key == "Backspace":
                 tail = self._committed_context[:-1]
                 self._clear_context()
                 self._lm_context = self._committed_context = tail
@@ -1559,7 +1582,7 @@ class ImeSession:
                 elif tok.press in self._press_alias:
                     tok = AmbShift(tok.key, self._press_alias[tok.press], tok.turn)
             if mapped["kind"] == "literal" and not isinstance(tok, Literal):
-                tok = Literal(mapped["text"])
+                tok = Literal(mapped["text"], faces=self.keyboard.width_faces(self.keyboard.key_vk(tok.key)))
             self._insert_token(tok)
         return insert or None
 

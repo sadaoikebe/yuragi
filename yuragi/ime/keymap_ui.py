@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from yuragi.chord.keys import ALT, CTRL, SHIFT, Chord
+from yuragi.chord.keys import ALT, CTRL, DEFAULT_KEYBOARD, SHIFT, Chord
 from . import keymap
 from .commands import COMMANDS
 
@@ -24,6 +24,8 @@ class KeyTab:
         self.settings: keymap.KeymapSettings | None = None
         self.added: set[Chord] = set()
         self.chords: dict[str, Chord] = {}
+        # The keys offered by キー追加 are this keyboard's (docs/JIS.md §2).
+        self.keyboard = DEFAULT_KEYBOARD
 
         top = ttk.Frame(frame)
         top.pack(fill="x", pady=(0, window.px(6)))
@@ -93,14 +95,13 @@ class KeyTab:
                                     state="normal" if count else "disabled")
         rows = settings.bindings()
         keys = self.added | {key for _, key in rows}
-        label = settings.profile.format_chord
-        self.chords = {str(key.code): key for key in sorted(keys, key=lambda k: label(k).casefold())}
+        self.chords = {str(i): key for i, key in enumerate(sorted(keys, key=lambda k: str(k).casefold()))}
         self.tree.delete(*self.tree.get_children())
         for iid, key in self.chords.items():
             cells = [self._cell(rows, phase, key) for phase in PHASES]
-            self.tree.insert("", "end", iid=iid, values=(label(key), *cells))
-        if chord is not None and str(chord.code) in self.chords:
-            iid = str(chord.code)
+            self.tree.insert("", "end", iid=iid, values=(str(key), *cells))
+        iid = next((iid for iid, key in self.chords.items() if key == chord), None)
+        if iid is not None:
             self.tree.selection_set(iid)
             self.tree.focus(iid)
             self.tree.see(iid)
@@ -211,9 +212,8 @@ class KeyTab:
             return
         chord = self.chords[selection[0]]
         phase = self._phase_id()
-        profile = self.settings.profile
-        label = profile.format_chord(chord)
-        if not keymap.chord_allowed(phase, chord, profile):
+        label = str(chord)
+        if not keymap.chord_allowed(phase, chord):
             self.window.message.set(f"{label} は「{PHASES[phase]}」に割り当てられません")
             return
 
@@ -264,19 +264,19 @@ class KeyTab:
             ttk.Label(body, text=label).pack(side="left")
             widget.pack(side="left", padx=self.window.px(6))
         existing = set(self.chords.values())
-        profile = self.settings.profile
 
         def update(_event=None):
             mods = MODIFIERS[modifier.get()]
-            values = [name for vk, name in profile.key_names.items() if Chord(vk, mods) not in existing]
+            values = [name for name in self.keyboard.names() if Chord(name, mods) not in existing
+                      and any(keymap.chord_allowed(phase, Chord(name, mods)) for phase in PHASES)]
             key_box.configure(values=values)
             key.set(values[0] if values else "")
 
         def add():
             if not key.get():
                 return
-            chord = Chord(profile.parse_chord(key.get()).vk, MODIFIERS[modifier.get()])
-            if not keymap.chord_allowed(self._phase_id(), chord, profile):
+            chord = Chord(key.get(), MODIFIERS[modifier.get()])
+            if not keymap.chord_allowed(self._phase_id(), chord):
                 self.phase.set(PHASES["global" if chord.alt_only else "converting"])
             self.added.add(chord)
             dialog.destroy()

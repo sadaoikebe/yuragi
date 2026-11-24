@@ -211,11 +211,11 @@ Mozc のコマンド名との対応表は持たない。プリセットは手で
 ```
 
 - 修飾の順は Ctrl、Alt、Shift に決める。読み込みでは順不同・大文字小文字の違いを受け付け、書き出しではこの順にそろえる。
-- キー名: `A`–`Z`、`0`–`9`、記号は US 配列の刻印（`` ` `` `-` `=` `[` `]` `\` `;` `'` `,` `.` `/`）、
+- キー名: `A`–`Z`、`0`–`9`、記号はそのキーボードに印字された文字（US の `` ` `` のキーは `` ` ``、JIS の同じ位置のキーは `@`）、
   `Space` `Enter` `Backspace` `Tab` `ImeOn` `ImeOff` `Convert` `NonConvert` `Esc` `Delete` `Insert` `Home` `End` `PageUp` `PageDown` `Left` `Right` `Up` `Down`
   `F1`–`F24` `CapsLock` `Numpad0`–`Numpad9` `NumpadAdd` `NumpadSubtract` `NumpadMultiply` `NumpadDivide` `NumpadDecimal`。
-- キー名は US 配列の刻印で、**利用者が押した形**を表す。内部では和音を整数 1 つで持つ:
-  `code = US 配列の仮想キーコード | 修飾 << 8`（修飾は Shift=1、Ctrl=2、Alt=4。TIP が `tip.json` の `toggle_mods`（`["alt"]` などの名前の並び）から作る値と同じ）。
+- キー名は**利用者が押した形**を表す。エンジンは和音をキーの名前と修飾で持ち、届いた仮想キーコードをセッションのキーボードで名前に直して引く（[JIS.md](JIS.md) §2）。
+  TIP に渡す食べる表（§7.1）だけは、和音を整数 1 つで持つ: `code = 仮想キーコード | 修飾 << 8`（修飾は Shift=1、Ctrl=2、Alt=4。TIP が `tip.json` の `toggle_mods`（`["alt"]` などの名前の並び）から作る値と同じ）。
   Alt+`` ` `` は `VK_OEM_3 | 4 << 8` で、TSF に届く `VK_KANJI` ではない。届いた形から和音への戻し方は §7.4。
 - Win キー付きの和音は割り当てられない（Windows のもの）。
 - 左右の修飾キーの区別（`LCtrl+` など）、修飾キーだけの単独打鍵、2 打の連続（Ctrl+X のあと Ctrl+S、など）は、MS-IME に無いので入れない。
@@ -397,7 +397,7 @@ TIP はどちらのファイルも読まない（§8）。
 
 | ファイル | 中身 |
 |---|---|
-| `yuragi/chord/keys.py` | キーの分類（`classify()`）、和音の型 `Chord(vk, mods)`、和音の書き方の読み書き、打鍵層の判定 |
+| `yuragi/chord/keys.py` | 和音の型 `Chord(key, mods)`（キーの名前と修飾）、和音の書き方の読み書き、打鍵層の判定。キーボード（`Keyboard`）は、届いたキーの名前と文字、キーの分類（`classify()`）を `data/keyboards/` から引く |
 | `yuragi/ime/keymap.py` | プリセットと `keymap.json` を読み、検査し、**引くだけの表**に直す。食べる表を作る |
 | `yuragi/ime/commands.py` | コマンド表。コマンドの属性と、`ImeSession` のどのメソッドを呼ぶか |
 | `yuragi/ime/session.py` | `on_key()`（表を引いてコマンドを実行する）と、操作の中身（`_commit`、`_cycle`、`_resize` など） |

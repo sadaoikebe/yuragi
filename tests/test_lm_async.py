@@ -17,7 +17,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from yuragi.chord.fsm import AmbShift, Plain
-from yuragi.chord.keys import VK_TO_M
+from yuragi.chord.keys import KEYBOARDS
 from yuragi.ime.bunsetsu import Candidate
 from yuragi.ime.learning import LearningStore
 from yuragi.ime.lm_async import DEADLINE_MS, ConnectionPipeline, Job, LmWorker
@@ -142,7 +142,7 @@ class Typist:
 
     def __init__(self):
         self.reverse = reverse_table(load_table())
-        self.vk = {key: vk for vk, key in VK_TO_M.items()}
+        self.vk = KEYBOARDS["ansi101"].key_vk
         self.t = 0
         self.events: list[dict] = []
 
@@ -160,7 +160,7 @@ class Typist:
     def kana(self, text, gap=150):
         for ch in text:
             token = self.reverse[ch]
-            vk = self.vk[token["key"]]
+            vk = self.vk(token["key"])
             if token["kind"] == "plain":
                 self.tap(vk, gap)
             else:  # chord with the thumb: thumb 10 ms after, letter released first

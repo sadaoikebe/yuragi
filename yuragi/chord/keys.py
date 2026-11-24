@@ -1,8 +1,9 @@
-"""Win32 chords and the ANSI 101 layout profile."""
+"""Win32 chords and the keyboards (docs/JIS.md §2)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from yuragi.text import to_full_width
@@ -21,60 +22,18 @@ VK_CONTROL = 0x11
 VK_MENU = 0x12  # Alt
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
-VK_OEM_1 = 0xBA  # ;
+VK_OEM_1 = 0xBA
 VK_OEM_PLUS = 0xBB
 VK_OEM_COMMA = 0xBC
 VK_OEM_MINUS = 0xBD
 VK_OEM_PERIOD = 0xBE
-VK_OEM_2 = 0xBF  # /
+VK_OEM_2 = 0xBF
 VK_OEM_3 = 0xC0
-VK_OEM_4 = 0xDB  # [
-VK_OEM_5 = 0xDC  # \
-VK_OEM_6 = 0xDD  # ]
-VK_OEM_7 = 0xDE  # '
-
-_ANSI_KEY_IDS = {
-    0x51: "q",
-    0x57: "w",
-    0x45: "e",
-    0x52: "r",
-    0x54: "t",
-    0x59: "y",
-    0x55: "u",
-    0x49: "i",
-    0x4F: "o",
-    0x50: "p",
-    0x41: "a",
-    0x53: "s",
-    0x44: "d",
-    0x46: "f",
-    0x47: "g",
-    0x48: "h",
-    0x4A: "j",
-    0x4B: "k",
-    0x4C: "l",
-    VK_OEM_1: ";",
-    VK_OEM_4: "[",
-    0x5A: "z",
-    0x58: "x",
-    0x43: "c",
-    0x56: "v",
-    0x42: "b",
-    0x4E: "n",
-    0x4D: "m",
-    VK_OEM_COMMA: ",",
-    VK_OEM_PERIOD: ".",
-    VK_OEM_2: "/",
-    # The digit row and the other symbol keys: plain and
-    # thumb faces in data/nicola_a.json, so they take part in the chord FSM.
-    **{0x30 + d: str(d) for d in range(10)},
-    VK_OEM_3: "`",
-    VK_OEM_MINUS: "-",
-    VK_OEM_PLUS: "=",
-    VK_OEM_6: "]",
-    VK_OEM_5: "\\",
-    VK_OEM_7: "'",
-}
+VK_OEM_4 = 0xDB
+VK_OEM_5 = 0xDC
+VK_OEM_6 = 0xDD
+VK_OEM_7 = 0xDE
+VK_OEM_102 = 0xE2
 
 SHIFT, CTRL, ALT, WIN = 1, 2, 4, 8
 SHIFT_VKS = {VK_SHIFT, 0xA0, 0xA1}
@@ -87,18 +46,11 @@ _MODIFIERS = (("Ctrl", CTRL, CTRL_VKS), ("Alt", ALT, ALT_VKS),
               ("Shift", SHIFT, SHIFT_VKS), ("Win", WIN, WIN_VKS))
 _MOD_BITS = {name.lower(): bit for name, bit, _ in _MODIFIERS}
 
-# Shift is the little-finger layer and never joins a chord:
-# Shift+letters are the native upper-case letters; Shift+digits/symbols give
-# the upper engraving in full width, with ' giving ”.
-_ANSI_SHIFTED = {
-    VK_OEM_1: ":", VK_OEM_PLUS: "+", VK_OEM_COMMA: "<", VK_OEM_MINUS: "_",
-    VK_OEM_PERIOD: ">", VK_OEM_2: "?", VK_OEM_3: "~", VK_OEM_4: "{",
-    VK_OEM_5: "|", VK_OEM_6: "}", VK_OEM_7: '"',
-    **{0x30 + d: ")!@#$%^&*("[d] for d in range(10)},
-}
+# The numeric keypad types the same on every keyboard.
+NUMPAD = {**dict(zip(range(0x60, 0x6A), "0123456789")), 0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"}
 
-
-_KEY_NAMES = {
+# The keys other than character keys (docs/KEYBIND.md §4.1).
+KEY_NAMES = {
     VK_SPACE: "Space", VK_RETURN: "Enter", VK_BACK: "Backspace", 0x09: "Tab",
     VK_IME_ON: "ImeOn", VK_IME_OFF: "ImeOff",
     VK_CONVERT: "Convert", VK_NONCONVERT: "NonConvert",
@@ -110,125 +62,169 @@ _KEY_NAMES = {
     0x6E: "NumpadDecimal", 0x6F: "NumpadDivide",
 }
 
+# Faces decided by the character, not the keyboard (docs/JIS.md §2).
+_KANA_SHIFT = {'"': "”", "'": "’"}  # the quotes as MS-IME types them
+_FULL = {"¥": "￥"}
+
+
+def _full(text: str) -> str:
+    return _FULL.get(text) or to_full_width(text)
+
 
 @dataclass(frozen=True, slots=True)
 class Chord:
-    vk: int
+    key: str  # the key's name (docs/KEYBIND.md §4.1)
     mods: int = 0
 
     @classmethod
     def parse(cls, name: str) -> Chord:
-        chord = ANSI_101.parse_chord(name)
-        return cls(chord.vk, chord.mods)
-
-    def __str__(self) -> str:
-        return ANSI_101.format_chord(self)
-
-    @property
-    def code(self) -> int:
-        return self.vk | self.mods << 8
-
-    @property
-    def alt_only(self) -> bool:
-        return self.mods & (CTRL | ALT) == ALT
-
-    @property
-    def character(self) -> bool:
-        return ANSI_101.is_character(self)
-
-    @property
-    def typing(self) -> bool:
-        return ANSI_101.is_typing(self)
-
-
-SPACE = Chord(VK_SPACE)
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class LayoutProfile:
-    name: str
-    face_table: Path
-    key_ids: dict[int, str]
-    shifted: dict[int, str]
-    shift_faces: dict[int, str]
-    numpad: dict[int, str]
-    key_names: dict[int, str]
-    _vks_by_name: dict[str, int] = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_vks_by_name",
-                           {name.lower(): vk for vk, name in self.key_names.items()})
-
-    def parse_chord(self, name: str) -> Chord:
-        *modifiers, key = name.lower().split("+")
-        if key not in self._vks_by_name or len(set(modifiers)) != len(modifiers):
+        *modifiers, key = name.split("+")
+        key = _NAMES.get(key.lower())
+        if key is None or len(set(m.lower() for m in modifiers)) != len(modifiers):
             raise ValueError(f"invalid chord: {name}")
         bits = 0
         for modifier in modifiers:
-            bit = _MOD_BITS.get(modifier, 0)
+            bit = _MOD_BITS.get(modifier.lower(), 0)
             if not bit or bit == WIN:
                 raise ValueError(f"invalid chord: {name}")
             bits |= bit
-        return Chord(self._vks_by_name[key], bits)
+        return cls(key, bits)
 
-    def format_chord(self, chord: Chord) -> str:
-        names = [name for name, bit, _ in _MODIFIERS if chord.mods & bit]
-        names.append(self.key_names.get(chord.vk, f"VK_{chord.vk:02X}"))
-        return "+".join(names)
+    def __str__(self) -> str:
+        return "+".join([name for name, bit, _ in _MODIFIERS if self.mods & bit] + [self.key])
 
-    def is_character(self, chord: Chord) -> bool:
-        return chord.mods in (0, SHIFT) and (chord.vk in self.key_ids or chord.vk in self.numpad)
+    @property
+    def character(self) -> bool:
+        """A character key of any keyboard, with no modifier or Shift."""
+        return self.mods in (0, SHIFT) and self.key in CHARACTER_KEYS
 
-    def is_typing(self, chord: Chord) -> bool:
-        return self.is_character(chord) or chord == SPACE
+    @property
+    def typing(self) -> bool:
+        return self.character or self == SPACE
+
+    @property
+    def alt_only(self) -> bool:
+        """Pressed with Alt and not Ctrl: TSF gives it to the IME only as a PreservedKey."""
+        return self.mods & (CTRL | ALT) == ALT
+
+
+SPACE = Chord("Space")
+
+
+@dataclass(frozen=True, slots=True)
+class Key:
+    """A character key: one row of a keyboard file."""
+    vk: int
+    id: str  # what it types without Shift: the chord FSM's and the kana table's key
+    shift: str  # what it types with Shift ("" nothing)
+    alnum: str  # what it types in alnum (half width)
+    kana: bool  # in the kana table: it joins the chord FSM
+
+    @property
+    def name(self) -> str:
+        return self.id.upper()
+
+
+class Keyboard:
+    """What each key types on one keyboard (data/keyboards/*.json)."""
+
+    def __init__(self, path: Path):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        self.name: str = raw["name"]
+        self.kana = (path.parent / raw["kana"]).resolve()
+        faces = json.loads(self.kana.read_text(encoding="utf-8"))["keys"]
+        keys = [Key(int(vk, 16), key, shift, alnum[0] if alnum else key, key in faces)
+                for vk, key, shift, *alnum in raw["keys"]]
+        self._by_vk = {key.vk: key for key in keys}
+        self._by_id = {key.id: key for key in keys}
+        self._vks = {key.name: key.vk for key in keys} | {name: vk for vk, name in KEY_NAMES.items()}
+
+    def __repr__(self) -> str:
+        return f"Keyboard({self.name!r})"
+
+    def chord(self, vk: int, mods: int) -> Chord:
+        """The chord a key event is looked up by: the key's name on this keyboard."""
+        key = self._by_vk.get(vk)
+        return Chord(key.name if key else KEY_NAMES.get(vk, f"VK_{vk:02X}"), mods)
+
+    def code(self, chord: Chord) -> int | None:
+        """The chord as the TIP sees it, or None for a key this keyboard lacks."""
+        vk = self._vks.get(chord.key)
+        return None if vk is None else vk | chord.mods << 8
+
+    def character_names(self) -> list[str]:
+        return [key.name for key in self._by_vk.values()]
+
+    def names(self) -> list[str]:
+        return self.character_names() + list(KEY_NAMES.values())
+
+    def character_vks(self) -> list[int]:
+        return sorted(self._by_vk.keys() | NUMPAD.keys())
+
+    def key_vk(self, key: str) -> int | None:
+        found = self._by_id.get(key)
+        return None if found is None else found.vk
 
     def classify(self, vk: int) -> tuple[str, str | None]:
-        """Return (kind, key_id) for the chord FSM."""
+        """Return (kind, key) for the chord FSM."""
         if vk == VK_SPACE:
             return "O", "space"
-        if vk in self.key_ids:
-            return "M", self.key_ids[vk]
+        key = self._by_vk.get(vk)
+        if key is not None and key.kana:
+            return "M", key.id
         if vk in MODIFIER_VKS:
             return "MOD", None
         return "OTHER", None
 
+    def alnum_key(self, vk: int) -> bool:
+        """A letter, digit or symbol key: it has alnum faces."""
+        return vk in self._by_vk
+
     def literal_character(self, vk: int, shift: bool) -> str | None:
-        """The character a key gives outside the chord FSM: numpad or Shift."""
-        if vk in self.numpad:
-            return self.numpad[vk]
-        if not shift:
+        """What a key types in kana outside the chord FSM: numpad, Shift or a key with no kana.
+        "" is a no-op (eaten, nothing typed); None sends the key to the chord FSM."""
+        if vk in NUMPAD:
+            return NUMPAD[vk]
+        key = self._by_vk.get(vk)
+        if key is None:
             return None
-        if ord("A") <= vk <= ord("Z"):
-            return chr(vk)
-        return self.shift_faces.get(vk)
-
-    def alnum_character(self, vk: int, shift: bool) -> str:
-        """A letter or symbol's half-width engraving in 英数の続き."""
         if not shift:
-            return self.key_ids[vk]
-        return self.shifted.get(vk, chr(vk))
+            return None if key.kana else ""
+        if key.shift.isascii() and key.shift.isalpha():
+            return key.shift
+        return _KANA_SHIFT.get(key.shift) or to_full_width(key.shift)
+
+    def alnum_character(self, vk: int, shift: bool, full: bool = False) -> str:
+        """What a key types in alnum ("" is a no-op, as JIS Shift+0)."""
+        key = self._by_vk[vk]
+        if shift:
+            return to_full_width(key.shift) if full else key.shift
+        return _full(key.id) if full else key.alnum
+
+    def width_faces(self, vk: int | None) -> tuple[str, str] | None:
+        """A key whose alnum is not its engraving (JIS ¥ types \\): its half- and full-width faces."""
+        found = self._by_vk.get(vk)
+        if found is None or found.alnum == found.id:
+            return None
+        return found.alnum, _full(found.id)
+
+    def key_alnum(self, key: str) -> tuple[str, str]:
+        """F9/F10: a chord key's unshifted half- and full-width alnum faces."""
+        found = self._by_id.get(key)
+        if found is None:  # a key id from a test table: its own text
+            return key, to_full_width(key)
+        return found.alnum, _full(found.id)
 
 
-ANSI_101 = LayoutProfile(
-    name="ansi101",
-    face_table=Path(__file__).resolve().parents[2] / "data" / "nicola_a.json",
-    key_ids=_ANSI_KEY_IDS,
-    shifted=_ANSI_SHIFTED,
-    shift_faces={**{vk: to_full_width(ch) for vk, ch in _ANSI_SHIFTED.items()}, VK_OEM_7: "”"},
-    numpad={**dict(zip(range(0x60, 0x6A), "0123456789")),
-            0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"},
-    key_names={**{vk: key.upper() for vk, key in _ANSI_KEY_IDS.items()}, **_KEY_NAMES},
-)
-
-# The default ANSI view used by replay tools and callers without a profile.
-VK_TO_M = ANSI_101.key_ids
-ANSI_SHIFTED = ANSI_101.shifted
-SHIFT_FACES = ANSI_101.shift_faces
-NUMPAD = ANSI_101.numpad
-KEY_NAMES = tuple(ANSI_101.key_names.values())
-classify = ANSI_101.classify
-literal_character = ANSI_101.literal_character
-alnum_character = ANSI_101.alnum_character
+KEYBOARDS = {keyboard.name: keyboard for keyboard in map(
+    Keyboard, sorted((Path(__file__).resolve().parents[2] / "data" / "keyboards").glob("*.json")))}
+# The keyboard of a request that names none (docs/JIS.md §2).
+DEFAULT_KEYBOARD = KEYBOARDS["ansi101"]
+# Every keyboard's character keys are character keys here: the rules do not depend on the keyboard.
+CHARACTER_KEYS = frozenset(
+    {name for keyboard in KEYBOARDS.values() for name in keyboard.character_names()}
+    | {KEY_NAMES[vk] for vk in NUMPAD})
+_NAMES = {name.lower(): name for name in (*CHARACTER_KEYS, *KEY_NAMES.values())}
 
 
 def modifier_bits(mods: list[str] | None, held: set[int]) -> int:

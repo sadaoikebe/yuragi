@@ -8,6 +8,7 @@ set(YURAGI_TAG "dev" CACHE STRING "the version tag compiled into the TIP")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 get_filename_component(YURAGI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 set(KEY_TABLE "${CMAKE_CURRENT_BINARY_DIR}/default_keymap.h")
+file(GLOB KEYBOARD_FILES CONFIGURE_DEPENDS "${YURAGI_ROOT}/data/keyboards/*.json" "${YURAGI_ROOT}/data/nicola_*.json")
 add_custom_command(OUTPUT "${KEY_TABLE}"
   COMMAND "${Python3_EXECUTABLE}" -m yuragi.ime.keymap "${KEY_TABLE}"
   WORKING_DIRECTORY "${YURAGI_ROOT}"
@@ -15,6 +16,7 @@ add_custom_command(OUTPUT "${KEY_TABLE}"
           "${YURAGI_ROOT}/yuragi/ime/keymap.py"
           "${YURAGI_ROOT}/yuragi/ime/commands.py"
           "${YURAGI_ROOT}/yuragi/chord/keys.py"
+          ${KEYBOARD_FILES}
           "${YURAGI_ROOT}/yuragi/text.py"
   VERBATIM)
 add_custom_target(tip_key_table DEPENDS "${KEY_TABLE}")

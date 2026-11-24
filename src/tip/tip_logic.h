@@ -416,7 +416,7 @@ inline Chord NormalizeKey(uint32_t vk, Mods mods) {
     }
 }
 
-// Generated from the same layout profile as the engine's key table.
+// Generated from the same keyboard as the engine's key table (data/keyboards).
 inline bool CharacterVk(uint32_t vk) {
     return std::binary_search(kCharacterVks.begin(), kCharacterVks.end(), vk);
 }

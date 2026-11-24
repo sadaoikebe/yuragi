@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from yuragi.engine import Engine, argument_parser
-from yuragi.chord.keys import Chord
+from yuragi.chord.keys import DEFAULT_KEYBOARD, Chord
 from yuragi.ime import config, server
 from yuragi.ime.keymap import load_keymap
 from yuragi.ime.lm_async import LmWorker
@@ -121,18 +121,18 @@ class KeyDispatchTest(EngineCase):
         self.assertEqual(reply["global"], "ime_toggle")
         self.assertEqual((reply["phase"], reply["composition"], reply["commit"]),
                          ("composing", "宇", ""))
-        chord = Chord.parse("Ctrl+Space")
-        table = engine.keymap.eat_table()
-        self.assertIn({"code": chord.code, "command": "ime_toggle"}, table["global"])
-        self.assertNotIn(chord.code, table["phases"]["composing"]["eat"])
+        code = DEFAULT_KEYBOARD.code(Chord.parse("Ctrl+Space"))
+        table = engine.eat_table()
+        self.assertIn({"code": code, "command": "ime_toggle"}, table["global"])
+        self.assertNotIn(code, table["phases"]["composing"]["eat"])
 
     def test_a_key_sent_in_place_keeps_the_phase_rows_and_commits_first(self):
         # Ctrl+H stays 前字削除 while composing; Ctrl+Q, bound in no phase, commits and is sent.
         self.write_keymap(["global", "Ctrl+H", "send_backspace"], ["global", "Ctrl+Q", "send_up"])
         engine = self.engine()
         engine.keymap = load_keymap(self.dir).compile()
-        table = engine.keymap.eat_table()
-        back = Chord.parse("Ctrl+H").code
+        table = engine.eat_table()
+        back = DEFAULT_KEYBOARD.code(Chord.parse("Ctrl+H"))
         self.assertIn({"code": back, "command": "send_backspace"}, table["global"])
         self.assertIn(back, table["phases"]["composing"]["eat"])
         self.assertNotIn(back, table["phases"]["empty"]["eat"])  # the TIP sends it itself

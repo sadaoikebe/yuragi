@@ -14,10 +14,13 @@ from pathlib import Path
 from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap
 from yuragi.chord.keys import (
     SHIFT_VKS, SHORTCUT_VKS, VK_BACK, VK_ESCAPE, VK_RETURN, VK_SPACE,
-    classify, literal_character,
+    KEYBOARDS,
 )
 from yuragi.ime.recording import SCHEMA, VK_NEXT_PROMPT
 from yuragi.lattice.table import load_table
+
+# Stage 1 was recorded on the US keyboard; the recordings do not name it.
+KEYBOARD = KEYBOARDS["ansi101"]
 
 LABELS = {
     "thumb_overlap_shift_loss": "親指の重なりでシフト消失（推定）",
@@ -216,7 +219,7 @@ def replay(trace: Trace, fsm=None) -> tuple[list[Observation], dict]:
             physical.add(vk)
         else:
             physical.discard(vk)
-        kind, key = classify(vk)
+        kind, key = KEYBOARD.classify(vk)
         if kind == "MOD":
             if down:
                 modifiers.add(vk)
@@ -244,7 +247,7 @@ def replay(trace: Trace, fsm=None) -> tuple[list[Observation], dict]:
                 counts[{VK_BACK: "backspace_downs", VK_ESCAPE: "escape_downs",
                         VK_RETURN: "enter_downs"}[vk]] += 1
             continue
-        native = literal_character(vk, bool(modifiers & SHIFT_VKS))
+        native = KEYBOARD.literal_character(vk, bool(modifiers & SHIFT_VKS))
         if native is not None:
             if down:
                 boundary(ms)

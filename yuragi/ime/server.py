@@ -35,10 +35,9 @@ import sys
 from pathlib import Path
 
 from yuragi.ime.bunsetsu import candidate_note
-from yuragi.ime.keymap import Keymap, default_keymap
+from yuragi.ime.session import ImeSession
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
-from yuragi.ime.session import ImeSession
 from yuragi.ime import power
 from yuragi.ime.config import DEFAULTS, SETTINGS
 from yuragi.ime.predict import DEFAULT_MODE as DEFAULT_PREDICTION, MODES as PREDICTION_MODES
@@ -286,14 +285,13 @@ def freeze_after_dictionary_load():
             gc.enable()
 
 
-def load_session(args, *, lex=None, keymap: Keymap | None = None) -> ImeSession:
+def load_session(args, *, lex=None) -> ImeSession:
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
     lex: an already loaded lexicon (the engine loads it itself).
     """
     store = LearningStore(args.learning_file) if args.learning == "on" else None
     sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
-                      keymap=keymap if keymap is not None else default_keymap(),
                       prediction=getattr(args, "prediction", DEFAULT_PREDICTION))
     sess.load()
     if sess.prediction != "off":

@@ -1,14 +1,13 @@
-"""Load and reverse NICOLA face tables."""
+"""NICOLA-A face table."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from yuragi.chord.keys import ANSI_101
 from .expand import is_literal_face
 
-DATA = ANSI_101.face_table
+DATA = Path(__file__).resolve().parents[2] / "data" / "nicola_a.json"
 
 
 def load_table(path: Path | None = None) -> dict:
