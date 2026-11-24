@@ -238,9 +238,6 @@ class Engine:
         with server.freeze_after_dictionary_load():
             try:
                 lex = mozc_dict.load_lex()
-            except mozc_dict.CacheWriteError as exc:
-                log(f"{where(exc)} (errno {exc.errno})")
-                fatal("cache-not-written")
             except (OSError, ValueError) as exc:  # not UTF-8, a bad line, cannot be opened
                 log(where(exc))
                 fatal("dictionary-unreadable")

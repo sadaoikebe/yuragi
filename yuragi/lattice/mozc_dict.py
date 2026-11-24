@@ -52,8 +52,6 @@ class DictionaryFormatError(ValueError):
     """
 
 
-class CacheWriteError(OSError):
-    """The rebuilt dictionary cache could not be written (disk space etc.)."""
 BOS_ID = 0  # BOS/EOS: Mozc's format fixes it as row and column 0 of the connection matrix
 ARITHMETIC_OPERATORS = frozenset(("プラス", "マイナス"))
 # An unqualified numeral gets a larger penalty at the end of a run. Keep the
@@ -378,9 +376,6 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
                          lex.connect, lex.pos_size), f, protocol=5)
         os.replace(tmp, cache)
         tmp = None
-    except OSError as exc:
-        raise CacheWriteError(exc.errno, f"cannot write the dictionary cache {cache}: "
-                                         f"{exc.strerror}") from exc
     finally:
         if tmp is not None:
             with suppress(OSError):
@@ -388,7 +383,7 @@ def write_cache(cache: Path, lex: MozcLex) -> None:
 
 
 def load_lex() -> MozcLex:
-    """The lexicon from the cache, or parsed from the text and cached."""
+    """The lexicon from the cache, or parsed from the text."""
     cache = CACHE_DIR / cache_name()
     lex = read_cache(cache)
     if lex is None:
@@ -397,12 +392,17 @@ def load_lex() -> MozcLex:
         by_reading, prefixes = _parse_dict_files()
         connect, pos_size = _parse_connection()
         lex = MozcLex(by_reading, prefixes, connect, pos_size)
-        write_cache(cache, lex)
-        print(
-            f"  readings={len(by_reading)} prefixes={len(prefixes)} "
-            f"pos={pos_size} cache={cache}",
-            file=sys.stderr,
-        )
+        try:
+            write_cache(cache, lex)
+        except OSError as exc:
+            print(f"cannot write the dictionary cache {cache}: {exc}; using the loaded dictionary",
+                  file=sys.stderr, flush=True)
+        else:
+            print(
+                f"  readings={len(by_reading)} prefixes={len(prefixes)} "
+                f"pos={pos_size} cache={cache}",
+                file=sys.stderr,
+            )
     finish_lex(lex)
     return lex
 
