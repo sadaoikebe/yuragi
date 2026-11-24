@@ -2,9 +2,9 @@
 //
 // The TIP runs inside other people's applications, so it does as little as
 // possible: it sends keys to the broker over a named pipe and writes the
-// replies on screen. It never starts Python, never retries, keeps no files.
-// The only process it may start is the broker, under the three conditions of
-// DESIGN「ブローカーを起動する条件」. Its decisions that need no TSF live in tip_logic.h (tested on any OS).
+// replies on screen. The broker starts Python and supervises the engine.
+// See DESIGN「ブローカーを起動する条件」 for when the TIP starts the broker.
+// Its decisions that need no TSF live in tip_logic.h (tested on any OS).
 //
 // Practices from SampleIME / CorvusSKK / Mozc:
 //   - disabled / empty context / keyboard closed: not our key
@@ -1706,9 +1706,8 @@ private:
     }
 
     // -- the time budget ---------------------------------------------------------------------
-    // DESIGN「守ること」5: one call from Windows (a key, a focus change, a message to the
-    // TIP's window) holds the UI thread for at most KEY_BUDGET_MS, however many writes and
-    // waits it makes. Each such call opens one; a nested one shares the outer deadline.
+    // Pipe writes and reply waits use the same deadline, set from KEY_BUDGET_MS.
+    // Nested callbacks use the outer callback's deadline.
     class Budget {
     public:
         explicit Budget(Tip* tip) : tip_(tip), outer_(!tip->deadline_) {
@@ -2865,7 +2864,7 @@ public:
     }
 };
 
-// -- registration (DESIGN「共通の仕組み」: run elevated by packaging/elevated.ps1, then read back) ----------
+// -- registration (run elevated by packaging/elevated.ps1) ----------
 
 static HRESULT SetSz(HKEY root, const wchar_t* sub, const wchar_t* name, const wchar_t* val) {
     HKEY k = nullptr;
@@ -2971,7 +2970,7 @@ STDAPI DllRegisterServer() {
     return hr;
 }
 
-// Every step runs; the first failure is returned (DESIGN「守ること」6: no false "OK").
+// Attempt COM cleanup even if removing the shared TSF profile fails.
 // The profile is shared by the 32- and 64-bit builds (DESIGN「32 ビットのアプリ」): the
 // second to be unregistered finds it gone, which is not a failure.
 STDAPI DllUnregisterServer() {

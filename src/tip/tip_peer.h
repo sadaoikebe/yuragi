@@ -1,4 +1,4 @@
-// Who made a named pipe (DESIGN「通信」). Windows only; the TIP and tests/tip_peer_test.cpp.
+// Checks the owner and integrity level of a named pipe for the Windows TIP.
 #pragma once
 
 #include <windows.h>

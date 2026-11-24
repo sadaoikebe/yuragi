@@ -63,7 +63,7 @@ class Confirmation:
     symbol: bool = False  # a symbol from its reading: promotes it in candidates only
     prev: str | None = None
     choice: bool = False  # written by a version that records the user's choices only
-    word: bool = False  # False for interval choices (including pre-A7 explicit choices)
+    word: bool = False  # False for interval choices, including older rows without the flag.
 
     def used(self) -> bool:
         """False for an older row that may be a plain commit of the engine's pick."""

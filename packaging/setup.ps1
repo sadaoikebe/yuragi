@@ -60,14 +60,15 @@ $Boot = "import os,sys,runpy; sys.path.insert(0, os.getcwd()); m = sys.argv.pop(
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
 function Say([string]$msg) { Write-Host $msg }
-# 段 6 で Tag を新しい版に書き換えたら、止まったときの案内が変わる (DESIGN の段の表)。
-$script:Switched = $false
+$script:SwitchPhase = "before-registration"
 function Fail([string]$msg) {
     Write-Host "エラー: $msg" -ForegroundColor Red
-    if ($script:Switched) {
+    if ($script:SwitchPhase -eq "switched") {
         Write-Host "新しい版への切り替えは済んでいます (次の打鍵かサインインで起動します)。再実行すると最後まで進みます。"
-    } else {
+    } elseif ($script:SwitchPhase -eq "before-registration") {
         Write-Host "インストール済みの版はそのまま使えます。再実行すると続きから進みます。"
+    } else {
+        Write-Host "セットアップを再実行してください。"
     }
     exit 1
 }
@@ -126,7 +127,7 @@ function Get-TorchVariant {
     return (Select-TorchVariant $header $gpus)
 }
 
-# ---------------------------------------------------------------- 1 確認
+# 配布用のスクリプトであることと、動作環境を確認する。
 if ($Tag -like "__*" -or $EmbedPythonSha256 -like "__*") {
     Fail "この setup.ps1 はリリース版ではありません。リリースページの setup.ps1 を使ってください。"
 }
@@ -205,7 +206,7 @@ function Write-EngineJson([string]$path, [string]$app, [string[]]$extra) {
     [IO.File]::WriteAllText($path, ($engine | ConvertTo-Json -Depth 4), $Utf8NoBom)
 }
 
-# ---------------------------------------------------------------- 2 staging
+# 配布物を作業フォルダーに取得して展開する。
 Say ""
 Say "== ゆらぎ本体のダウンロード"
 $Stage = Join-Path $StagingRoot $Tag
@@ -313,8 +314,7 @@ if ($TorchVariant -ne "cpu") {
 $script:Cache = Join-Path $Shared "cache"
 New-Item -ItemType Directory -Force $script:Cache | Out-Null
 
-# ---------------------------------------------------------------- 3 試運転
-# 利用者のデータには触らない: 試運転のエンジンは staging の中のフォルダを使う。
+# 専用のフォルダーで試運転し、利用者の学習履歴や個人辞書から分ける。
 $selftestData = Join-Path $Stage "selftest-data"
 New-Item -ItemType Directory -Force $selftestData | Out-Null
 $stageEngine = Join-Path $Stage "engine.json"
@@ -330,7 +330,7 @@ if ($proc.ExitCode -ne 0) {
 }
 Say "  変換  OK"
 
-# ---------------------------------------------------------------- 旧ブローカー
+# 終了依頼と起動確認に使うブローカーの接続を扱う。
 function Connect-Broker([int]$timeoutMs) {
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $session = (Get-Process -Id $PID).SessionId
@@ -370,7 +370,7 @@ function Stop-Broker {
     }
 }
 
-# ---------------------------------------------------------------- 4 versions へ
+# 試運転を終えたファイルをインストール先に移す。
 $Version = Join-Path $Versions $Tag
 New-Item -ItemType Directory -Force $Versions | Out-Null
 if (Test-Path -LiteralPath $Version) {
@@ -379,7 +379,6 @@ if (Test-Path -LiteralPath $Version) {
         Say "  同じ版 ($Tag) を再インストールします"
         Stop-Broker
     }
-    # Tag が違えば、前回が段 5 で止まった残り。動いている旧版には触らない。
     $aside = "$Version.old-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
     Rename-Item -LiteralPath $Version -NewName (Split-Path $aside -Leaf)
 }
@@ -388,7 +387,7 @@ Remove-Item -LiteralPath (Join-Path $Version "selftest-data") -Recurse -Force -E
 $App = Join-Path $Version "app"
 Write-EngineJson (Join-Path $Version "engine.json") $App @()
 
-# ---------------------------------------------------------------- 5 管理者権限
+# DLL の配置と登録を行うスクリプトを管理者権限で呼び出す。
 # 管理者用スクリプトの呼び出しと引数を 1 つのコマンドにして -EncodedCommand 用に符号化する
 # (空白・引用符・日本語を含むパスもそのまま届く)。パスと引数は単一引用符で囲む。PowerShell は ' のほか
 # U+2018・U+2019・U+201A・U+201B も単一引用符として読むので、5 種類とも二重にする。
@@ -421,6 +420,7 @@ Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 # 旧ブローカーを終わらせておく (elevated.ps1 は旧版を消す前にその終了を待つので、旧版の exe も消える)。
 Send-Quit
+$script:SwitchPhase = "switching"
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag,
     "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
     "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
@@ -431,11 +431,10 @@ $DllFinal = Join-Path $ProgramRoot "$Tag\yuragi_tip.dll"
 $BrokerFinal = Join-Path $ProgramRoot "$Tag\yuragi-broker.exe"
 Say "  登録: $DllFinal  OK"
 
-# ---------------------------------------------------------------- 6 切り替え
+# インストール済みの版と、サインイン時に起動するブローカーを更新する。
 Say ""
 Say "== 新しい版への切り替え"
 Stop-Broker
-$script:Switched = $true
 New-Item -Force $ProductKey | Out-Null
 Set-ItemProperty -LiteralPath $ProductKey -Name "Tag" -Value $Tag
 # Run は他のアプリと共有するため、キーが無いときだけ作る。
@@ -443,6 +442,7 @@ if (-not (Test-Path -LiteralPath $RunKey)) {
     New-Item -Path $RunKey | Out-Null
 }
 Set-ItemProperty -LiteralPath $RunKey -Name "yuragi-ime" -Value "`"$BrokerFinal`""
+$script:SwitchPhase = "switched"
 Add-Type -Namespace YuragiSetup -Name Input -MemberDefinition @'
 [DllImport("input.dll", CharSet = CharSet.Unicode)]
 public static extern bool InstallLayoutOrTip(string profile, uint flags);
@@ -451,7 +451,7 @@ if (-not [YuragiSetup.Input]::InstallLayoutOrTip($Layout, 0)) { Fail "入力方�
 
 New-Item -ItemType Directory -Force $UserData | Out-Null
 
-# ---------------------------------------------------------------- 7 起動と確認
+# 新しい変換エンジンが起動したことを、ブローカーの応答で確かめる。
 Say ""
 Say "== 起動確認 (最大 120 秒)"
 Start-Process -FilePath $BrokerFinal
@@ -478,7 +478,7 @@ if ($state -ne "ready") {
 }
 Say "  変換エンジン  OK"
 
-# ---------------------------------------------------------------- 8 片付け
+# 新しい版が使うファイルを残し、旧版と作業ファイルを片付ける。
 # 消せないもの (使用中) は残す。次回の setup がまた消す。
 $keep = @($Runtime, $script:Dict) + $script:Models
 $cacheName = ""
@@ -495,7 +495,6 @@ foreach ($kind in @("runtime", "dict", "model")) {
 }
 if ($cacheName) { $cleanup += @(Get-ChildItem -LiteralPath $script:Cache -File | Where-Object { $_.Name -ne $cacheName }) }
 if (Test-Path -LiteralPath $StagingRoot) { $cleanup += @(Get-Item -LiteralPath $StagingRoot) }
-# この版の取得物 (DLL・ブローカー・zip など。段 5 のあとは使わない) と試運転の出力。
 $cleanup += @(Get-Item -LiteralPath (Join-Path $Version "download"), (Join-Path $Version "selftest.txt") -ErrorAction SilentlyContinue)
 foreach ($item in $cleanup) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 

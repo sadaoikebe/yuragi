@@ -584,13 +584,13 @@ class AdminWindow:
         rows = m.setting_rows()
         self._fill(self.settings_tree, [(r.label, r.value, r.help) for r in rows])
         self._setting_rows = {str(i): r for i, r in enumerate(rows)}
+        # Query the broker when the status tab is visible.
         if self.notebook.select() == str(self.status_frame):
             self._refresh_status(store)
         elif self.notebook.select() == str(self.keys_frame):
             self.keys_tab.open()
 
     def _refresh_status(self, store=None):
-        # Hashes the dictionary files and asks the broker: only when looked at.
         self._fill(self.status_tree, self.model.status_rows(store))
 
 

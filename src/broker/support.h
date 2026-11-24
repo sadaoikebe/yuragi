@@ -77,8 +77,8 @@ struct EngineConfig {
 };
 bool ReadEngineConfig(const fs::path& path, EngineConfig& config, std::string& error);
 
-// --selftest (DESIGN「インストールと更新」, step 3): start the engine for real, convert once,
-// end it. Exit codes below.
+// The installer runs --selftest before switching versions. It starts the engine,
+// runs one conversion, and shuts the engine down.
 enum SelfTestResult {
     SELFTEST_OK = 0,
     SELFTEST_NOT_READY = 1,  // exited, or not ready in time

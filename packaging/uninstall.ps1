@@ -54,8 +54,7 @@ function New-ElevatedCommand([string]$scriptPath, [string[]]$arguments) {
 function Say([string]$msg) { Write-Host $msg }
 function Fail([string]$msg) { Write-Host "エラー: $msg" -ForegroundColor Red; exit 1 }
 
-# ---------------------------------------------------------------- 1
-# -RemoveData の確認は最初に (途中で止まらないように)。
+# データの削除も指定された場合は、アンインストールを始める前に確認する。
 if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     $size = (Get-ChildItem -LiteralPath $UserData -Recurse -Force -File | Measure-Object -Property Length -Sum).Sum
     Say "学習データ・登録した単語・設定も削除します: $UserData ($([math]::Round($size / 1KB)) KB)"
@@ -65,7 +64,7 @@ if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     }
 }
 
-# ---------------------------------------------------------------- 2
+# この利用者の自動起動と入力方法の一覧からゆらぎを外す。
 Say "== 自動起動と入力方法の一覧から削除"
 Remove-ItemProperty -LiteralPath $RunKey -Name "yuragi-ime" -ErrorAction SilentlyContinue
 Add-Type -Namespace YuragiUninstall -Name Input -MemberDefinition @'
@@ -76,7 +75,7 @@ public static extern bool InstallLayoutOrTip(string profile, uint flags);
 if (-not [YuragiUninstall.Input]::InstallLayoutOrTip($Layout, 1)) { Say "  入力方法の一覧: 未登録" }
 Say "  OK"
 
-# ---------------------------------------------------------------- 3
+# 実行ファイルを削除できるよう、このセッションのブローカーを止める。
 Say "== ブローカーの終了"
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $session = (Get-Process -Id $PID).SessionId
@@ -88,7 +87,7 @@ try {
     $writer.NewLine = "`n"
     $writer.WriteLine('{"op":"hello","proto":1}')
     # 返事を 1 行読んでから quit を送る (読まずに閉じると、ブローカーは返事の書き込みに失敗して
-    # 接続を閉じ、後ろの quit が届かないことがある)。setup.ps1 の Stop-Broker と同じ手順。
+    # 接続を閉じ、後ろの quit が届かないことがある)。
     $reader = New-Object IO.StreamReader($pipe, $Utf8NoBom)
     [void]$reader.ReadLineAsync().Wait(2000)
     $writer.WriteLine('{"op":"quit"}')
@@ -101,7 +100,7 @@ foreach ($b in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue
 }
 Say "  OK"
 
-# ---------------------------------------------------------------- 4
+# 管理者権限で DLL の登録を解除し、プログラムのファイルを削除する。
 if ($elevatedPath) {
 Say "== Windows からの登録解除とプログラムの削除 (管理者権限の確認が出ます)"
 $resultFile = Join-Path $env:TEMP ("yuragi-elevated-" + [Guid]::NewGuid().ToString("N") + ".json")
@@ -119,9 +118,8 @@ Say "  OK"
     Say "== Windows への登録: なし (登録解除は不要)"
 }
 
-# ---------------------------------------------------------------- 5
-# 登録が消えたあとの、この利用者の分: 製品のキー (Tag) と、
-# 言語一覧から外したときに Windows が書く TSF の利用者設定 (Enable = 0)。
+# 登録解除が済んでから、この利用者の Tag と TSF の設定を消す。
+# TSF の設定には、入力方法の一覧から外したときに Windows が残す Enable = 0 も含まれる。
 if (Test-Path -LiteralPath $ProductKey) { Remove-Item -LiteralPath $ProductKey -Recurse -Force }
 $userTip = "HKCU:\SOFTWARE\Microsoft\CTF\TIP\$Clsid"
 if (Test-Path -LiteralPath $userTip) { Remove-Item -LiteralPath $userTip -Recurse -Force }
@@ -131,7 +129,7 @@ if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     Say "  削除: $UserData"
 }
 
-# ---------------------------------------------------------------- 6
+# 終了を知らせ、利用者データを残す場合はその場所を表示する。
 Say ""
 Say "アンインストールが完了しました。"
 if (-not $RemoveData) {

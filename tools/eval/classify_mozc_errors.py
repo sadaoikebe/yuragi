@@ -672,12 +672,11 @@ def main():
     if cache is None and not args.from_text and args.dictionary_dir == DICT_DIR:
         cache = CACHE_DIR / mozc_dict.cache_name()
         cache = cache if cache.exists() else None
-    # Exactly the files required by the selected snapshot, not an open glob.
-    inputs = [tsv, args.table, args.dictionary_dir / "id.def", args.dictionary_dir / "suffix.txt",
-              args.dictionary_dir / "connection_single_column.txt",
-              *(args.dictionary_dir / f"dictionary{i:02}.txt" for i in range(10))]
-    if cache:
+    inputs = [tsv, args.table, args.dictionary_dir / "id.def"]
+    if cache is not None:
         inputs.append(cache)
+    else:
+        inputs.extend(args.dictionary_dir / name for name in mozc_dict.LOADER_FILES)
     hashes = {str(path.resolve()): sha256(path) for path in inputs}
     engine_files = [Path(__file__), ROOT / "yuragi/lattice/mozc_dict.py",
                     ROOT / "yuragi/lattice/token_viterbi.py", ROOT / "tools/eval/run_mozc_eval.py",

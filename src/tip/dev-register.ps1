@@ -83,7 +83,7 @@ try {
     $writer.NewLine = "`n"
     $writer.WriteLine('{"op":"hello","proto":1}')
     # 返事を 1 行読んでから quit を送る (読まずに閉じると、ブローカーは返事の書き込みに失敗して
-    # 接続を閉じ、後ろの quit が届かないことがある)。setup.ps1 の Stop-Broker と同じ手順。
+    # 接続を閉じ、後ろの quit が届かないことがある)。
     $reader = New-Object IO.StreamReader($pipe, $Utf8NoBom)
     [void]$reader.ReadLineAsync().Wait(2000)
     $writer.WriteLine('{"op":"quit"}')
