@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yuragi.chord.keys import CTRL, KEYBOARDS, Chord
+from yuragi.chord.keys import CTRL, KEYBOARDS, SHIFT, Chord
 from yuragi.ime import keymap
 
 ANSI, JIS = KEYBOARDS["ansi101"], KEYBOARDS["jis106"]
@@ -174,3 +174,9 @@ class EatTableTest(unittest.TestCase):
                          ([ANSI.code(enter)], [ANSI.code(shift_f6)]))
         self.assertEqual({phase for phase, row in phases.items() if row.get("rest") == "eat"},
                          set(phases) - {"empty"})
+
+    def test_thumb_keys_stay_off_the_table(self):
+        table = keymap.default_keymap().eat_table(ANSI)["phases"]
+        codes = {code for row in table.values() for code in row["eat"] + row["pass"]}
+        self.assertTrue({0x1C, 0x1D}.isdisjoint(codes))
+        self.assertIn(0x1D | SHIFT << 8, codes)  # Shift+無変換 is a command key

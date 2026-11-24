@@ -444,7 +444,7 @@ class ConnectionPipeline:
         sess = self.sess
         if sess._await is not None or not self.worker.available():
             return
-        if sess.fsm.state != "S3" and self.spec is not None:
+        if not sess.lone_thumb_converts() and self.spec is not None:
             # The thumb press became a chord (or the input changed otherwise): the
             # prefetch is for an input that will not be converted. Free the worker
             # for the next one instead of finishing it.
@@ -453,8 +453,8 @@ class ConnectionPipeline:
             self.spec_key = None
         if self.prefetch == "off" or sess.converted or not sess.tokens:
             return
-        if sess.fsm.state != "S3":
-            return  # S3: only a thumb key is down, awaiting the chord decision
+        if not sess.lone_thumb_converts():
+            return  # only a thumb key that converts is down, awaiting the chord decision
         request = sess.conversion_request()
         if request is None or request.key == self.spec_key:
             return

@@ -421,9 +421,12 @@ inline bool CharacterVk(uint32_t vk) {
     return std::binary_search(kCharacterVks.begin(), kCharacterVks.end(), vk);
 }
 
+// keys.THUMBS: Space, 無変換 and 変換 on every keyboard.
+inline bool ThumbVk(uint32_t vk) { return vk == VK_SPACE_ || vk == 0x1C || vk == 0x1D; }
+
 inline bool Typing(Chord chord) {
     return !chord.mods.Shortcut() &&
-           (CharacterVk(chord.vk) || (chord.vk == VK_SPACE_ && !chord.mods.shift));
+           (CharacterVk(chord.vk) || (ThumbVk(chord.vk) && !chord.mods.shift));
 }
 
 struct Local {

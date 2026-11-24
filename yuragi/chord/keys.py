@@ -62,6 +62,11 @@ KEY_NAMES = {
     0x6E: "NumpadDecimal", 0x6F: "NumpadDivide",
 }
 
+# The thumb keys of the chord FSM, the same on every keyboard. Which thumb presses each is
+# fsm.THUMB_SIDE.
+THUMBS = {VK_SPACE: "space", VK_NONCONVERT: "muhenkan", VK_CONVERT: "henkan"}
+THUMB_VK = {key: vk for vk, key in THUMBS.items()}
+
 # Faces decided by the character, not the keyboard (docs/JIS.md §2).
 _KANA_SHIFT = {'"': "”", "'": "’"}  # the quotes as MS-IME types them
 _FULL = {"¥": "￥"}
@@ -99,8 +104,13 @@ class Chord:
         return self.mods in (0, SHIFT) and self.key in CHARACTER_KEYS
 
     @property
+    def thumb(self) -> bool:
+        """A thumb key with no modifier. With one it is a command key (Shift+Space)."""
+        return self.mods == 0 and self.key in _THUMB_NAMES
+
+    @property
     def typing(self) -> bool:
-        return self.character or self == SPACE
+        return self.character or self.thumb
 
     @property
     def alt_only(self) -> bool:
@@ -109,6 +119,12 @@ class Chord:
 
 
 SPACE = Chord("Space")
+_THUMB_NAMES = frozenset(KEY_NAMES[vk] for vk in THUMBS)
+
+
+def thumb_chord(key: str) -> Chord:
+    """The chord a lone thumb key is looked up by (ThumbTap.key)."""
+    return Chord(KEY_NAMES[THUMB_VK[key]])
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,8 +183,8 @@ class Keyboard:
 
     def classify(self, vk: int) -> tuple[str, str | None]:
         """Return (kind, key) for the chord FSM."""
-        if vk == VK_SPACE:
-            return "O", "space"
+        if vk in THUMBS:
+            return "O", THUMBS[vk]
         key = self._by_vk.get(vk)
         if key is not None and key.kana:
             return "M", key.id

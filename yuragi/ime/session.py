@@ -16,10 +16,12 @@ import time
 from typing import Callable
 import unicodedata
 
-from yuragi.chord.fsm import AmbShift, ChordFsm, Plain, ThumbTap, Token
+from yuragi.chord.fsm import (
+    AmbShift, ChordFsm, Plain, ThumbJoin, ThumbOver, ThumbTap, Token, thumb_side,
+)
 from yuragi.chord.keys import (
-    ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, VK_SPACE, Chord, Keyboard,
-    modifier_bits,
+    ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, THUMB_VK, VK_SPACE, Chord, Keyboard,
+    modifier_bits, thumb_chord,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
 from yuragi.lattice.expand import is_literal_face, literal_text
@@ -126,6 +128,10 @@ def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
             k = table["keys"].get(tok.key, {}).get(face)
             if k:
                 faces[face] = k
+        side = thumb_side(tok.struck, tok.held, tok.over)
+        if side is not None:
+            # The thumb keys pressed say which thumb it was (JIS 無変換/変換): only its face is left.
+            faces = {face: k for face, k in faces.items() if face == side}
         if not faces:
             return None
         texts = set(faces.values())
@@ -389,10 +395,12 @@ class ImeSession:
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
     key_global: str | None = field(default=None, init=False)
+    # A thumb key eaten at its down and found alone, whose function is to go to the application.
+    key_resend: int | None = field(default=None, init=False)
     commit_caret_back: int = field(default=0, init=False)  # distance from the latest commit's end
     input_mode: str = "hiragana"
     _input_script: str | None = None  # current unconverted run styled with NonConvert
-    _alnum_held: bool = False  # Shift+CapsLock: 英数の続き until the input ends
+    _alnum_held: bool = False  # alnum_mode: 英数の続き until the input ends
     max_tokens: int | None = None
 
     @property
@@ -430,8 +438,7 @@ class ImeSession:
 
     def _reset_input(self) -> None:
         self._clear_input()
-        self.fsm.reset()
-        self.fsm.pressed_at.clear()
+        self.fsm.clear()
         self._fsm_down.clear()
         self._press_alias.clear()
         self._carry.clear()
@@ -495,7 +502,7 @@ class ImeSession:
             return None
         if self.direct:
             self.set_direct(False)
-        self._end_alnum()  # Ctrl+CapsLock keeps the input; later keys type kana (MS-IME)
+        self._end_alnum()  # ひらがな keeps the input; later keys type kana (MS-IME)
         if mode != "hiragana":
             return self._then(self._finish_pending(), lambda: self._commit_mode(mode))
         self.input_mode = mode
@@ -527,7 +534,7 @@ class ImeSession:
         provide the state.
         """
         self.key_eat = None if down else False
-        self.key_global = None
+        self.key_global = self.key_resend = None
         if self.direct:
             self.key_eat = False
             return None
@@ -576,19 +583,25 @@ class ImeSession:
 
     def _type_key(self, chord: Chord, vk: int, now_ms: int) -> str | None:
         keyboard = self.keyboard
-        # Plain Space is looked up only on ThumbTap. A Space that forms
+        # A plain thumb key is looked up only on ThumbTap. One that forms
         # a NICOLA chord must keep its original timing in every phase.
         if chord.character and (self.phase in CONVERTED or self.predicting):
             if self.keymap.lookup(self.phase, chord) is not None:
                 return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
+        alnum = self._alnum_continues()
+        if not chord.character and chord != SPACE and (
+                alnum or self._alnum_held or self.input_mode == "full_alnum"):
+            # 無変換/変換 while the character keys type alphanumerics: no chord can form, so
+            # the key runs its command at its down (Space has its own rules below).
+            return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
         self.key_eat = True
         kind, key = keyboard.classify(vk)
         if self._alnum_held and self.converted and not self.editing and vk != VK_SPACE:
             # MS-IME commits the conversion and drops the character: the IME is off.
+            pending = self._finish_pending()
             self._forget_fsm_down(vk)
-            return self._then(self._finish_pending(), self._commit)
-        alnum = self._alnum_continues()
+            return self._then(pending, self._commit)
         if self.input_mode == "full_alnum" and not self._alnum_held and chord == SPACE:
             return self._then(self._finish_pending(), lambda: self._space_in_alnum(Literal("　")))
         if alnum and chord == SPACE:
@@ -634,7 +647,7 @@ class ImeSession:
         if vk in self._fsm_down:
             self._fsm_down.remove(vk)
             _, key = self.keyboard.classify(vk)
-            self.fsm.pressed_at.pop(key, None)
+            self.fsm.forget(key)
 
     def _run_command(self, command: Command | None) -> str | None:
         if command is None or command.run is None:
@@ -648,7 +661,7 @@ class ImeSession:
             self._resize_origin = None
 
     def _alnum_continues(self) -> bool:
-        """英数の続き: Shift+CapsLock held it, or the input ends in a half-width ASCII literal.
+        """英数の続き: alnum_mode held it, or the input ends in a half-width ASCII literal.
 
         Only Shift+letter and the continuation itself type one (every other
         key types kana or a full-width literal), so the tail is the state.
@@ -662,7 +675,7 @@ class ImeSession:
         return self._alnum_held or (isinstance(tail, Literal) and tail.alnum)
 
     def _hold_alnum(self) -> None:
-        """Shift+CapsLock with input (MS-IME's 英数 mode): the input and any
+        """英数 with input (MS-IME's 英数 mode): the input and any
         conversion stay; later keys type half-width alphanumerics."""
         self._alnum_held = True
 
@@ -737,15 +750,20 @@ class ImeSession:
         return text
 
     def on_timeout(self, now_ms: int) -> str | None:
+        """The timer request: the chord deadline has come."""
         if self.direct:
             return None
+        self.key_global = self.key_resend = None
+        return self._timeout(now_ms)
+
+    def _timeout(self, now_ms: int) -> str | None:
         return self._ingest(self.fsm.on_timeout(now_ms))
 
     def flush_timeout(self, now_ms: int) -> str | None:
         deadline = self.fsm.timer_deadline
         if deadline is None or now_ms < deadline:
             return None
-        return self.on_timeout(now_ms)
+        return self._timeout(now_ms)
 
     def _finish_pending(self) -> str | None:
         """End a chord at a literal/edit boundary before applying that event.
@@ -754,7 +772,7 @@ class ImeSession:
         the existing FSM timeout path so held keys cannot appear out of order.
         """
         deadline = self.fsm.timer_deadline
-        insert = self.on_timeout(deadline) if deadline is not None else None
+        insert = self._timeout(deadline) if deadline is not None else None
         self.fsm.reset()
         return insert
 
@@ -1566,11 +1584,17 @@ class ImeSession:
         insert = ""
         for tok in raw:
             if isinstance(tok, ThumbTap):
-                insert += self._run_command(self.keymap.lookup(self.phase, SPACE)) or ""
+                insert += self._thumb_tap(tok.key) or ""
+                continue
+            if isinstance(tok, (ThumbJoin, ThumbOver)):
+                self._add_evidence(tok)
                 continue
             mapped = to_lattice_token(tok, self._table)
             if mapped is None:
-                continue  # An empty face (] alone, Q right, ...): nothing is typed.
+                # An empty face (] alone, Q right, ...): nothing is typed.
+                if isinstance(tok, AmbShift):
+                    self._carry_side(tok)
+                continue
             if self.converted and not self.editing:
                 insert += self._commit(reset_input=False)
             if self.max_tokens is not None and len(self.tokens) >= self.max_tokens:
@@ -1580,11 +1604,93 @@ class ImeSession:
                     self._press_alias[tok.press] = self._next_alias
                     self._next_alias -= 1
                 elif tok.press in self._press_alias:
-                    tok = AmbShift(tok.key, self._press_alias[tok.press], tok.turn)
+                    tok = replace(tok, press=self._press_alias[tok.press])
             if mapped["kind"] == "literal" and not isinstance(tok, Literal):
                 tok = Literal(mapped["text"], faces=self.keyboard.width_faces(self.keyboard.key_vk(tok.key)))
             self._insert_token(tok)
         return insert or None
+
+    def _thumb_tap(self, key: str) -> str | None:
+        """A thumb key pressed alone: the function of that key in this phase.
+
+        The TIP ate its down. A function that leaves the key to the application
+        (変換 with no input) or to the TIP is reported with this event's reply.
+        """
+        chord = thumb_chord(key)
+        if chord == SPACE:
+            return self._run_command(self.keymap.lookup(self.phase, SPACE))
+        command = self.keymap.command_for(self.phase, chord)
+        if command.where == "tip":
+            self.key_global = command.id
+        if command.key != "eat":
+            self.key_resend = THUMB_VK[key]
+            if command.key == "pass" and self.phase == "empty":
+                self._pass_empty_key(chord)
+        return self._run_command(command)
+
+    def lone_thumb_converts(self) -> bool:
+        """A thumb key is down with no character yet (S3), and alone it would convert the input.
+
+        Space is taken to; 無変換 and 変換 are looked up, since only one of them converts.
+        """
+        if self.fsm.state != "S3":
+            return False
+        chord = thumb_chord(self.fsm.stroke.first)
+        if chord == SPACE:
+            return True
+        command = self.keymap.lookup(self.phase, chord)
+        return command is not None and command.id == "convert"
+
+    def _carry_side(self, tok: AmbShift) -> None:
+        """A chord that typed nothing still says which thumb it was: its press keeps the direction."""
+        side = thumb_side(tok.struck, tok.held, tok.over)
+        press = self._press_alias.get(tok.press, tok.press)
+        if side is not None and press is not None and press not in self._carry:
+            self._carry[press] = frozenset((face_of(side, tok.turn),))
+
+    def _add_evidence(self, evidence: ThumbJoin | ThumbOver) -> None:
+        """Thumb keys seen after their chord was emitted (JIS.md §5.5).
+
+        The chord may be gone (committed, deleted, a literal, an empty face):
+        the evidence then has nothing to change.
+        """
+        origin = (evidence.press, evidence.turn)
+        index = next((i for i, t in enumerate(self.tokens)
+                      if isinstance(t, AmbShift) and t.origin == origin), None)
+        if index is None:
+            return
+        old = self.tokens[index]
+        if isinstance(evidence, ThumbJoin):
+            new = replace(old, struck=(*old.struck, evidence.key))
+        else:
+            new = replace(old, over=(*old.over, evidence.key))
+        mapped = to_lattice_token(new, self._table)
+        if mapped == to_lattice_token(old, self._table):
+            self.tokens[index] = new
+            return
+        start, end = self._edit_bounds()
+        if self.converted and not (self.editing and start <= index < end):
+            return  # shown as converted: the display stays as it is
+        if mapped is not None and mapped["kind"] == "literal":
+            return  # no key has a symbol on one thumb face and a kana on the other
+        tokens = self.tokens[start:end]
+        if mapped is None:
+            self._carry_side(new)
+            del tokens[index - start]
+            if self._cursor is not None and self._cursor > index:
+                self._cursor -= 1
+            if self._cursor is not None and self._cursor >= start + len(tokens):
+                self._cursor = None
+        else:
+            tokens[index - start] = new
+        if self.editing:
+            self._replace_edited_tokens(self.focus, tokens)
+        elif tokens:
+            self.tokens[:] = tokens
+            self._clear_cands()
+            self._refresh()
+        else:
+            self._clear_input()
 
     def _insert_token(self, token: Token | Literal) -> None:
         self._freeze_input_script()
@@ -1658,12 +1764,19 @@ class ImeSession:
         for t in self.tokens:
             d = to_lattice_token(t, self._table)
             assert d is not None  # _ingest drops empty faces before inserting tokens.
-            carried = self._carry.get(d.get("press")) if self._carry else None
-            if carried is not None:
-                # The committed head chose this press's direction (部分確定).
-                d = {**d, "faces": {face: kana for face, kana in d["faces"].items()
-                                    if face_of(face, d["turn"]) in carried}}
             out.append(d)
+        if self._carry:
+            for d in out:
+                carried = self._carry.get(d.get("press"))
+                if carried is not None and not any(face_of(face, d["turn"]) in carried for face in d["faces"]):
+                    # The thumb keys of this chord say otherwise: the evidence stands, not the carry.
+                    del self._carry[d["press"]]
+            for i, d in enumerate(out):
+                carried = self._carry.get(d.get("press"))
+                if carried is not None:
+                    # The committed head chose this press's direction (部分確定).
+                    out[i] = {**d, "faces": {face: kana for face, kana in d["faces"].items()
+                                             if face_of(face, d["turn"]) in carried}}
         return out
 
     def _parts(self, lattice: list[dict] | None = None) -> list[str | list[dict]]:
@@ -1828,7 +1941,7 @@ class ImeSession:
 
         MS-IME commits the first unit it typed (one romaji syllable, one
         letter or digit); a press is that unit here. 英数の続き started by
-        Shift+letter ends; under Shift+CapsLock everything is committed.
+        Shift+letter ends; under alnum_mode everything is committed.
         """
         if not self.segments:
             return ""
