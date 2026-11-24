@@ -60,16 +60,15 @@ $Boot = "import os,sys,runpy; sys.path.insert(0, os.getcwd()); m = sys.argv.pop(
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
 function Say([string]$msg) { Write-Host $msg }
-$script:SwitchPhase = "before-registration"
+$script:SwitchCompleted = $false
 function Fail([string]$msg) {
     Write-Host "エラー: $msg" -ForegroundColor Red
-    if ($script:SwitchPhase -eq "switched") {
-        Write-Host "新しい版への切り替えは済んでいます (次の打鍵かサインインで起動します)。再実行すると最後まで進みます。"
-    } elseif ($script:SwitchPhase -eq "before-registration") {
-        Write-Host "インストール済みの版はそのまま使えます。再実行すると続きから進みます。"
+    if ($script:SwitchCompleted) {
+        Write-Host "新しい版への切り替えは済んでいます。その後の処理でエラーが発生しました。"
     } else {
-        Write-Host "セットアップを再実行してください。"
+        Write-Host "新しい版への切り替えを完了できませんでした。"
     }
+    Write-Host "セットアップを再実行してください。"
     exit 1
 }
 # Fail を通らない失敗 (予期しない例外) も同じ形で表示して止める。
@@ -420,7 +419,6 @@ Say ""
 Say "== Windows への登録 (管理者権限の確認が出ます)"
 # 旧ブローカーを終わらせておく (elevated.ps1 は旧版を消す前にその終了を待つので、旧版の exe も消える)。
 Send-Quit
-$script:SwitchPhase = "switching"
 $result = Invoke-Elevated @("-Action", "install", "-Tag", $Tag,
     "-DllSource", (Join-Path $Version "download\yuragi_tip.dll"),
     "-Dll32Source", (Join-Path $Version "download\yuragi_tip32.dll"),
@@ -442,7 +440,7 @@ if (-not (Test-Path -LiteralPath $RunKey)) {
     New-Item -Path $RunKey | Out-Null
 }
 Set-ItemProperty -LiteralPath $RunKey -Name "yuragi-ime" -Value "`"$BrokerFinal`""
-$script:SwitchPhase = "switched"
+$script:SwitchCompleted = $true
 Add-Type -Namespace YuragiSetup -Name Input -MemberDefinition @'
 [DllImport("input.dll", CharSet = CharSet.Unicode)]
 public static extern bool InstallLayoutOrTip(string profile, uint flags);
@@ -472,9 +470,8 @@ if ($conn) {
 if ($state -ne "ready") {
     $why = @{ starting = '120 秒以内に起動しませんでした'; down = '起動に失敗しました' }[$state]
     if (-not $why) { $why = '応答がありません' }
-    Write-Host "エラー: 変換エンジンが起動しませんでした ($why)。" -ForegroundColor Red
     Write-Host "ログ: $(Join-Path $UserData 'logs')。次回サインイン時にも起動を試みます。"
-    exit 1
+    Fail "変換エンジンが起動しませんでした ($why)。"
 }
 Say "  変換エンジン  OK"
 
