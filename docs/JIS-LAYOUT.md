@@ -84,7 +84,7 @@
 
 - C01 の `ゔ` は J 型で選択可能な面として採用する。D10 の `，` は U+FF0C、B01 の `．` は U+FF0E、B10 は `・`。D12 の `゛`（U+309B）と `゜`（U+309C）は独立した文字として入力し、直前のかなは保持する。[NICOLA 配列規格書 §3](https://web.archive.org/web/20210508080709/http://nicola.sunicom.co.jp/spec/kikaku.htm#0103) [JIS 化提案 §5.3](https://web.archive.org/web/20220516223927/http://nicola.sunicom.co.jp/spec/jisdraft.htm)
 - C11 `:`、C12 `]`、B11 `\` の修飾なしは無操作で、Space から独立する。単独面がある D11 `@`、E03、E10～E13 は同時打鍵の判定に加える。親指面が空欄の同時打鍵と `Shift+0` は無操作。親指面が空欄の同時打鍵に使った Space は消費し、単独の変換や空白に振り替えない。
-- かな入力中の小指 Shift は英大文字を半角で、記号を全角で入れる。半濁音は親指面で入力する。半角・全角英数入力中にはそれぞれの英数列を使い、英字の通常／Shift は Caps Lock がオンのときだけ反転する。直接入力は Windows が文字を出す。[JIS 化提案 §5.2–5.3](https://web.archive.org/web/20220516223927/http://nicola.sunicom.co.jp/spec/jisdraft.htm)
+- かな入力中の小指 Shift は英大文字を半角で（Caps Lock がオンなら小文字。続く英字と同じ）、記号を全角で入れる。半濁音は親指面で入力する。半角・全角英数入力中にはそれぞれの英数列を使い、英字の通常／Shift は Caps Lock がオンのときだけ反転する。直接入力は Windows が文字を出す。[JIS 化提案 §5.2–5.3](https://web.archive.org/web/20220516223927/http://nicola.sunicom.co.jp/spec/jisdraft.htm)
 - `¥` と `\` は半角で U+005C、全角でそれぞれ `￥`（U+FFE5）と `＼`（U+FF3C）。F9/F10 ではかなトークンの元キーから英数を引き、入力済みの記号は幅を変える。円記号キー由来の U+005C は再度全角にするときも `￥` に戻す。[WDK の英数面](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L275-L295)
 
 ## 3. 制御キー・編集キー・テンキー（58 キー）

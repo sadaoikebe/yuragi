@@ -611,7 +611,7 @@ class ImeSession:
                 return self._after(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
             return self._after(pending, lambda: self._ingest([ThumbTap()]))
         shift = bool(chord.mods & SHIFT)
-        literal = keyboard.literal_character(vk, shift)
+        literal = keyboard.literal_character(vk, shift, caps_lock)
         alnum_key = keyboard.alnum_key(vk)
         if self.input_mode == "full_alnum" and not self._alnum_held and alnum_key:
             literal = keyboard.alnum_character(vk, shift, full=True, caps_lock=caps_lock)
@@ -1018,8 +1018,9 @@ class ImeSession:
         F9/F10 the typed keys as full-/half-width alphanumerics (the kana-input
         convention: what the keys would have typed with the IME off); pressed
         again they cycle lower → UPPER → Capitalized. Not learned.
-        Input not yet converted converts first, as with the MS-IME gesture;
-        input with no kana clause (only literals) is left as it is.
+        Input not yet converted converts first, and every clause takes the script: MS-IME's
+        gesture changes the whole input string there (ms-ime.md §1), only the focused clause
+        after a conversion. Input with no kana clause (only literals) is left as it is.
         """
         if not self.tokens:
             return
@@ -1027,11 +1028,27 @@ class ImeSession:
             self._cancel_conversion()  # the kana spelling of what was typed
         if not self.converted and all(segment.literal for segment in self.segments):
             return  # no clause to respell: the input stays, 英数の続き goes on
-        show = not self.converted
-        if show:
-            self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
-        else:
+        if self.converted:
             self._clear_cands()
+            self._respell(script, show=False)
+            return
+        self._show_conversion(self._conversion_input(self._parts()), converter=self.lm)
+        focus = self.focus
+        last = [focus] if focus >= 0 else []  # the focused clause last: its page is the one shown
+        for index in [i for i in range(len(self.segments)) if i != focus] + last:
+            segment = self.segments[index]
+            if not segment.literal:
+                self.focus = index
+                self._respell(script, show=index == focus)
+            elif script in ("half_alnum", "full_alnum"):
+                # A digit or symbol run between the kana changes width only.
+                surface = "".join(self._script_units(segment, script))
+                segment.fixed, segment.raw, segment.index = True, False, -1
+                self._set_selection(index, replace(segment.selected, surface=surface))
+        self.focus = focus
+
+    def _respell(self, script: str, *, show: bool) -> None:
+        """F6-F10 on the focused clause (_to_script)."""
         if self.focus < 0:
             return
         segment = self.segments[self.focus]

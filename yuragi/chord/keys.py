@@ -214,9 +214,10 @@ class Keyboard:
         """A letter, digit or symbol key: it has alnum faces."""
         return vk in self._by_vk
 
-    def literal_character(self, vk: int, shift: bool) -> str | None:
+    def literal_character(self, vk: int, shift: bool, caps_lock: bool = False) -> str | None:
         """What a key types in kana outside the chord FSM: numpad, Shift or a key with no kana.
-        "" is a no-op (eaten, nothing typed); None sends the key to the chord FSM."""
+        "" is a no-op (eaten, nothing typed); None sends the key to the chord FSM.
+        Shift+letter starts alnum: Caps Lock swaps its faces as in the letters after it (MS-IME)."""
         if vk in NUMPAD:
             return NUMPAD[vk]
         key = self._by_vk.get(vk)
@@ -225,7 +226,7 @@ class Keyboard:
         if not shift:
             return None if key.kana else ""
         if key.shift.isascii() and key.shift.isalpha():
-            return key.shift
+            return self.alnum_character(vk, shift, caps_lock=caps_lock)
         return _KANA_SHIFT.get(key.shift) or to_full_width(key.shift)
 
     def alnum_character(self, vk: int, shift: bool, full: bool = False, caps_lock: bool = False) -> str:

@@ -198,6 +198,13 @@ void Broker::OnEngineLine(const std::string& line) {
             UpdateKeymap(tip_json::Stringify(msg.Get("keymap")));
         return;
     }
+    if (msg.Get("event").text == "lm_done") {
+        // DESIGN「LM の結果」: one session's conversion may now be asked for; it answers no request.
+        long long sid = 0;
+        if (msg.Get("sid").Int(sid) && clients_.count((ClientId)sid))
+            platform_.WriteClient((ClientId)sid, line);
+        return;
+    }
     long long sid = 0, seq = 0;
     if (!msg.Get("sid").Int(sid) || !msg.Get("seq").Int(seq)) {
         Log("a line from the engine without sid/seq; ignored");

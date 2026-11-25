@@ -296,6 +296,31 @@ class LmPipelineTest(EngineCase):
         self.assertEqual((reply["commit"], reply["composition"], reply["converted"]),
                          ("卯", "宇", False))
 
+    def test_a_key_held_behind_the_lm_is_answered_without_polling(self):
+        # The TIP holds a key whose reply said eat_pending and sends nothing until that key is
+        # decided (KEYBIND §7.6). The engine must say when the LM is done; one request then
+        # gets the decision.
+        loaded = loaded_session()
+        worker = LmWorker(lambda: ZenzConverter(SlowModel()), loaded._lex)
+        self.addCleanup(worker.thread.join, 5)
+        self.addCleanup(worker.stop)
+        self.wait_state(worker, "ready")
+        engine = self.engine(loaded, worker)
+        self.open(engine, 1)
+        self.type_a(engine, 1)
+        self.request(engine, 1, {"op": "down", "vk": 32, "t": 100})
+        self.assertTrue(self.request(engine, 1, {"op": "up", "vk": 32, "t": 130})["pending"])
+        self.assertTrue(self.request(engine, 1, {"op": "down", "vk": 13, "t": 140})["eat_pending"])
+        enter = self.seq
+
+        deadline = time.monotonic() + 5
+        while {"event": "lm_done", "sid": 1} not in engine.channel.events:
+            self.assertLess(time.monotonic(), deadline, "the TIP was not told that the LM was done")
+            time.sleep(0.01)
+        reply = self.request(engine, 1, {"op": "resolve", "t": 150})
+        self.assertEqual((reply["pending"], reply["commit"], reply["resolved_keys"]),
+                         (False, "卯", [{"seq": enter, "eat": True}]))
+
     def test_reload_keeps_old_bindings_for_keys_already_waiting_for_lm(self):
         from tests.test_lm_async import ManualWorker, PickyModel
 

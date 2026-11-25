@@ -77,6 +77,18 @@ class KanaKeyTest(unittest.TestCase):
         self.assertEqual(surfaces, ["ew", "EW", "Ew", "ew"])
         self.assertEqual(s.segments[s.focus].selected.reading, "たか")
 
+    def test_script_keys_respell_all_of_the_unconverted_input(self):
+        # MS-IME's F7 and F10 change the input string (ms-ime.md §1), not its first run:
+        # a digit typed between two kana must not leave the second kana as it was.
+        for vk, typed in ((VK_F7, "ト１ト"), (VK_F10, "j1j")):
+            with self.subTest(key=hex(vk)):
+                k = Keys(kana_session(self.lex))
+                k.letters("j")
+                k.tap(ord("1"))
+                k.letters("j")
+                self.assertEqual(k.idle()["composition"], "と１と")
+                self.assertEqual(k.tap(vk)["composition"], typed)
+
 
 class JisKeyTest(unittest.TestCase):
     def test_convert_starts_conversion_and_shift_convert_opens_its_candidates(self):

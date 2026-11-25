@@ -401,6 +401,10 @@ public:
         notify_ = notify;
         message_ = message;
         name_ = PipeName();
+        // Started again after Stop (the TIP deactivated and activated again): the attempt
+        // or connection that was stopped is gone.
+        idle_ = true;
+        queue_.clear();
         stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         connect_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         arrived_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -1255,6 +1259,8 @@ public:
             if (SUCCEEDED(lbm->AddItem(this))) langbar_ = true;
             lbm->Release();
         }
+        link_state_ = Link::Connecting;  // activated again: the last activation's link is gone
+        broker_state_.clear();
         link_.Start(hwnd_, kLinkMessage);
         TryConnect();  // DESIGN「接続」: one of the four moments a connection is tried
         CheckScope();
@@ -1832,6 +1838,10 @@ private:
             if (direct_) pending_mode_seq_ = SendRequest("set_direct", "\"direct\":true");
         }
         if (!m.has_seq) {
+            // DESIGN「LM の結果」: the conversion that waited for the LM can be asked for. Asked at
+            // once, even with keys waiting: "resolve" is neither a key nor a deadline, so it
+            // overtakes nothing, and the keys that wait behind the conversion are decided by it.
+            if (m.event == "lm_done") SendRequest("resolve", "\"t\":" + std::to_string(NowMs()));
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
             return false;
         }
@@ -1982,7 +1992,9 @@ private:
         pending_ = r.pending;
         fsm_idle_ = r.fsm_idle;
         composing_ = phase_ != tip_logic::Phase::Empty && phase_ != tip_logic::Phase::Direct;
-        timer_pending_ = r.has_timer && !r.direct;
+        // While a conversion waits for the LM, the engine says when it is done (lm_done): its
+        // timer is for older TIPs that ask again and again.
+        timer_pending_ = r.has_timer && !r.direct && !r.pending;
         NoteCandidates(r);
         timeout_due_ = false;  // the reply arms its own deadline
         CancelReplyTimer();

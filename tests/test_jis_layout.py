@@ -124,14 +124,22 @@ class JisTypingTest(unittest.TestCase):
         self.assertEqual(self.text(k), "Ａｂ１！")
 
         k = jis_keys()
-        k.tap(ord("A"), ["shift"], caps_lock=True)
-        k.tap(ord("B"), caps_lock=True)
-        k.tap(ord("C"), ["shift"], caps_lock=True)
-        self.assertEqual(self.text(k), "ABc")
-
-        k = jis_keys()
         k.tap(ord("J"), caps_lock=True)
         self.assertEqual(self.text(k), "と")
+
+    def test_caps_lock_applies_from_the_first_shifted_letter(self):
+        # MS-IME, kana input with Caps Lock on (keyprobe, 2026-11-26): Shift+A Shift+B Shift+C
+        # types abc, and Shift+A B Shift+C types aBc. The lock counts from the first letter.
+        shift = ["shift"]
+        for keyboard in (ANSI, JIS):
+            for typed, keys in (("abc", ((ord("A"), shift), (ord("B"), shift), (ord("C"), shift))),
+                                ("aBc", ((ord("A"), shift), (ord("B"), None), (ord("C"), shift)))):
+                with self.subTest(keyboard=keyboard.name, typed=typed):
+                    k = Keys(ImeSession(_table=load_table(keyboard.kana), _lex=small_lex("あ あ 1000"),
+                                        keymap=Keymap({}), keyboard=keyboard))
+                    for vk, mods in keys:
+                        k.tap(vk, mods, caps_lock=True)
+                    self.assertEqual(self.text(k), typed)
 
     def test_alnum_continuation_after_a_shifted_letter(self):
         k = jis_keys()

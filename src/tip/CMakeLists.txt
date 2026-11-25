@@ -88,4 +88,20 @@ if(TIP_BUILD_TESTS)
     COMMAND "${Python3_EXECUTABLE}" -m tests.keymap_cases "$<TARGET_FILE:tip_logic_test>")
   set_tests_properties(tip_keymap_roundtrip PROPERTIES WORKING_DIRECTORY "${YURAGI_ROOT}")
 
+  if(WIN32)
+    # The connection to the broker: yuragi_tip.cpp itself, compiled into the test.
+    add_executable(tip_link_test tests/tip_link_test.cpp)
+    add_dependencies(tip_link_test tip_key_table)
+    target_include_directories(tip_link_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_features(tip_link_test PRIVATE cxx_std_17)
+    target_compile_definitions(tip_link_test PRIVATE
+      UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00
+      YURAGI_TAG="${YURAGI_TAG}")
+    if(MSVC)
+      target_compile_options(tip_link_test PRIVATE /utf-8)
+    endif()
+    target_link_libraries(tip_link_test PRIVATE ole32 oleaut32 uuid advapi32 user32 gdi32 userenv dwmapi)
+    add_test(NAME tip_link COMMAND tip_link_test)
+  endif()
+
 endif()

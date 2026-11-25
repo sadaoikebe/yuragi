@@ -9,6 +9,7 @@ Broker → engine:
   {"op":"close","sid":3}
   {"sid":3,"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}
       op as for yuragi.ime.server: down/up/timeout/reset/set_direct/set_mode/suggest
+      resolve asks for a conversion the engine said was ready (lm_done); it is no key
       reload_keymap reloads the key settings for all sessions
 Engine → broker:
   {"ready":true,"proto":1,"warnings":[...],"keymap":{...}}
@@ -17,6 +18,7 @@ Engine → broker:
   {"event":"warning","warning":"lm"}       a warning found after ready
   {"event":"warning","warning":"keymap","active":false}  clears that warning
   {"event":"keymap","keymap":{...}}         an updated key table
+  {"event":"lm_done","sid":3}               the conversion that waited for the LM is ready
 
 Warnings can be lm (LM unavailable) or keymap (key settings could not load).
 open/close have no reply. stdin closure initiates shutdown.
@@ -55,6 +57,8 @@ GPU_FAILURES_BEFORE_RESTART = 2
 LM_RETRY_DELAY_S = 300
 LM_RETRY_FACTOR = 2
 LM_RETRIES = 1
+# The TIP is told this long after a job's deadline at the latest: past it by any clock.
+LM_DONE_SLACK_S = 0.005
 # Warm-up input (DESIGN「暖機」): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
 
@@ -169,6 +173,7 @@ class Connection:
         self.engine = engine
         self.sess = engine.new_session()
         self.pipeline = engine.new_pipeline(self.sess)
+        self.watched = None  # the LM job a thread will tell the TIP about (Engine.watch_conversion)
 
     def handle(self, msg: dict) -> dict:
         from yuragi.ime.server import process_request
@@ -204,7 +209,9 @@ class Engine:
         self.loaded = None
         self.worker = None
         self.settings = None
-        self.lock = threading.Lock()  # one request at a time, or the restart
+        # One request at a time with its reply written, a "lm_done" sent, or the restart: the TIP
+        # is told only after the reply that left the conversion waiting.
+        self.lock = threading.Lock()
         self.last_request = time.monotonic()
         self.lm_on_battery = False  # the power source when the LM device was chosen
         self.lm_retries = 0
@@ -414,8 +421,7 @@ class Engine:
             else:
                 with self.lock:
                     self.last_request = time.monotonic()
-                    reply = self.request(msg)
-                self.channel.send(reply)
+                    self.channel.send(self.request(msg))
 
     # -- choosing the LM device again (CONVERSION「装置とモデル」) ---------------------
     def device_change(self) -> str | None:
@@ -483,9 +489,31 @@ class Engine:
                 reply["error"] = True
                 if msg.get("op") == "down":
                     reply["eat"] = not reply["direct"]
+            self.watch_conversion(sid, connection)
         reply["sid"] = sid
         reply["seq"] = seq
         return reply
+
+    # -- LM results (DESIGN「LM の結果」) -------------------------------------------
+    def watch_conversion(self, sid, connection: Connection) -> None:
+        """A conversion waiting for the LM: a thread tells the TIP when the LM is done or the
+        deadline has come, and the TIP asks for the result once ("resolve"). It does not poll."""
+        pipeline = connection.pipeline
+        job = pipeline.job if pipeline is not None and pipeline.sess._await is not None else None
+        if job is None or job is connection.watched:
+            return
+        connection.watched = job
+        threading.Thread(target=self.tell_lm_done, args=(sid, connection, pipeline, job),
+                         name="lm-done", daemon=True).start()
+
+    def tell_lm_done(self, sid, connection: Connection, pipeline, job) -> None:
+        while not job.done.wait(max(0.0, job.deadline - pipeline.clock()) + LM_DONE_SLACK_S):
+            if pipeline.clock() >= job.deadline:
+                break  # the deadline: the result is the dictionary's
+        with self.lock:
+            if (self.connections.get(sid) is connection and connection.pipeline is pipeline
+                    and pipeline.job is job and pipeline.sess._await is not None):
+                self.channel.send({"event": "lm_done", "sid": sid})
 
 
 def main(argv=None) -> int:

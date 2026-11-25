@@ -140,6 +140,24 @@ void ReplyOnlyAnswersTheMatchingSession() {
     assert(!Contains(f.Client(2), R"({"seq":1,"state":"starting"})"));
 }
 
+// DESIGN「LM の結果」: the engine says that a session's conversion is ready; only that TIP is told.
+// The notice answers no request, so the request still in flight keeps its hang deadline.
+void LmDoneGoesToItsSessionOnly() {
+    Fake f;
+    Broker b(f);
+    b.Start();
+    Ready(b);
+    Hello(b, 1);
+    Hello(b, 2);
+    b.OnClientLine(1, R"({"seq":5,"op":"down","vk":13,"t":0,"mods":[]})");
+    f.to_client.clear();
+    b.OnEngineLine(R"({"event":"lm_done","sid":1})");
+    assert(f.Client(1).size() == 1 && f.Client(1).back() == R"({"event":"lm_done","sid":1})");
+    assert(f.Client(2).empty());
+    Advance(b, f, ENGINE_HANG_MS + 1);
+    assert(f.kills == 1);
+}
+
 // DESIGN「通信」: an app package (a sandboxed app's TIP) converts, but cannot end the broker.
 void AnAppPackageCannotQuit() {
     Fake f;
@@ -348,6 +366,7 @@ int main() {
     KeysPassWhileStartingThenGoToTheEngine();
     SessionsOpenOnlyAfterHello();
     ReplyOnlyAnswersTheMatchingSession();
+    LmDoneGoesToItsSessionOnly();
     AnAppPackageCannotQuit();
     ExitWhileReadyResetsAndRestarts();
     ExitIsLoggedWithItsOwnFatalLine();

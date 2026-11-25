@@ -101,7 +101,7 @@ TIP → ブローカー（プロトコル 1）:
 
 ```json
 {"op":"hello","proto":1}
-{"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest
+{"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest/resolve
 {"op":"retry"}                                              ← 利用者が「もう一度試す」を選んだ
 {"op":"open_admin"}                                         ← 設定ウィンドウを開く（最初のタブの単語登録で開く）
 {"op":"quit"}                                               ← インストーラだけが使う（アプリパッケージからは受け付けない）
@@ -116,6 +116,7 @@ TIP → ブローカー（プロトコル 1）:
 {"event":"state","state":"starting"}                        ← 状態が変わった（要求と無関係に届く）
 {"event":"reset"}                                           ← エンジンが終了した。変換中のものは失われた
 {"event":"keymap","keymap":{…}}                             ← 食べる表が変わった
+{"event":"lm_done","sid":3}                                 ← LM を待っていた変換の結果が出た（下の「LM の結果」）
 ```
 
 `state` は `ready` `starting` `down` の 3 つ。キー要求の `t` は、TIP がキーを処理するときに
@@ -133,6 +134,8 @@ TIP → ブローカー（プロトコル 1）:
 - エンジン → ブローカー: 準備ができたら `{"ready":true,"proto":1,"warnings":[…],"keymap":{…}}`（`keymap` は食べる表。[KEYBIND.md](KEYBIND.md) §7.1）。以後は要求 1 件に返事 1 件
   `{"sid":3,"seq":17,…}`。ready のあとで見つかった注意は `{"event":"warning","warning":"lm"}` の形で送る（`lm`・`keymap`）。注意が解けたときは `"active":false` を付ける。
 - キー設定の読み直しに成功したエンジンは `{"event":"keymap","keymap":{…}}` を送り、ブローカーが各 TIP に配る。
+- LM を待っていた変換は、LM が終わったとき（または採用期限が来たとき）に `{"event":"lm_done","sid":3}` を送り、ブローカーがその TIP に渡す。
+  要求の返事ではない。返事を書き終えるまでエンジンは次を送らないので、変換を待たせた返事より先には届かない。
   `reload_keymap` の返事は [KEYBIND.md](KEYBIND.md) §8.3。
 - 1 セッションを標準入出力で直接動かす `python -m yuragi.ime.server` は、試験と評価用。
 
@@ -405,8 +408,10 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
 
 ### タイマー
 
-- 返事に `timer`（同時打鍵の判定期限、LM 待ちの次の問い合わせ時刻）があるときは、
-  その時刻に 1 回鳴るタイマーを掛ける。鳴ったら `timeout` を送る。
+- 返事に `timer`（同時打鍵の判定期限）があるときは、その時刻に 1 回鳴るタイマーを掛ける。鳴ったら `timeout` を送る。
+- **LM の結果**: `pending` の返事の `timer` は使わない（前の版の TIP が問い合わせ続けるための時刻）。エンジンの `lm_done` が届いたら
+  `resolve`（打鍵でも期限でもない要求）を 1 回送り、その返事で変換と、待たせていた打鍵の結果（`resolved_keys`）を受け取る。
+  手元に打鍵を溜めていても、すぐに送る（溜めた打鍵を追い越さない。溜めた打鍵は、この返事で決まるのを待っている）。
 - `suggest_at` も同じタイマーで扱い、打鍵の返事を待っておらず、送る打鍵も無いときだけ `suggest` を送る。
   自動予測の期限と返事待ちはキーの判定に使わない。後続の要求を送っていれば `suggest` の返事を表示せず、
   フォーカスが変われば通常の変換と同様に捨てる。
