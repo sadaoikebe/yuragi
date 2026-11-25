@@ -5,8 +5,8 @@
 # - HKCU の Tag を dev にし、%LOCALAPPDATA%\yuragi-ime\versions\dev\engine.json を
 #   このリポジトリに向ける (yuragi.engine --require-lm)。
 # - -Python を渡すと、その Python で python -m yuragi.engine を動かす (torch と transformers が要る)。
-#   渡さなければ、入っている製品版の engine.json から同梱の Python と LM のモデルを借りる
-#   (辞書とキャッシュはリポジトリの既定)。--require-lm なので、LM を読めない Python では起動しない。
+#   渡さなければ、入っている製品版の engine.json から同梱の Python、辞書、キャッシュ、LM のモデルを借りる。
+#   --require-lm なので、LM を読めない Python では起動しない。
 # - DLL とブローカーは dist\ から読み込む (開発機に限り Program Files に置かない)。
 #   DLL は dist\yuragi_tip-a.dll / -b.dll / ... のうち、登録中でなく使用中でもないものに
 #   コピーして登録するので、古い DLL を読み込んだアプリを閉じなくても更新できる。
@@ -34,14 +34,18 @@ function Write-DevEngineConfig([string]$Path, [string]$Python, [string]$Repo, $P
         if ($given.Count -lt 3 -or $given[0] -ne '-c' -or $given[2] -ne 'yuragi.engine') {
             throw '製品版の engine.json の形が想定と違います。-Python で Python を渡してください。'
         }
-        $lm = @()
+        $borrowed = @()
+        $dict = @()
         for ($i = 3; $i -lt $given.Count - 1; $i++) {
-            if ($given[$i] -in @('--lm-model', '--lm-cpu-model')) { $lm += @($given[$i], $given[$i + 1]) }
+            if ($given[$i] -in @('--dict-dir', '--cache-dir', '--lm-model', '--lm-cpu-model')) {
+                $borrowed += @($given[$i], $given[$i + 1])
+            }
+            if ($given[$i] -eq '--dict-dir') { $dict = @($given[$i], $given[$i + 1]) }
         }
         $engine.python = $Product.python
         $engine.pythonw = $Product.pythonw
-        $engine.args = @($given[0], $given[1], 'yuragi.engine', '--require-lm') + $lm
-        $engine.admin_args = @($given[0], $given[1], 'yuragi.ime.admin_ui')
+        $engine.args = @($given[0], $given[1], 'yuragi.engine', '--require-lm') + $borrowed
+        $engine.admin_args = @($given[0], $given[1], 'yuragi.ime.admin_ui') + $dict
     }
     [IO.File]::WriteAllText($Path, ($engine | ConvertTo-Json -Depth 3), [Text.UTF8Encoding]::new($false))
 }
