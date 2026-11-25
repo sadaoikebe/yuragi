@@ -32,7 +32,7 @@ Windows の設定とキーボードの対応は次のスキャンコードで見
 ## 3. TIP とエンジンの接続
 
 - TIP の文字キーの判定は、エンジンが食べる表の `characters` で送るキーボードの文字キーで行う（[KEYBIND.md](KEYBIND.md#71-食べる表) §7.1）。JIS の `VK_OEM_102` もこれで入り、US では入らない。TIP はキーボードを自分では判定しない。IME 用のキーも、Windows が届けた VK のまま和音にする（[KEYBIND.md](KEYBIND.md#41-和音の書き方) §4.1）。Windows の Caps Lock、かなロック、その他の専用ショートカットが、単独の IME キーとして再解釈されないようにする。[WDK の NLS 表](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L467-L571)
-- 特殊キーの解放は押下時に決めた論理キーに対応させる。押下と解放で異なる DBE の VK が届くため、対応付けにはスキャンコードと拡張ビットを使う。普通のキーでスキャンコードがない場合は VK を使う。識別できない特殊イベントは通す。JIS の Alt+半角/全角は `VK_KANJI` の PreservedKey を使い、`keyprobe` で受け取れる登録形を確定する。登録が機能する経路では同じ打鍵を通常のキーコールバックから重ねて実行しない。対象外の入力欄、フォーカス移動、キーの送り直しには既存の規則を適用する。[PreserveKey](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfkeystrokemgr-preservekey) [Windows のキー入力](keybind/windows.md)
+- JIS の Alt+半角/全角は、修飾を問わない `VK_KANJI` の PreservedKey で受ける。Alt を先に押せば、どちらを先に離しても 1 回届く。そのあと通常のキーの経路に届くのは `VK_KANJI` の解放だけなので、同じ打鍵が重ねて実行されることはない。半角/全角を先に押すと、Alt+半角/全角ではなく半角/全角として届く（`keyprobe` の `jis-kanji`）。対象外の入力欄、フォーカス移動、キーの送り直しには既存の規則を適用する。[PreserveKey](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfkeystrokemgr-preservekey) [Windows のキー入力](keybind/windows.md)
 - CMake が既定キー表を `ansi101` で Python の表から生成する。TIP は接続前はこれを使い、エンジンの表が届いたら置き換える。`characters` の無い表（古いエンジン）は受け取らず、既定表のままにする。
 - 通信にキーボードの項目は足さない。TIP とエンジンは同じ PC の同じ設定に従うので、食い違わない。Caps Lock は `caps_lock` を打鍵に付け、省略時はオフとする。
 
@@ -140,5 +140,5 @@ Space・無変換・変換は同じ規則で動く。押し方で 3 通りに分
 
 - TIP は、かな入力中の修飾なしの無変換・変換を、Space と同じく打鍵層のキーとして食べ、押下と解放の両方をエンジンに送る。TIP の打鍵層の判定（`Typing`）に、修飾なしの無変換・変換を含める。
 - 判定のタイマーは今の `timer` の項目だけで足りる。`JOIN_MS` の判定は、キーが届いた時点の時刻の比較で行う。
-- 変換・無変換は押下と解放が普通に届く（`keyprobe` の `jis-codes`）。スキャンコードから論理キーへ戻す §3 の規則は、状態機械に渡す前に適用する。
+- 変換・無変換は押下と解放が普通に届く（`keyprobe` の `jis-codes`）。
 

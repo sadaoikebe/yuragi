@@ -200,8 +200,8 @@ Shift+Ctrl+CapsLock はカナのロックを切り替える。ロック中は、
 
 - JIS の 半角／全角 キーは `` ` `` と同じ 0x29、英数 キーは CapsLock と同じ 0x3A を出す。仮想キーコードを決めるのはキーボードではなく配列ドライバで、
   `kbd101` なら 0x29 は `VK_OEM_3`、`kbd106` なら `VK_DBE_SBCSCHAR`（[KBDH] の `T29`、[CHROMIUM]）。`kbd101` のもとでは、JIS のキーボードも §3 のとおりに届く。
-- 配列ドライバが `kbd106` のとき: 半角／全角キーは down と up で仮想キーコードが違う（down が `VK_OEM_ENLW`、up が `VK_OEM_AUTO` など、[SPICE-ML]）。
-  Alt+半角／全角 は `VK_KANJI` の down だけで up が無い（[SPICE]、[SPICE-ML]）。IME が処理したときは、アプリには `VK_PROCESSKEY` の down だけが届く（[FLUTTER]）。
+- 配列ドライバが `kbd106` のとき: 半角／全角キーは押すたびに、押されたままの `VK_OEM_AUTO`（0xF3）と `VK_OEM_ENLW`（0xF4）の一方の up と、もう一方の down を出す。離しても何も届かない（実測、[SPICE-ML]）。
+  Alt+半角／全角 は `VK_KANJI` の down を出す。up は半角／全角を Alt より先に離したときだけ届く（実測、[SPICE]、[SPICE-ML]）。IME が処理したときは、アプリには `VK_PROCESSKEY` の down だけが届く（[FLUTTER]）。
 
 ---
 
