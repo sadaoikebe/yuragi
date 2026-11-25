@@ -8,6 +8,9 @@
 - [DESIGN.md](DESIGN.md) — 全体の設計（構成、置き場所、通信、ブローカー、エンジン、TIP、インストール・更新・アンインストールの手順、利用者に見えるもの、実地試験、定数）
 - [CONVERSION.md](CONVERSION.md) — 変換の仕様（キーとトークン、同時打鍵の判定、左右交互、変換、セッション、文節と候補、学習、n-best、LM、設定）
 - [KEYBIND.md](KEYBIND.md) — キーバインドの設計（局面とコマンド、プリセット、TIP の食べる表と送り直し）。前提にした Windows のキー入力と各 IME の資料は [keybind/](keybind/)
+- [JIS.md](JIS.md) — JIS 106 対応の実装仕様（キーボードで変わるもの、TIP とエンジンの接続、検証、親指キーの接続）
+- [JIS-FSM.md](JIS-FSM.md) — 親指キーが Space・無変換・変換の 3 個のときの同時打鍵の状態機械
+- [JIS-LAYOUT.md](JIS-LAYOUT.md) — JIS 106 の全キーの配置と、MS-IME プリセットの局面ごとの割り当て
 - [EVALUATION.md](EVALUATION.md) — 変換の評価と診断、実打鍵の記録と再生
 - [PERFORMANCE.md](PERFORMANCE.md) — CPU・GPU での LM の速さと精度の調査（モデルの比較、較正、遅い PC、GPU と電池）
 - [assets/icon/THEME.md](../assets/icon/THEME.md) — 見た目のテーマ（アイコンの形と色、`.ico` の大きさと作り方、使いどころ）

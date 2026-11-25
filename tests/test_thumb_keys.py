@@ -203,7 +203,7 @@ class StateTableTest(unittest.TestCase):
 
 
 class TypingModelTest(unittest.TestCase):
-    """Typing that follows the model (JIS-FSM.md §1, A1–A4, a stroke's keys at most 25 ms apart):
+    """Typing that follows the model (JIS-FSM.md §1, A1–A5, a stroke's keys at most 25 ms apart):
     the evidence never names the wrong thumb, the chains alternate, and lone strokes are lone."""
 
     @staticmethod
