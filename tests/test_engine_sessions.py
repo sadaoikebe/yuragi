@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from yuragi.engine import Engine, argument_parser
-from yuragi.chord.keys import DEFAULT_KEYBOARD, Chord
+from yuragi.chord.keys import DEFAULT_KEYBOARD, KEYBOARDS, VK_OEM_102, Chord
 from yuragi.ime import config, server
 from yuragi.ime.keymap import load_keymap
 from yuragi.ime.lm_async import LmWorker
@@ -145,6 +145,19 @@ class KeyDispatchTest(EngineCase):
         reply = self.request(engine, 1, {"op": "down", "vk": 0x51, "mods": ["ctrl"], "t": 300})
         self.assertEqual((reply["eat"], reply["global"], reply["commit"], reply["phase"]),
                          (False, "send_up", "宇", "empty"))
+
+    def test_the_keyboard_of_windows_is_every_sessions_and_the_tables(self):
+        # docs/JIS.md §2: the engine reads the setting once; sessions and the TIPs' table follow it.
+        jis = KEYBOARDS["jis106"]
+        loaded = loaded_session()
+        loaded.keyboard = jis
+        engine = self.engine(loaded)
+        self.open(engine, 1)
+        self.assertIs(engine.connections[1].sess.keyboard, jis)
+        table = engine.eat_table()
+        self.assertEqual(table["characters"], jis.character_vks())
+        self.assertIn(VK_OEM_102, table["characters"])
+        self.assertNotIn(VK_OEM_102, self.engine().eat_table()["characters"])
 
     def test_reload_changes_existing_sessions_and_keeps_other_input(self):
         engine = self.engine()

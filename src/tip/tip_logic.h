@@ -128,6 +128,7 @@ struct KeyTable {
         }
     };
     std::string rev;
+    std::vector<unsigned> characters;  // sorted: the keyboard's character keys (docs/JIS.md §2)
     std::array<Row, (size_t)Phase::Direct> phases;
     std::map<unsigned, GlobalCommand> global;
 
@@ -150,10 +151,17 @@ struct KeyTable {
 inline std::optional<KeyTable> ParseKeyTable(const tip_json::Value& json) {
     const auto& phases = json.Get("phases");
     const auto& global = json.Get("global");
+    const auto& characters = json.Get("characters");
     if (json.kind != tip_json::Value::Object || json.Get("rev").kind != tip_json::Value::String ||
-        phases.kind != tip_json::Value::Object || global.kind != tip_json::Value::Array) return {};
+        phases.kind != tip_json::Value::Object || global.kind != tip_json::Value::Array ||
+        characters.kind != tip_json::Value::Array) return {};
     KeyTable table;
     table.rev = json.Get("rev").text;
+    for (const auto& item : characters.array) {
+        long long vk;
+        if (item.Int(vk) && vk > 0 && vk <= 0xFF) table.characters.push_back((unsigned)vk);
+    }
+    std::sort(table.characters.begin(), table.characters.end());
     for (size_t i = 0; i < table.phases.size(); ++i) {
         const auto& from = phases.Get(kPhaseNames[i]);
         auto& row = table.phases[i];
@@ -420,17 +428,14 @@ inline bool AltOnly(Chord chord) {
     return (chord.mods.alt && !chord.mods.ctrl) || chord.vk == 0x19 || chord.vk == 0xF1;
 }
 
-// Generated from the same keyboard as the engine's key table (data/keyboards).
-inline bool CharacterVk(uint32_t vk) {
-    return std::binary_search(kCharacterVks.begin(), kCharacterVks.end(), vk);
-}
-
 // keys.THUMBS: Space, 無変換 and 変換 on every keyboard.
 inline bool ThumbVk(uint32_t vk) { return vk == VK_SPACE_ || vk == 0x1C || vk == 0x1D; }
 
-inline bool Typing(Chord chord) {
+// A key of the typing layer: a character key of the engine's keyboard, or a thumb key.
+inline bool Typing(Chord chord, const KeyTable& table) {
     return !chord.mods.Shortcut() &&
-           (CharacterVk(chord.vk) || (ThumbVk(chord.vk) && !chord.mods.shift));
+           (std::binary_search(table.characters.begin(), table.characters.end(), chord.vk) ||
+            (ThumbVk(chord.vk) && !chord.mods.shift));
 }
 
 struct Local {
@@ -538,7 +543,7 @@ inline Take WantKey(Chord chord, const Local& local, const KeyTable& table) {
         case GlobalUse::Ask: return Take::Send;
         case GlobalUse::None: break;
     }
-    if (Typing(chord)) return Take::Send;
+    if (Typing(chord, table)) return Take::Send;
     auto sends = [&](Phase phase) { return table.Sends(phase, chord.Code()); };
     if (sends(local.phase)) return Take::Send;
     if (local.unsettled) {

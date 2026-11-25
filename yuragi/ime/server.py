@@ -36,6 +36,7 @@ from pathlib import Path
 
 from yuragi.ime.bunsetsu import candidate_note
 from yuragi.ime.session import ImeSession
+from yuragi.chord.keys import DEFAULT_KEYBOARD
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
 from yuragi.ime import power
@@ -285,14 +286,16 @@ def freeze_after_dictionary_load():
             gc.enable()
 
 
-def load_session(args, *, lex=None) -> ImeSession:
+def load_session(args, *, lex=None, keyboard=None) -> ImeSession:
     """Load expensive resources once, for the engine's sessions or the stdio host.
 
     lex: an already loaded lexicon (the engine loads it itself).
+    keyboard: Windows' keyboard setting (the engine reads it); 101 when None.
     """
     store = LearningStore(args.learning_file) if args.learning == "on" else None
     sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
-                      prediction=getattr(args, "prediction", DEFAULT_PREDICTION))
+                      prediction=getattr(args, "prediction", DEFAULT_PREDICTION),
+                      keyboard=keyboard or DEFAULT_KEYBOARD)
     sess.load()
     if sess.prediction != "off":
         # Sort the base readings once. Personal additions have their own small index.

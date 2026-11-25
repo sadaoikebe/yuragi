@@ -1221,7 +1221,7 @@ public:
         constexpr unsigned default_toggle = VK_OEM_3 | (4 << 8);
         const auto mods = settings_.toggle_mods;
         if (toggle != default_toggle && !(mods & 8) && !tip_logic::ModifierVk(settings_.toggle_vk) &&
-            !tip_logic::Typing({settings_.toggle_vk, {(mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, false}})) {
+            !tip_logic::Typing({settings_.toggle_vk, {(mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, false}}, keymap_)) {
             keymap_.rev.clear(); // the broker's copy takes precedence when received
             keymap_.global.erase(VK_KANJI);  // the row Alt+` reaches
             keymap_.global[toggle] = tip_logic::GlobalCommand::Toggle;
@@ -1745,7 +1745,7 @@ private:
     // A kana keystroke (DESIGN「接続」): tries the connection, and when stopped, says so once
     // per focus (DESIGN「小さな表示」).
     void Typed(const Stroke& key) {
-        if (direct_ || !tip_logic::Typing(key.chord)) return;
+        if (direct_ || !tip_logic::Typing(key.chord, keymap_)) return;
         TryConnect();
         if (CurrentMode() == Mode::Stopped && !stopped_told_) {
             stopped_told_ = true;
@@ -1899,7 +1899,7 @@ private:
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return SendResult::Unavailable;
         std::optional<tip_logic::KeyContext> context;
         bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
-        if (settings_.document_context && key.down && tip_logic::Typing(key.chord)
+        if (settings_.document_context && key.down && tip_logic::Typing(key.chord, keymap_)
                 && ((!composing_ && fsm_idle_) || awaiting)) {
             context.emplace();
             context->disconnected = !awaiting && state_ && state_->disconnected;

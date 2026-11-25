@@ -234,6 +234,9 @@ class Engine:
 
         settings = self.read_settings(args, config, server)
         self.settings = settings
+        from yuragi.ime.keyboard_setting import system_keyboard
+        keyboard = system_keyboard()
+        log(f"keyboard: {keyboard.name}")
 
         with server.freeze_after_dictionary_load():
             try:
@@ -241,7 +244,7 @@ class Engine:
             except (OSError, ValueError) as exc:  # not UTF-8, a bad line, cannot be opened
                 log(where(exc))
                 fatal("dictionary-unreadable")
-            loaded = server.load_session(settings, lex=lex)
+            loaded = server.load_session(settings, lex=lex, keyboard=keyboard)
         store = loaded._learning
         if store is not None:
             log(f"learning on: {store.lines} lines, "
@@ -349,7 +352,7 @@ class Engine:
             _table=loaded._table, _lex=loaded._lex, _symbols=loaded._symbols,
             _learning=loaded._learning, personal=loaded.personal,
             prediction=loaded.prediction, predict_index=loaded.predict_index, keymap=self.keymap,
-            max_tokens=MAX_TOKENS)
+            keyboard=loaded.keyboard, max_tokens=MAX_TOKENS)
 
     def new_pipeline(self, sess):
         if self.worker is None:
@@ -370,9 +373,8 @@ class Engine:
         return settings.compile()
 
     def eat_table(self) -> dict:
-        """The TIPs' table, in the default keyboard's key codes (docs/JIS.md §2)."""
-        from yuragi.chord.keys import DEFAULT_KEYBOARD
-        return self.keymap.eat_table(DEFAULT_KEYBOARD)
+        """The TIPs' table, in the keyboard's key codes (docs/JIS.md §2)."""
+        return self.keymap.eat_table(self.loaded.keyboard)
 
     def reload_keymap(self) -> dict:
         from yuragi.ime.keymap import load_keymap

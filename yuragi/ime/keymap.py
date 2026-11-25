@@ -127,6 +127,7 @@ class Keymap:
                 row["rest"] = "eat"
             phases[phase] = row
         table = {
+            "characters": keyboard.character_vks(),  # the keys typing goes to the engine with
             "phases": phases,
             "global": [{"code": code, "command": command.id} for code, command in coded("global")],
         }
@@ -337,11 +338,7 @@ if __name__ == "__main__":
     import sys
 
     serialized = json.dumps(default_keymap().eat_table(DEFAULT_KEYBOARD), separators=(",", ":"))
-    vks = DEFAULT_KEYBOARD.character_vks()
-    character_keys = ", ".join(f"0x{vk:02X}" for vk in vks)
     Path(sys.argv[1]).write_text(
-        '#pragma once\n#include <array>\n#include <cstdint>\n'
-        f'inline constexpr char kDefaultKeyTable[] = R"keymap({serialized})keymap";\n'
-        f'inline constexpr std::array<std::uint32_t, {len(vks)}> kCharacterVks = {{\n'
-        f'    {character_keys}\n}};\n',
+        '#pragma once\n'
+        f'inline constexpr char kDefaultKeyTable[] = R"keymap({serialized})keymap";\n',
         encoding="utf-8")

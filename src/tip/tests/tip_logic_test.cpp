@@ -148,6 +148,24 @@ static void KeysSentInPlace() {
     assert(take(up, Phase::Empty, true) == Take::Send);
 }
 
+static void CharacterKeysComeWithTheTable() {
+    // The engine's keyboard names its character keys: VK_OEM_102 (ろ) is one on JIS only.
+    tip_json::Value json;
+    const std::string encoded(kDefaultKeyTable);
+    assert(tip_json::Parser(encoded).Parse(json));
+    const auto ansi = ParseKeyTable(json).value();
+    Mods none;
+    assert(WantKey(NormalizeKey(0xE2, none), {Phase::Empty, false}, ansi) == Take::Pass);
+    assert(WantKey(NormalizeKey('A', none), {Phase::Empty, false}, ansi) == Take::Send);
+    tip_json::Value vk;
+    assert(tip_json::Parser("226").Parse(vk));
+    json.object.at("characters").array.push_back(vk);
+    const auto jis = ParseKeyTable(json).value();
+    assert(WantKey(NormalizeKey(0xE2, none), {Phase::Empty, false}, jis) == Take::Send);
+    json.object.erase("characters");
+    assert(!ParseKeyTable(json));  // a table without them is not the engine's
+}
+
 static void OrderOfReplies() {
     InFlight f;
     assert(!f.Waiting());
@@ -360,6 +378,7 @@ int main(int argc, char** argv) {
     CommittingVisibleText();
     EatingKeys();
     KeysSentInPlace();
+    CharacterKeysComeWithTheTable();
     OrderOfReplies();
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();

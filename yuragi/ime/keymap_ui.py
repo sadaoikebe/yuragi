@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from yuragi.chord.keys import ALT, CTRL, DEFAULT_KEYBOARD, SHIFT, Chord
+from yuragi.chord.keys import ALT, CTRL, SHIFT, Chord
 from . import keymap
 from .commands import COMMANDS
+from .keyboard_setting import system_keyboard
 
 PHASES = {
     "global": "常時", "empty": "入力なし", "composing": "入力中", "converting": "変換中",
@@ -25,7 +26,7 @@ class KeyTab:
         self.added: set[Chord] = set()
         self.chords: dict[str, Chord] = {}
         # The keys offered by キー追加 are this keyboard's (docs/JIS.md §2).
-        self.keyboard = DEFAULT_KEYBOARD
+        self.keyboard = system_keyboard()
 
         top = ttk.Frame(frame)
         top.pack(fill="x", pady=(0, window.px(6)))
