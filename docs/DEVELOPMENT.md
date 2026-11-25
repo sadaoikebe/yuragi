@@ -1,6 +1,6 @@
 # 開発と技術文書
 
-使う人向けの説明は [README](../README.md) と [USAGE.md](USAGE.md) にあります。
+使う人向けの説明は [README](../README.md)（入口。短い案内）と [USAGE.md](USAGE.md)（詳しい使い方）にあります。
 この文書は、技術文書の一覧と、開発環境・ビルド・試験・リリースの入口です。
 
 ## 技術文書
@@ -15,7 +15,7 @@
 - [PERFORMANCE.md](PERFORMANCE.md) — CPU・GPU での LM の速さと精度の調査（モデルの比較、較正、遅い PC、GPU と電池）
 - [assets/icon/THEME.md](../assets/icon/THEME.md) — 見た目のテーマ（アイコンの形と色、`.ico` の大きさと作り方、使いどころ）
 
-同時打鍵の状態機械（S1〜S7）の表と各状態の出口は、`yuragi/chord/fsm.py` 冒頭の説明にあります。
+同時打鍵の状態機械（S1〜S7）の仕様は [JIS-FSM.md](JIS-FSM.md) にあります。
 TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/broker/README.md`](../src/broker/README.md)。
 
 ## 開発環境

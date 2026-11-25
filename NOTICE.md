@@ -276,4 +276,6 @@ from a photo and traced into an outline (`assets/icon/src/glyph.json`); the
 | NICOLA 配列規格書（日本語入力コンソーシアム） http://nicola.sunicom.co.jp/spec/kikaku.htm | かな配列と同時打鍵の判定規則はこの規格に基づく |
 
 `data/nicola_a.json` is a hiragana face table written from the kana
-assignment in that specification.
+assignment in that specification. `data/nicola_j.json` is the same for the
+JIS keyboard, following the specification and the NICOLA JIS draft cited in
+`docs/JIS-LAYOUT.md`.

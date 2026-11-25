@@ -8,7 +8,6 @@ python3 -m tools.eval.fetch_mozc_dict          # 初回のみ。Mozc OSS 辞書�
 python3 -m tools.eval.run_regression           # 回帰ゲート
 python3 -m tools.eval.run_mozc_eval --details /tmp/mozc-results.jsonl
 python3 -m tools.eval.run_mozc_eval --unambiguous
-python3 -m tools.eval.run_mozc_eval --no-user-lexicon
 python3 -m tools.eval.classify_mozc_errors --output /tmp/mozc-errors      # Mozc 評価の失敗の分類（新しい空のフォルダに出す）
 python3 -m tools.replay_stage1 <ログ>          # 実打鍵ログの再生と採点（下の「実打鍵の記録」）
 ```

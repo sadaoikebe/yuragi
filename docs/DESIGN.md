@@ -101,7 +101,7 @@ TIP → ブローカー（プロトコル 1）:
 
 ```json
 {"op":"hello","proto":1}
-{"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest/reload_keymap
+{"seq":17,"op":"down","vk":74,"t":123456,"mods":[]}        ← op は down/up/timeout/reset/set_direct/set_mode/suggest
 {"op":"retry"}                                              ← 利用者が「もう一度試す」を選んだ
 {"op":"open_admin"}                                         ← 設定ウィンドウを開く（最初のタブの単語登録で開く）
 {"op":"quit"}                                               ← インストーラだけが使う（アプリパッケージからは受け付けない）
@@ -174,8 +174,8 @@ TIP → ブローカー（プロトコル 1）:
 
 ## 4. ブローカー（`src/broker/`）
 
-打鍵と返事は `sid` と `seq` で振り分ける。`set_direct` と返事の `direct` から旧 TIP の入力モードを覚え、
-`reload_keymap`、状態、注意、キー表の通知も扱う。通信と再起動の判断は OS に依存しない `broker_core` にある。
+打鍵と返事は `sid` と `seq` で振り分ける。
+設定ウィンドウからの `reload_keymap`、状態、注意、キー表の通知も扱う。通信と再起動の判断は OS に依存しない `broker_core` にある。
 
 ### 起動と終了
 
