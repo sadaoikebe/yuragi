@@ -2412,6 +2412,8 @@ private:
     }
 
     bool ReplayHeld(Stroke key) {
+        // Windows has already changed the lock (JIS.md §3): a resent key would change it back.
+        if (tip_logic::LockVk(key.raw)) return true;
         key.windows_only = true;
         auto started = CarryStarted();
         switch (Replay(key)) {
