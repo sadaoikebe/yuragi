@@ -146,7 +146,8 @@ TIP → ブローカー（プロトコル 1）:
 | `converted` | 変換中か。文節内入力も含む |
 | `direct` / `input_mode` / `pass_through` | 直接入力か / 入力モード（`hiragana`・`katakana`・`half_katakana`・`full_alnum`） / この down・up をアプリに渡すか |
 | `phase` | キー表の局面（`empty` `composing` `converting` `selecting` `resizing` `editing` `predicting` `direct`） |
-| `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前。英数（`alnum_mode`）の続きが入力ごと終わったときの `ime_off` も（[KEYBIND.md](KEYBIND.md) §6.5） |
+| `eat` / `global` | この down を食べたか / TIP が実行するコマンド（`ime_toggle` など）だったときのその名前。英数（`alnum_mode`）の続きが入力ごと終わったときの `ime_off` も（[KEYBIND.md](KEYBIND.md) §6.5）。`global` は up と `timeout` の返事にも付く（単独と決まった無変換・変換。KEYBIND.md §7.6） |
+| `again` | down だけ。単独の親指キーを閉じて `global` が先に決まったので、この down は処理していない。TIP がコマンドのあとで決め直す（KEYBIND.md §7.6） |
 | `eat_pending` / `resolved_keys` | LM 待ちで打鍵を保留した / 保留していた打鍵の元の `seq` と最終の `eat`。コマンドだったときは `global` も（[KEYBIND.md](KEYBIND.md) §8.1） |
 | `fsm` / `n_tokens` / `timer` | 同時打鍵の判定の状態 / トークン数 / 次に `timeout` を送る時刻（無ければ null） |
 | `suggest_at` | 自動予測を問い合わせる時刻。期限があるときだけ返す |

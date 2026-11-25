@@ -220,6 +220,7 @@ struct Message {
     std::string composition, commit;  // UTF-8
     bool direct = false, converted = false, pending = false;
     bool eat_pending = false;
+    bool again = false;  // the down was left unprocessed after global: decide it again
     std::optional<bool> eat;
     std::optional<GlobalCommand> global;
     std::vector<ResolvedKey> resolved_keys;
@@ -276,6 +277,7 @@ inline bool ParseMessage(const std::string& line, Message& m) {
     ReadBool(v, "converted", m.converted);
     ReadBool(v, "pending", m.pending);
     ReadBool(v, "eat_pending", m.eat_pending);
+    ReadBool(v, "again", m.again);
     if (v.Get("eat").kind == tip_json::Value::Boolean) m.eat = v.Get("eat").boolean;
     m.global = ReadGlobal(v);
     for (const auto& result : v.Get("resolved_keys").array) {
@@ -522,6 +524,9 @@ inline GlobalUse UseGlobal(unsigned code, const Local& local, const KeyTable& ta
     auto found = table.global.find(code);
     if (found == table.global.end()) return GlobalUse::None;
     if (local.phase == Phase::Direct) return GlobalUse::Run;
+    // 無変換/変換 alone go to the chord judgment: the engine returns the command once the key
+    // is known to be alone (KEYBIND §4.2, §7.6).
+    if (ThumbVk(code)) return GlobalUse::Ask;
     // A key sent in place of another goes after the input: the engine commits it first.
     const bool sent = SentKeyOf(found->second) != nullptr;
     if (!local.unsettled) {

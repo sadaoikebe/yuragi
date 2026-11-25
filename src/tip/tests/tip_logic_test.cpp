@@ -101,6 +101,15 @@ static void EatingKeys() {
     const Chord width = NormalizeKey(0x1D, shift);
     assert(take(width.vk, width.mods, Phase::Composing) == Take::Send);
     assert(UseGlobal(width.Code(), {Phase::Direct, false}, table) == GlobalUse::Run);
+    {
+        // 変換 = IME オン: run at the down while the IME is off, judged by the engine while it is on.
+        auto ime_keys = table;
+        ime_keys.global[0x1C] = GlobalCommand::On;
+        assert(UseGlobal(0x1C, {Phase::Direct, false}, ime_keys) == GlobalUse::Run);
+        assert(UseGlobal(0x1C, {Phase::Empty, false}, ime_keys) == GlobalUse::Ask);
+        assert(WantKey({0x1C, none}, {Phase::Empty, false}, ime_keys) == Take::Send);
+        assert(WantKey({0x1C, none}, {Phase::Direct, false}, ime_keys) == Take::Pass);
+    }
     assert(table.GlobalAt(Phase::Direct, width.Code()) == GlobalCommand::FullAlnum);
     assert(!HoldDuringCarry({0xEB, none}, 0xEB, 0x7B0000, false));
     assert(HoldDuringCarry({0x1D, none}, 0x1D, 0x7B0000, false));
@@ -116,6 +125,9 @@ static void EatingKeys() {
     assert(!final.resolved_keys[1].global);
     auto pending = Parse(R"({"seq":2,"eat":true,"eat_pending":true,"pending":true})");
     assert(pending.eat_pending && pending.eat == true);
+    auto again = Parse(R"({"seq":3,"eat":false,"global":"ime_toggle","again":true})");
+    assert(again.again && again.eat == false && again.global == GlobalCommand::Toggle);
+    assert(!Parse(R"({"seq":4,"op":"up","global":"ime_toggle"})").again);
 }
 
 static void KeysSentInPlace() {

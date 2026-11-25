@@ -38,19 +38,28 @@ type BindingKey = tuple[str, Chord]
 type Bindings = dict[BindingKey, str | None]
 
 
+def ime_key(chord: Chord) -> bool:
+    """無変換 or 変換 alone: like MS-IME's key assignment, its global row is its function
+    with no input and in direct input (KEYBIND §4.2)."""
+    return chord.thumb and chord != SPACE
+
+
 def chord_allowed(phase: str, chord: Chord) -> bool:
     """The same on every keyboard (KEYBIND §4.2)."""
     return not (
         (chord.key in MODE_KEYS and chord.mods)  # Windows makes these with the modifier
         or (chord.alt_only and phase != "global")
         or (chord.character and phase in ("empty", "composing"))
-        or (chord.typing and phase in ("global", "direct"))
+        or (chord.typing and phase == "direct")
+        or (chord.typing and phase == "global" and not ime_key(chord))
     )
 
 
 def command_allowed(phase: str, chord: Chord, command: Command) -> bool:
     if phase not in command.phases:
         return False
+    if phase == "global" and ime_key(chord):
+        return command.where == "tip"  # the TIP runs it, also while the IME is off
     # A ThumbTap runs after down. Commands that need to return the original
     # stroke or ask the TIP to act require a regular key request.
     return chord != SPACE or (
@@ -66,11 +75,13 @@ def implemented(command: Command) -> bool:
 def merged_bindings(base: Bindings, overrides: Bindings) -> Bindings:
     # A key given a global command leaves the phase rows, except a key sent in place of another:
     # where a phase binds it (Ctrl+H while composing), that row stays first.
+    # 無変換/変換 leave only the empty row: with input they convert as before (MS-IME).
     global_keys = {chord for (phase, chord), command_id in overrides.items()
                    if phase == "global" and command_id is not None
                    and implemented(COMMANDS[command_id]) and command_id not in SEND_KEYS}
     rows = {key: command for key, command in base.items()
-            if key[0] == "global" or key[1] not in global_keys}
+            if key[0] == "global" or key[1] not in global_keys
+            or (ime_key(key[1]) and key[0] != "empty")}
     for key, command in overrides.items():
         if command is None:
             rows.pop(key, None)
@@ -112,7 +123,7 @@ class Keymap:
         """The table the TIP looks keys up in (KEYBIND §7.1), in the keyboard's key codes."""
         def coded(phase: str) -> list[tuple[int, Command]]:
             rows = ((keyboard.code(chord), command) for chord, command in self._rows[phase].items()
-                    if not chord.typing)
+                    if not chord.typing or (phase == "global" and ime_key(chord)))
             return sorted(((code, command) for code, command in rows if code is not None),
                           key=lambda row: row[0])
 

@@ -201,7 +201,7 @@ class LoneThumbKeyTest(unittest.TestCase):
         k = Typist()
         k.play("w+0 w-50")
         reply = k.play("H+0 H-50")
-        self.assertEqual((reply["phase"], k.s.key_resend), ("converting", None))
+        self.assertEqual((reply["phase"], reply.get("global")), ("converting", None))
         self.assertEqual(k.play("H+0 H-50")["phase"], "selecting")
         k = Typist()
         k.play("N+0 N-50")
@@ -215,15 +215,61 @@ class LoneThumbKeyTest(unittest.TestCase):
         self.assertEqual(k.send("timeout", step=0)["phase"], "converting")
         self.assertEqual(k.send("up", VK_CONVERT)["phase"], "converting")
 
-    def test_a_key_whose_function_is_to_pass_is_reported_for_resending(self):
-        """変換 with no input has no command here: it goes to the application once it is known to be alone."""
+    def test_a_key_with_no_command_stays_eaten(self):
+        """変換 with no input has no command here: like Space, the lone key does nothing more."""
         k = Typist()
         self.assertTrue(k.send("down", VK_CONVERT)["eat"])
-        self.assertIsNone(k.s.key_resend)
-        k.send("up", VK_CONVERT)
-        self.assertEqual(k.s.key_resend, VK_CONVERT)
-        k.send("down", ord("W"))
-        self.assertIsNone(k.s.key_resend)
+        reply = k.send("up", VK_CONVERT)
+        self.assertEqual((reply["phase"], reply.get("global")), ("empty", None))
+        k.play("w+0 w-50")
+        self.assertEqual(k.s.composition, "か")
+
+    def test_a_tip_command_comes_with_the_reply_that_finds_the_key_alone(self):
+        """KEYBIND.md §7.6: at the release, at the deadline, or at the down of a key that ends it."""
+        def typist():
+            k = Typist()
+            k.s.keymap = Keymap({**BINDINGS, ("empty", MUHENKAN): "ime_toggle"})
+            return k
+
+        k = typist()
+        self.assertNotIn("global", k.send("down", VK_NONCONVERT))
+        self.assertEqual(k.send("up", VK_NONCONVERT)["global"], "ime_toggle")
+
+        k = typist()
+        k.send("down", VK_NONCONVERT)
+        k.t += 80
+        self.assertEqual(k.send("timeout", step=0)["global"], "ime_toggle")
+        self.assertNotIn("global", k.send("up", VK_NONCONVERT))
+
+        # Enter within the window ends it: the TIP runs the command, then decides Enter again.
+        k = typist()
+        k.send("down", VK_NONCONVERT)
+        reply = k.send("down", VK_RETURN, step=20)
+        self.assertEqual((reply["eat"], reply["global"], reply["again"]), (False, "ime_toggle", True))
+        again = k.send("down", VK_RETURN, step=0)
+        self.assertNotIn("again", again)
+        self.assertNotIn("global", again)
+
+        # A key past the deadline the TIP has not reported yet: the same.
+        k = typist()
+        k.send("down", VK_NONCONVERT)
+        reply = k.send("down", ord("W"), step=200)
+        self.assertEqual((reply["eat"], reply["global"], reply["again"]), (False, "ime_toggle", True))
+        self.assertEqual(k.s.fsm.state, "S1")
+
+        # The same through the global column (MS-IME's key assignment): with no input only.
+        k = Typist()
+        k.s.keymap = Keymap({**BINDINGS, ("global", HENKAN): "ime_on"})
+        self.assertEqual(k.play("H+0 H-50")["global"], "ime_on")
+        k.play("w+0 w-50")
+        reply = k.play("H+0 H-50")
+        self.assertEqual((reply["phase"], reply.get("global")), ("converting", None))
+
+        # A character within the window makes a chord: no command.
+        k = typist()
+        k.send("down", VK_NONCONVERT)
+        reply = k.send("down", ord("W"), step=20)
+        self.assertEqual((reply["eat"], reply.get("global"), reply.get("again")), (True, None, None))
 
     def test_with_a_modifier_it_is_a_command_key(self):
         k = Typist()

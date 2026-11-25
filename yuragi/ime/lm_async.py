@@ -309,11 +309,14 @@ class ConnectionPipeline:
         op = msg.get("op")
         commit, grace = "", False
         eat = key_global = None
+        again = False
         resolved_keys = []
 
         def key_result(m: dict) -> None:
-            nonlocal eat, key_global
+            nonlocal eat, key_global, again
             if m.get("op") != "down":
+                if m is msg:
+                    key_global = self.sess.key_global
                 return
             result = self.sess.key_eat
             if result is None:
@@ -321,6 +324,7 @@ class ConnectionPipeline:
             elif m is msg:
                 eat = result
                 key_global = self.sess.key_global
+                again = self.sess.key_again
             elif type(m.get("seq")) is int:
                 resolved = {"seq": m["seq"], "eat": result}
                 if self.sess.key_global is not None:
@@ -359,7 +363,7 @@ class ConnectionPipeline:
             # A pending reply reserves the down. The eventual phase is used
             # when it runs, even if preceding queued keys changed the input.
             eat = self.sess.pending_key_eat(int(msg["vk"]), msg.get("mods"))
-        reply = snapshot(self.sess, op, eat=eat, key_global=key_global)
+        reply = snapshot(self.sess, op, eat=eat, key_global=key_global, again=again)
         if deferred:
             reply["eat_pending"] = True
         if resolved_keys:

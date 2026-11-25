@@ -115,6 +115,28 @@ class KeymapFileTest(unittest.TestCase):
         self.assertEqual(set(settings.overrides), {("global", Chord.parse("Alt+F5")),
                                                    ("editing", Chord.parse("Space"))})
 
+    def test_ime_keys_take_ime_commands_in_place_of_their_function_with_no_input(self):
+        """MS-IME's key assignment (KEYBIND §4.2): with input, 変換 still converts."""
+        rows = [["global", "無変換", "ime_off"], ["global", "変換", "ime_on"],
+                ["global", "Space", "ime_off"],            # Space types: no global row
+                ["global", "変換", "convert"],             # only what the TIP runs
+                ["direct", "変換", "ime_on"]]
+        (self.dir / "keymap.json").write_text(json.dumps(
+            {"use": "custom", "custom": {"base": "ms-ime", "overrides": rows}}), encoding="utf-8")
+        settings = keymap.load_keymap(self.dir)
+        self.assertEqual([note.split(":")[0] for note in settings.notes],
+                         [f"差分 {index} 行目" for index in (3, 4, 5)])
+        compiled = settings.compile()
+        henkan, muhenkan = Chord.parse("変換"), Chord.parse("無変換")
+        self.assertEqual([compiled.command_for(phase, henkan).id
+                          for phase in ("empty", "composing", "converting")],
+                         ["ime_on", "convert", "next_candidate"])
+        self.assertEqual([compiled.command_for(phase, muhenkan).id for phase in ("empty", "composing")],
+                         ["ime_off", "cycle_kana_script"])
+        table = compiled.eat_table(JIS)
+        self.assertIn({"code": 0x1C, "command": "ime_on"}, table["global"])
+        self.assertIn({"code": 0x1D, "command": "ime_off"}, table["global"])
+
     def test_a_composing_row_does_not_run_in_the_prediction_list(self):
         # predicting inherits composing's rows; a composing-only command there
         # would edit the input while the prediction list is focused.
@@ -154,7 +176,7 @@ class OneTableTest(unittest.TestCase):
         allowed = {name: keymap.chord_allowed(phase, Chord.parse(name))
                    for phase, name in (("global", "変換"), ("composing", "漢字"),
                                        ("composing", "'"), ("converting", "Ctrl+@"))}
-        self.assertEqual(allowed, {"変換": False, "漢字": False, "'": False, "Ctrl+@": True})
+        self.assertEqual(allowed, {"変換": True, "漢字": False, "'": False, "Ctrl+@": True})
 
     def test_a_key_the_keyboard_lacks_keeps_its_row(self):
         rows = [["converting", "Ctrl+'", "commit"], ["converting", "Ctrl+@", "commit"]]

@@ -20,7 +20,7 @@ from yuragi.chord.fsm import (
     AmbShift, ChordFsm, Plain, ThumbJoin, ThumbOver, ThumbTap, Token, thumb_side,
 )
 from yuragi.chord.keys import (
-    ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, THUMB_VK, VK_SPACE, Chord, Keyboard,
+    ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, VK_SPACE, Chord, Keyboard,
     modifier_bits, thumb_chord,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
@@ -395,8 +395,9 @@ class ImeSession:
     _fsm_down: set[int] = field(default_factory=set)
     key_eat: bool | None = field(default=None, init=False)  # None while a down awaits dispatch
     key_global: str | None = field(default=None, init=False)
-    # A thumb key eaten at its down and found alone, whose function is to go to the application.
-    key_resend: int | None = field(default=None, init=False)
+    # This down ended a pending lone thumb key whose command the TIP runs (key_global): the down
+    # is left unprocessed, for the TIP to decide again after that command.
+    key_again: bool = field(default=False, init=False)
     commit_caret_back: int = field(default=0, init=False)  # distance from the latest commit's end
     input_mode: str = "hiragana"
     _input_script: str | None = None  # current unconverted run styled with NonConvert
@@ -535,7 +536,7 @@ class ImeSession:
         provide the state.
         """
         self.key_eat = None if down else False
-        self.key_global = self.key_resend = None
+        self.key_global, self.key_again = None, False
         if self.direct:
             self.key_eat = False
             return None
@@ -558,9 +559,9 @@ class ImeSession:
 
         chord = self.keyboard.chord(vk, modifier_bits(mods, self._modifiers))
         if chord.typing:
-            return self._then(self.flush_timeout(now_ms),
-                              lambda: self._type_key(chord, vk, now_ms, caps_lock))
-        return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
+            return self._after(self.flush_timeout(now_ms),
+                               lambda: self._type_key(chord, vk, now_ms, caps_lock))
+        return self._after(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
     def pending_key_eat(self, vk: int, mods: list[str] | None) -> bool:
         """Reserve a queued down if it can be consumed after the LM resolves."""
@@ -588,29 +589,29 @@ class ImeSession:
         # a NICOLA chord must keep its original timing in every phase.
         if chord.character and (self.phase in CONVERTED or self.predicting):
             if self.keymap.lookup(self.phase, chord) is not None:
-                return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
+                return self._after(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
         alnum = self._alnum_continues()
         if not chord.character and chord != SPACE and (
                 alnum or self._alnum_held or self.input_mode == "full_alnum"):
             # 無変換/変換 while the character keys type alphanumerics: no chord can form, so
             # the key runs its command at its down (Space has its own rules below).
-            return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
+            return self._after(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
         self.key_eat = True
         kind, key = keyboard.classify(vk)
         if self._alnum_held and self.converted and not self.editing and vk != VK_SPACE:
             # MS-IME commits the conversion and drops the character: the IME is off.
             pending = self._finish_pending()
             self._forget_fsm_down(vk)
-            return self._then(pending, self._commit)
+            return self._after(pending, self._commit)
         if self.input_mode == "full_alnum" and not self._alnum_held and chord == SPACE:
-            return self._then(self._finish_pending(), lambda: self._space_in_alnum(Literal("　")))
+            return self._after(self._finish_pending(), lambda: self._space_in_alnum(Literal("　")))
         if alnum and chord == SPACE:
             pending = self._finish_pending()
             self._forget_fsm_down(vk)
             if self._alnum_held:
-                return self._then(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
-            return self._then(pending, lambda: self._ingest([ThumbTap()]))
+                return self._after(pending, lambda: self._space_in_alnum(Literal(" ", alnum=True)))
+            return self._after(pending, lambda: self._ingest([ThumbTap()]))
         shift = bool(chord.mods & SHIFT)
         literal = keyboard.literal_character(vk, shift)
         alnum_key = keyboard.alnum_key(vk)
@@ -622,13 +623,13 @@ class ImeSession:
             # A key or face with nothing on it (JIS :, Shift+0): eaten, the input stays.
             pending = self._finish_pending()
             self._forget_fsm_down(vk)
-            return pending
+            return self._after(pending, lambda: None)
         if literal is not None:
             pending = self._finish_pending()
             self._forget_fsm_down(vk)
             continues = alnum or (alnum_key and literal.isascii() and literal.isalpha())
             faces = keyboard.width_faces(vk) if not shift else None
-            return self._then(pending, lambda: self._ingest([Literal(literal, alnum=continues, faces=faces)]))
+            return self._after(pending, lambda: self._ingest([Literal(literal, alnum=continues, faces=faces)]))
 
         assert key is not None
         insert = ""
@@ -697,6 +698,18 @@ class ImeSession:
             if self.key_eat:
                 self.key_global = "ime_off"
 
+    def _after(self, pending: str | None, rest: Callable[[], str | None]) -> str | None:
+        """The rest of a down, after the pending chord it ended (docs/JIS.md §5.3).
+
+        A lone thumb key found there whose command the TIP runs (IME on/off) goes first:
+        the down is left unprocessed, and the TIP decides it again after that command.
+        """
+        if self.key_global is not None:
+            self.key_eat = False
+            self.key_again = True
+            return pending
+        return self._then(pending, rest)
+
     def _then(self, text: str | None, rest: Callable[[], str | None]) -> str | None:
         """Run the rest of a key event now, or after the awaited conversion resolves."""
         if self._await is not None:
@@ -754,7 +767,7 @@ class ImeSession:
         """The timer request: the chord deadline has come."""
         if self.direct:
             return None
-        self.key_global = self.key_resend = None
+        self.key_global, self.key_again = None, False
         return self._timeout(now_ms)
 
     def _timeout(self, now_ms: int) -> str | None:
@@ -1614,8 +1627,8 @@ class ImeSession:
     def _thumb_tap(self, key: str) -> str | None:
         """A thumb key pressed alone: the function of that key in this phase.
 
-        The TIP ate its down. A function that leaves the key to the application
-        (変換 with no input) or to the TIP is reported with this event's reply.
+        The TIP ate its down, and the key stays eaten, as Space does. A command the TIP
+        runs is reported with the reply to the event that found the key alone.
         """
         chord = thumb_chord(key)
         if chord == SPACE:
@@ -1623,10 +1636,6 @@ class ImeSession:
         command = self.keymap.command_for(self.phase, chord)
         if command.where == "tip":
             self.key_global = command.id
-        if command.key != "eat":
-            self.key_resend = THUMB_VK[key]
-            if command.key == "pass" and self.phase == "empty":
-                self._pass_empty_key(chord)
         return self._run_command(command)
 
     def lone_thumb_converts(self) -> bool:

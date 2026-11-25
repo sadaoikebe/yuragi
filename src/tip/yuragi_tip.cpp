@@ -1159,9 +1159,12 @@ class Tip final : public ITfTextInputProcessorEx,
         bool caps_lock = false;
     };
     struct TestedKey { Stroke key; Decision decision; uint64_t generation; };
+    // A request sent to the engine whose reply is awaited (KEYBIND §7.6): a key, or a timeout.
     struct SentKey {
         long long seq;
-        Stroke key;
+        std::optional<Stroke> key;  // none for a timeout
+        bool held = false;  // a down this TIP ate: it goes to the application if the engine passes it
+        bool again = false;
         long long replay_after = 0;
         std::optional<tip_logic::GlobalCommand> run_after;
     };
@@ -1423,7 +1426,6 @@ public:
             return S_OK;
         }
         if (!eligible) return S_OK;
-        FlushReleases();
         Typed(key);
         switch (decision.action) {
             case Action::Buffer: break; // queued above, even if the field is unresolved
@@ -1675,9 +1677,11 @@ private:
             }
             if (direct_) return;
             std::string at = "\"t\":" + std::to_string(NowMs());
-            if (timer_pending_)
-                SendRequest("timeout", at);
-            else if (!in_flight_.Waiting() && buffered_.empty() && !KeysWaiting())
+            if (timer_pending_) {
+                // After the keys before it, so that it does not overtake them.
+                if (KeysWaiting() || !buffered_.empty()) timeout_due_ = true;
+                else SendTimeout();
+            } else if (!in_flight_.Waiting() && buffered_.empty() && !KeysWaiting())
                 SendRequest("suggest", at, false);
         } else if (id == kTimerNotice) {
             HideNotice();
@@ -1841,9 +1845,11 @@ private:
         }
         if (!m.engine) {
             if (sent_key_ && sent_key_->seq == m.seq) {
-                auto key = sent_key_->key;
-                key.windows_only = true; // the broker explicitly did not process it
-                buffered_.push_front(key);
+                if (sent_key_->held) {
+                    auto key = *sent_key_->key;
+                    key.windows_only = true; // the broker explicitly did not process it
+                    buffered_.push_front(key);
+                }
                 sent_key_.reset();
             }
             if (tip_logic::CommitsVisibleText(m)) FinishLocal();
@@ -1872,8 +1878,8 @@ private:
         if (settings_.log_text)  // the typed text only on request (tip.json "log_text")
             Log(L"reply text seq=%lld comp=%ls commit=%ls", m.seq,
                 Utf8ToWide(m.composition).c_str(), Utf8ToWide(m.commit).c_str());
-        if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.global, m.seq);
-        for (const auto& [seq, eat, global] : m.resolved_keys) KeyResult(seq, eat, global, m.seq);
+        if (!m.eat_pending) KeyResult(m.seq, m.eat.value_or(true), m.global, m.seq, m.again);
+        for (const auto& [seq, eat, global] : m.resolved_keys) KeyResult(seq, eat, global, m.seq, false);
         if (pending_mode_seq_ && m.seq >= pending_mode_seq_ && !m.pending) {
             pending_mode_seq_ = 0;
             mode_edit_seq_ = m.seq;
@@ -1896,7 +1902,8 @@ private:
         return seq;
     }
 
-    SendResult SendKey(const Stroke& key, bool capture, ITfContext* ctx, bool sync) {
+    // held: a down this TIP ate (Action::Send). Every key sent is awaited (sent_key_).
+    SendResult SendKey(const Stroke& key, bool held, ITfContext* ctx, bool sync) {
         if (!link_.Connected() || !tip_logic::SendsKeys(CurrentMode())) return SendResult::Unavailable;
         std::optional<tip_logic::KeyContext> context;
         bool awaiting = in_flight_.Waiting() || pending_ || (state_ && !state_->pending.empty());
@@ -1926,8 +1933,8 @@ private:
             in_flight_.Answer(seq);
             return SendResult::Unavailable;
         }
-        if (capture) sent_key_ = SentKey{seq, key};
-        if (key.down && capture) down_sent_[key.raw] = key.chord;
+        sent_key_ = SentKey{seq, key, held};
+        if (key.down && held) down_sent_[key.raw] = key.chord;
         if (sync) {
             while (in_flight_.Waiting(seq) && !Drain(true, seq)) {
                 const DWORD left = Remaining();
@@ -1944,6 +1951,12 @@ private:
         key.chord = *sent;
         sent.reset();
         SendKey(key, false, nullptr, false);
+    }
+
+    void SendTimeout() {
+        timeout_due_ = false;
+        if (long long seq = SendRequest("timeout", "\"t\":" + std::to_string(NowMs())))
+            sent_key_ = SentKey{seq};
     }
 
     bool Toggle() { return RunGlobal(tip_logic::GlobalCommand::Toggle); }
@@ -1971,6 +1984,7 @@ private:
         composing_ = phase_ != tip_logic::Phase::Empty && phase_ != tip_logic::Phase::Direct;
         timer_pending_ = r.has_timer && !r.direct;
         NoteCandidates(r);
+        timeout_due_ = false;  // the reply arms its own deadline
         CancelReplyTimer();
         if (timer_pending_)
             ArmReplyTimer(r.timer);
@@ -2068,7 +2082,7 @@ private:
             stale_upto_ = in_flight_.Last();
             in_flight_.Clear();
             sent_key_.reset();
-            releases_.clear();
+            timeout_due_ = false;
             tested_up_.reset();
             pending_mode_seq_ = mode_edit_seq_ = 0;
         }
@@ -2277,31 +2291,20 @@ private:
     void QueueRelease(const Stroke& key) {
         auto stroke = std::find_if(buffered_.rbegin(), buffered_.rend(),
                                   [&](const Stroke& queued) { return queued.raw == key.raw; });
-        if (stroke != buffered_.rend() && stroke->down) {
+        // In the same queue as the downs, so that no event overtakes another (KEYBIND §7.6).
+        if ((stroke != buffered_.rend() && stroke->down) ||
+            (down_sent_[key.raw] && Eligible() && ScopeAllowsInput() && !FocusChanged()))
             Buffer(key);
-        } else if (down_sent_[key.raw] && Eligible() && ScopeAllowsInput() && !FocusChanged()) {
-            auto release = key;
-            release.chord = *down_sent_[key.raw];
-            down_sent_[key.raw].reset();
-            releases_.push_back(release);
-            PostMessageW(hwnd_, kKeysMessage, 0, 0);
-        }
     }
     void KeyResult(long long seq, bool eat, std::optional<tip_logic::GlobalCommand> global,
-                   long long reply_seq) {
+                   long long reply_seq, bool again) {
         if (!sent_key_ || sent_key_->seq != seq) return;
-        if (eat && !global) {
+        if (!global && !again && (eat || !sent_key_->held)) {
             sent_key_.reset();
         } else {
             sent_key_->run_after = global;
             sent_key_->replay_after = reply_seq;
-        }
-    }
-    void FlushReleases() {
-        while (!releases_.empty()) {
-            auto release = releases_.front();
-            releases_.pop_front();
-            SendKey(release, false, nullptr, false);
+            sent_key_->again = again && sent_key_->held;
         }
     }
     void PumpKeys() {
@@ -2311,17 +2314,23 @@ private:
             return;
         }
         carry_.Pumped();
-        FlushReleases();
         if (replay_ || retry_replay_ || pending_mode_seq_) return;
         if (mode_edit_seq_) {
             if (scope_ctx_ && (!state_ || state_->applied_seq < mode_edit_seq_)) return;
             mode_edit_seq_ = 0;
         }
         if (sent_key_) {
-            auto [seq, key, after, global] = *sent_key_;
-            if (!after || !state_ || state_->applied_seq < after) return;
+            const auto sent = *sent_key_;
+            if (!sent.replay_after || !state_ || state_->applied_seq < sent.replay_after) return;
             sent_key_.reset();
-            if ((!global || !RunGlobal(*global)) && !ReplayHeld(key)) return;
+            const bool ran = sent.run_after && RunGlobal(*sent.run_after);
+            if (sent.again) {
+                // The engine left this down for after the command: decide it again, first.
+                down_sent_[sent.key->raw].reset();
+                buffered_.push_front(*sent.key);
+            } else if (!ran && sent.held && !ReplayHeld(*sent.key)) {
+                return;
+            }
             if (replay_ || retry_replay_ || pending_mode_seq_ || menu_generation_) return;
         }
         if (state_ && !state_->pending.empty()) return;
@@ -2361,6 +2370,7 @@ private:
             carry_.Finished();
             KillTimer(hwnd_, kTimerCarry);
         }
+        if (timeout_due_ && buffered_.empty() && !KeysWaiting() && !direct_) SendTimeout();
     }
 
     bool IsReplay(const Stroke& key) {
@@ -2668,7 +2678,8 @@ private:
     // The one key sent to the engine whose answer is awaited: KeysWaiting() holds the next
     // key back until it is resolved.
     std::optional<SentKey> sent_key_;
-    std::deque<Stroke> buffered_, releases_;
+    std::deque<Stroke> buffered_;
+    bool timeout_due_ = false;  // the chord deadline came while keys waited: sent after them
     tip_logic::Carry carry_;
     std::vector<Registration> preserved_;
     long long pending_mode_seq_ = 0, mode_edit_seq_ = 0;

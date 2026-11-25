@@ -50,7 +50,8 @@ def dispatch(sess: ImeSession, msg: dict) -> dict:
     if msg.get("op") == "suggest":
         return suggestion_reply(sess, msg)
     commit = apply_op(sess, msg)
-    reply = snapshot(sess, msg.get("op"), eat=sess.key_eat, key_global=sess.key_global)
+    reply = snapshot(sess, msg.get("op"), eat=sess.key_eat, key_global=sess.key_global,
+                     again=sess.key_again)
     set_reply_commit(sess, msg, reply, commit)
     if "seq" in msg:
         reply["seq"] = msg["seq"]
@@ -113,7 +114,7 @@ def suggestion_reply(sess: ImeSession, msg: dict, *, busy: bool = False) -> dict
 
 
 def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
-             key_global: str | None = None) -> dict:
+             key_global: str | None = None, again: bool = False) -> dict:
     """The reply for the session's state; the caller fills in commit."""
     reply = {
         "direct": sess.direct,
@@ -144,8 +145,11 @@ def snapshot(sess: ImeSession, op, *, eat: bool | None = None,
         reply["caret"] = caret
     if op == "down" and eat is not None:
         reply["eat"] = eat
-        if key_global is not None:
-            reply["global"] = key_global
+        if again:
+            reply["again"] = True
+    # A key's own command, or a lone thumb key found alone by this event (up, timeout, a down).
+    if op in ("down", "up", "timeout") and key_global is not None:
+        reply["global"] = key_global
     return reply
 
 
