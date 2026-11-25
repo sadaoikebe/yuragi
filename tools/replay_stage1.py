@@ -214,7 +214,6 @@ def replay(trace: Trace, fsm=None) -> tuple[list[Observation], dict]:
         ms, vk = event["ms"], event["vk"]
         down = event["action"] == "down"
         timeout(ms)
-        repeat = down and vk in physical
         if down:
             physical.add(vk)
         else:
@@ -229,9 +228,6 @@ def replay(trace: Trace, fsm=None) -> tuple[list[Observation], dict]:
         if vk in native_down:
             if not down:
                 native_down.discard(vk)
-            continue
-        if repeat:
-            counts["repeat_downs"] += 1
             continue
         if vk == VK_NEXT_PROMPT:
             if down:
