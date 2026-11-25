@@ -142,26 +142,29 @@ static bool CompartmentSet(ITfCompartmentMgr* cm, REFGUID guid) {
 }
 
 // Disabled or empty contexts are not ours (SampleIME / CorvusSKK / Mozc).
-static bool KeyboardDisabled(ITfThreadMgr* tm) {
-    if (!tm) return true;
+// Why the focused field takes no keys, or nullptr when it does.
+static const wchar_t* DisabledReason(ITfThreadMgr* tm) {
+    if (!tm) return L"no-thread-manager";
     ITfDocumentMgr* dm = nullptr;
-    if (FAILED(tm->GetFocus(&dm)) || !dm) return true;
+    if (FAILED(tm->GetFocus(&dm)) || !dm) return L"no-focus-document";
     ITfContext* ctx = nullptr;
     if (FAILED(dm->GetTop(&ctx)) || !ctx) {
         dm->Release();
-        return true;
+        return L"no-context";
     }
-    bool disabled = false;
+    const wchar_t* reason = nullptr;
     ITfCompartmentMgr* cm = nullptr;
     if (SUCCEEDED(ctx->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) && cm) {
-        disabled = CompartmentSet(cm, GUID_COMPARTMENT_KEYBOARD_DISABLED) ||
-                   CompartmentSet(cm, GUID_COMPARTMENT_EMPTYCONTEXT);
+        if (CompartmentSet(cm, GUID_COMPARTMENT_KEYBOARD_DISABLED)) reason = L"keyboard-disabled";
+        else if (CompartmentSet(cm, GUID_COMPARTMENT_EMPTYCONTEXT)) reason = L"empty-context";
         cm->Release();
     }
     ctx->Release();
     dm->Release();
-    return disabled;
+    return reason;
 }
+
+static bool KeyboardDisabled(ITfThreadMgr* tm) { return DisabledReason(tm) != nullptr; }
 
 static bool KeyboardClosed(ITfThreadMgr* tm) {
     if (!tm) return true;
@@ -2217,12 +2220,22 @@ private:
         if (!tm_ || key.chord.mods.win || UntranslatedJisKey(key.raw, (uint32_t)key.flags)) return {};
         const bool closed = KeyboardClosed(tm_);
         auto reopen = closed ? GlobalFor(key.chord.Code(), true) : GlobalCommand::None;
-        if (closed && reopen == GlobalCommand::None) return {};
+        if (closed && reopen == GlobalCommand::None) {
+            NotePass(L"keyboard-closed");
+            return {};
+        }
         const bool can_hold = HoldDuringCarry(key.chord, key.raw, (uint32_t)key.flags,
                                               keymap_.global.count(key.chord.Code()) != 0);
         if (buffer && carry_.Active()) return {can_hold ? Action::Buffer : Action::Pass};
         if (buffer && (!buffered_.empty() || retry_replay_) && can_hold) return {Action::Buffer};
-        if (KeyboardDisabled(tm_) || !ScopeAllowsInput()) return {};
+        if (const wchar_t* disabled = DisabledReason(tm_)) {
+            NotePass(disabled);
+            return {};
+        }
+        if (!ScopeAllowsInput()) {
+            NotePass(L"field-scope");
+            return {};
+        }
         if (closed)
             return buffer && KeysWaiting() ? Decision{Action::Buffer} : Decision{Action::Global, reopen};
         auto local = LocalState();
@@ -2235,11 +2248,23 @@ private:
         if (ModifierVk(key.raw) || KanaLockKey(key.raw, (uint32_t)key.flags)) return {};
         if (buffer && KeysWaiting() && can_hold)
             return {Action::Buffer};
-        if (ready && !direct_ && WantKey(key.chord, local, keymap_) == Take::Send)
-            return {Action::Send};
+        if (!direct_ && WantKey(key.chord, local, keymap_) == Take::Send) {
+            if (ready) return {Action::Send};
+            NotePass(L"not-ready");
+        }
         auto global = GlobalFor(key.chord.Code());
         if (global != GlobalCommand::None) return {Action::Global, global};
         return {};
+    }
+
+    // tip.json "log": why a key passed to the application untouched. One line when the reason
+    // changes, so a field that never takes keys leaves a line, and a normal one leaves none.
+    void NotePass(const wchar_t* reason) {
+        if (!g_log || pass_reason_ == reason) return;
+        pass_reason_ = reason;
+        Log(L"keys pass reason=%ls scope=%d scope_hr=%08lx scope_result=%08lx link=%d mode=%d direct=%d",
+            reason, (int)scope_, scope_hr_, scope_result_, (int)link_state_, (int)CurrentMode(),
+            direct_ ? 1 : 0);
     }
 
     void Buffer(const Stroke& key) {
@@ -2618,6 +2643,8 @@ private:
     HWND hwnd_ = nullptr;
     TipPopup candidate_, notice_popup_{true};
     Scope scope_ = Scope::Unknown;
+    HRESULT scope_hr_ = S_OK, scope_result_ = S_OK;  // the scope check's request (NotePass)
+    const wchar_t* pass_reason_ = nullptr;  // the last reason NotePass wrote, for this focus
     ITfContext* scope_ctx_ = nullptr;
     uint64_t focus_generation_ = 0;
     DWORD edit_cookie_ = TF_INVALID_COOKIE;
@@ -2782,6 +2809,8 @@ void Tip::CheckScope() {
     if (scope_ctx_) scope_ctx_->Release();
     scope_ctx_ = FocusContext();
     scope_ = Scope::Unknown;
+    pass_reason_ = nullptr;
+    scope_hr_ = scope_result_ = S_OK;
     if (!scope_ctx_ || client_ == TF_CLIENTID_NULL) return;
     if (settings_.document_context) {
         ITfSource* src = nullptr;
@@ -2796,7 +2825,9 @@ void Tip::CheckScope() {
     HRESULT result = S_OK;
     HRESULT hr = scope_ctx_->RequestEditSession(client_, es, TF_ES_SYNC | TF_ES_READ, &result);
     if (hr == TF_E_SYNCHRONOUS || result == TF_E_SYNCHRONOUS)
-        scope_ctx_->RequestEditSession(client_, es, TF_ES_ASYNC | TF_ES_READ, &result);
+        hr = scope_ctx_->RequestEditSession(client_, es, TF_ES_ASYNC | TF_ES_READ, &result);
+    scope_hr_ = hr;
+    scope_result_ = result;
     es->Release();
 }
 
