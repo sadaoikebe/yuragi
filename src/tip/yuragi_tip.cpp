@@ -1156,6 +1156,7 @@ class Tip final : public ITfTextInputProcessorEx,
         bool down;
         bool windows_only = false;
         bool preserved = false;
+        bool caps_lock = false;
     };
     struct TestedKey { Stroke key; Decision decision; uint64_t generation; };
     struct SentKey {
@@ -1920,7 +1921,7 @@ private:
         if (!ScopeAllowsInput()) return SendResult::Unavailable;
         long long seq = in_flight_.Next();
         auto request = tip_logic::KeyRequest(seq, key.down, key.chord.vk, key.time, key.chord.mods,
-                                            context ? &*context : nullptr);
+                                            context ? &*context : nullptr, key.caps_lock);
         if (!link_.Write(request, Remaining())) {
             in_flight_.Answer(seq);
             return SendResult::Unavailable;
@@ -2191,7 +2192,9 @@ private:
     }
     Stroke ReadStroke(WPARAM w, LPARAM l, bool down = true) {
         UINT vk = VkOf(w);
-        return {vk, l, GetMessageTime(), NowMs(), tip_logic::NormalizeKey(vk, HeldMods()), down};
+        Stroke key{vk, l, GetMessageTime(), NowMs(), tip_logic::NormalizeKey(vk, HeldMods()), down};
+        key.caps_lock = (GetKeyState(VK_CAPITAL) & 1) != 0;
+        return key;
     }
     bool SameTest(const Stroke& key) const {
         return tested_ && SameEvent(tested_->key, key);
@@ -2245,7 +2248,7 @@ private:
                 return {Action::ObserveAlt};
             return {};
         }
-        if (ModifierVk(key.raw) || KanaLockKey(key.raw, (uint32_t)key.flags)) return {};
+        if (ModifierVk(key.raw) || key.raw == VK_KANA) return {};
         if (buffer && KeysWaiting() && can_hold)
             return {Action::Buffer};
         if (!direct_ && WantKey(key.chord, local, keymap_) == Take::Send) {

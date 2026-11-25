@@ -461,9 +461,9 @@ inline Deliver DeliverHeld(const FieldFacts& field, uint64_t now, std::optional<
     return carry_started && now - *carry_started < KEY_BUDGET_MS ? Deliver::Wait : Deliver::Raw;
 }
 
-inline bool KanaLockKey(uint32_t vk, uint32_t flags) {
-    return vk == 0x15 && ((flags >> 16) & 0xFF) == 0x3A; // kbd101 already changed the lock
-}
+// VK_CAPITAL and VK_KANA: Windows has changed the lock before the IME sees the key, so a
+// resent key would change it again.
+inline bool LockVk(uint32_t vk) { return vk == 0x14 || vk == 0x15; }
 
 inline bool UntranslatedJisKey(uint32_t vk, uint32_t flags) {
     const unsigned scan = (flags >> 16) & 0x1FF;  // include the extended bit
@@ -471,7 +471,7 @@ inline bool UntranslatedJisKey(uint32_t vk, uint32_t flags) {
 }
 
 inline bool HoldDuringCarry(Chord chord, uint32_t raw_vk, uint32_t flags, bool is_global) {
-    return !chord.mods.win && !ModifierVk(raw_vk) && !KanaLockKey(raw_vk, flags) &&
+    return !chord.mods.win && !ModifierVk(raw_vk) && !LockVk(raw_vk) &&
            !UntranslatedJisKey(raw_vk, flags) &&
            (!AltOnly(chord) || is_global);
 }
@@ -706,10 +706,11 @@ struct KeyContext {
 };
 
 inline std::string KeyRequest(long long seq, bool down, uint32_t vk, uint64_t t, Mods mods,
-                              const KeyContext* context = nullptr) {
+                              const KeyContext* context = nullptr, bool caps_lock = false) {
     std::string request = "{\"seq\":" + std::to_string(seq) + ",\"op\":\"" + (down ? "down" : "up") +
            "\",\"vk\":" + std::to_string(vk) + ",\"t\":" + std::to_string(t) +
            ",\"mods\":" + ModsJson(mods);
+    if (caps_lock) request += ",\"caps_lock\":true";
     if (context) {
         request += ",\"left_context\":" +
                    (context->text ? tip_json::Quote(*context->text) : "null");

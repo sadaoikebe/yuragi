@@ -10,6 +10,7 @@ One JSON object per line:
   {"op":"up","vk":74,"t":150}
   {"op":"timeout","t":200}
   {"op":"down","vk":65,"t":220,"mods":["shift"]}
+  {"op":"down","vk":65,"t":230,"caps_lock":true}  # Caps Lock is on (absent: off)
   {"op":"down","vk":39,"t":250,"mods":["shift"]}  # extend focused bunsetsu
   {"op":"down","vk":37,"t":280,"mods":["shift"]}  # shrink focused bunsetsu
   {"op":"reset"}  # focus loss or application-terminated composition; no commit
@@ -76,7 +77,7 @@ def apply_op(sess: ImeSession, msg: dict) -> str:
             after = msg.get("after_commit_seq")
             sess.start_input(msg.get("left_context"), after if type(after) is int else None,
                              disconnected=after is None and "after_commit_seq" in msg)
-        commit = sess.on_key(down, vk, t, mods=mods) or ""
+        commit = sess.on_key(down, vk, t, mods=mods, caps_lock=msg.get("caps_lock") is True) or ""
     elif op == "timeout":
         commit = sess.on_timeout(t) or ""
     elif op == "reset":

@@ -31,7 +31,7 @@ Windows の設定とキーボードの対応は次のスキャンコードで見
 
 ## 3. TIP とエンジンの接続
 
-- TIP の文字キーの判定は、エンジンが食べる表の `characters` で送るキーボードの文字キーで行う（[KEYBIND.md](KEYBIND.md#71-食べる表) §7.1）。JIS の `VK_OEM_102` もこれで入り、US では入らない。TIP はキーボードを自分では判定しない。IME 用のキーも、Windows が届けた VK のまま和音にする（[KEYBIND.md](KEYBIND.md#41-和音の書き方) §4.1）。Windows の Caps Lock、かなロック、その他の専用ショートカットが、単独の IME キーとして再解釈されないようにする。[WDK の NLS 表](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L467-L571)
+- TIP の文字キーの判定は、エンジンが食べる表の `characters` で送るキーボードの文字キーで行う（[KEYBIND.md](KEYBIND.md#71-食べる表) §7.1）。JIS の `VK_OEM_102` もこれで入り、US では入らない。TIP はキーボードを自分では判定しない。IME 用のキーも、Windows が届けた VK のまま和音にする（[KEYBIND.md](KEYBIND.md#41-和音の書き方) §4.1）。Windows の Caps Lock、かなロック、その他の専用ショートカットが、単独の IME キーとして再解釈されないようにする。Caps Lock とかなロックのキー（`VK_CAPITAL`・`VK_KANA`）は、Windows がロックを切り替えたあとに届くので、保留して送り直さない。[WDK の NLS 表](https://github.com/microsoft/Windows-driver-samples/blob/main/input/layout/fe_kbds/jpn/106/kbd106.c#L467-L571)
 - JIS の Alt+半角/全角は、修飾を問わない `VK_KANJI` の PreservedKey で受ける。Alt を先に押せば、どちらを先に離しても 1 回届く。そのあと通常のキーの経路に届くのは `VK_KANJI` の解放だけなので、同じ打鍵が重ねて実行されることはない。半角/全角を先に押すと、Alt+半角/全角ではなく半角/全角として届く（`keyprobe` の `jis-kanji`）。対象外の入力欄、フォーカス移動、キーの送り直しには既存の規則を適用する。[PreserveKey](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfkeystrokemgr-preservekey) [Windows のキー入力](keybind/windows.md)
 - CMake が既定キー表を `ansi101` で Python の表から生成する。TIP は接続前はこれを使い、エンジンの表が届いたら置き換える。`characters` の無い表（古いエンジン）は受け取らず、既定表のままにする。
 - 通信にキーボードの項目は足さない。TIP とエンジンは同じ PC の同じ設定に従うので、食い違わない。Caps Lock は `caps_lock` を打鍵に付け、省略時はオフとする。

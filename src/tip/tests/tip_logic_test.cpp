@@ -229,13 +229,16 @@ static void HeldKeysRespectScopeAndSystemKeys() {
     assert(DeliverHeld({true, true, Scope::Unavailable}, deadline, start) == Deliver::Raw);
     assert(DeliverHeld({true, true, Scope::Unavailable}, start, std::nullopt) == Deliver::Decide);
 
-    Mods alt{}, ctrl_alt{}, win{};
-    alt.alt = ctrl_alt.alt = ctrl_alt.ctrl = win.win = true;
+    Mods alt{}, ctrl_alt{}, win{}, shift{};
+    alt.alt = ctrl_alt.alt = ctrl_alt.ctrl = win.win = shift.shift = true;
     assert(HoldDuringCarry({'A', {}}, 'A', 0, false));
     assert(!HoldDuringCarry({'A', win}, 'A', 0, false));
     assert(!HoldDuringCarry({0x12, alt}, 0x12, 0, false));
     assert(!HoldDuringCarry({0xA0, {}}, 0xA0, 0, false));
-    assert(!HoldDuringCarry({0x15, {}}, 0x15, 0x3A << 16, false));
+    assert(!HoldDuringCarry({0x15, {}}, 0x15, 0x3A << 16, false));  // kbd101 Ctrl+Shift+CapsLock
+    assert(!HoldDuringCarry({0x15, {}}, 0x15, 0x70 << 16, false));  // kbd106 Ctrl+Shift+ひらがな
+    assert(!HoldDuringCarry({0x14, {}}, 0x14, 0x3A << 16, false));
+    assert(!HoldDuringCarry({0x14, shift}, 0x14, 0x3A << 16, false));  // kbd106 Shift+英数
     assert(!HoldDuringCarry({'F', alt}, 'F', 0, false));
     assert(HoldDuringCarry({'F', ctrl_alt}, 'F', 0, false));
     assert(HoldDuringCarry({0x19, {}}, 0x19, 0, true));
@@ -316,6 +319,8 @@ static void Requests() {
     KeyContext context;
     assert(KeyRequest(8, true, 65, 124, {}, &context) ==
            R"({"seq":8,"op":"down","vk":65,"t":124,"mods":[],"left_context":null})");
+    assert(KeyRequest(9, true, 65, 125, {}, nullptr, true) ==
+           R"({"seq":9,"op":"down","vk":65,"t":125,"mods":[],"caps_lock":true})");
     context.disconnected = true;
     context.text = "";
     assert(KeyRequest(8, true, 65, 124, {}, &context) ==

@@ -527,6 +527,7 @@ class ImeSession:
 
     def on_key(
         self, down: bool, vk: int, now_ms: int, mods: list[str] | None = None,
+        caps_lock: bool = False,
     ) -> str | None:
         """Return this event's committed text; record its consumption in key_eat.
 
@@ -558,7 +559,7 @@ class ImeSession:
         chord = self.keyboard.chord(vk, modifier_bits(mods, self._modifiers))
         if chord.typing:
             return self._then(self.flush_timeout(now_ms),
-                              lambda: self._type_key(chord, vk, now_ms))
+                              lambda: self._type_key(chord, vk, now_ms, caps_lock))
         return self._then(self._finish_pending(), lambda: self._dispatch_chord(chord, vk))
 
     def pending_key_eat(self, vk: int, mods: list[str] | None) -> bool:
@@ -581,7 +582,7 @@ class ImeSession:
             self._pass_empty_key(chord)
         return self._run_command(command)
 
-    def _type_key(self, chord: Chord, vk: int, now_ms: int) -> str | None:
+    def _type_key(self, chord: Chord, vk: int, now_ms: int, caps_lock: bool) -> str | None:
         keyboard = self.keyboard
         # A plain thumb key is looked up only on ThumbTap. One that forms
         # a NICOLA chord must keep its original timing in every phase.
@@ -614,9 +615,9 @@ class ImeSession:
         literal = keyboard.literal_character(vk, shift)
         alnum_key = keyboard.alnum_key(vk)
         if self.input_mode == "full_alnum" and not self._alnum_held and alnum_key:
-            literal = keyboard.alnum_character(vk, shift, full=True)
+            literal = keyboard.alnum_character(vk, shift, full=True, caps_lock=caps_lock)
         elif alnum and alnum_key:
-            literal = keyboard.alnum_character(vk, shift)
+            literal = keyboard.alnum_character(vk, shift, caps_lock=caps_lock)
         if literal == "":
             # A key or face with nothing on it (JIS :, Shift+0): eaten, the input stays.
             pending = self._finish_pending()

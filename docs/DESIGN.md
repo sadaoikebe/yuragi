@@ -121,6 +121,7 @@ TIP → ブローカー（プロトコル 1）:
 `state` は `ready` `starting` `down` の 3 つ。キー要求の `t` は、TIP がキーを処理するときに
 `QueryPerformanceCounter` から付けたミリ秒（TSF はキーの時刻を渡さない）。`mods` は小文字名の配列
 （`["shift","ctrl","alt","win"]` の部分集合）。省略したら修飾キー自体の down/up で追跡する。
+`caps_lock` は Caps Lock がオンのときだけ `true` を載せ、省略したらオフとする。
 
 入力開始の `down` には、文書から取得した `left_context`（文字列、取得不能なら `null`）と、
 同じ位置に反映した最新確定の `after_commit_seq`（番号、切断なら `null`、不明なら省略）を載せられる。

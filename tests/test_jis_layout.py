@@ -115,6 +115,24 @@ class JisTypingTest(unittest.TestCase):
         self.tap_all(k, VK_YEN, VK_BACKSLASH, VK_COLON, ord("A"))
         self.assertEqual(self.text(k), "￥＼：ａ")
 
+    def test_caps_lock_swaps_the_letters_in_alnum(self):
+        # JIS-LAYOUT.md §2: only the letters, and only while the keys type alphanumerics.
+        k = jis_keys()
+        k.s.set_mode("full_alnum")
+        for vk, mods in ((ord("A"), None), (ord("B"), ["shift"]), (0x31, None), (0x31, ["shift"])):
+            k.tap(vk, mods, caps_lock=True)
+        self.assertEqual(self.text(k), "Ａｂ１！")
+
+        k = jis_keys()
+        k.tap(ord("A"), ["shift"], caps_lock=True)
+        k.tap(ord("B"), caps_lock=True)
+        k.tap(ord("C"), ["shift"], caps_lock=True)
+        self.assertEqual(self.text(k), "ABc")
+
+        k = jis_keys()
+        k.tap(ord("J"), caps_lock=True)
+        self.assertEqual(self.text(k), "と")
+
     def test_alnum_continuation_after_a_shifted_letter(self):
         k = jis_keys()
         k.tap(ord("A"), ["shift"])

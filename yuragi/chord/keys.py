@@ -228,10 +228,10 @@ class Keyboard:
             return key.shift
         return _KANA_SHIFT.get(key.shift) or to_full_width(key.shift)
 
-    def alnum_character(self, vk: int, shift: bool, full: bool = False) -> str:
-        """What a key types in alnum ("" is a no-op, as JIS Shift+0)."""
+    def alnum_character(self, vk: int, shift: bool, full: bool = False, caps_lock: bool = False) -> str:
+        """What a key types in alnum ("" is a no-op, as JIS Shift+0). Caps Lock swaps a letter's faces."""
         key = self._by_vk[vk]
-        if shift:
+        if shift != (caps_lock and key.id.isascii() and key.id.isalpha()):
             return to_full_width(key.shift) if full else key.shift
         return _full(key.id) if full else key.alnum
 
