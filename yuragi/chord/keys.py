@@ -244,9 +244,7 @@ class Keyboard:
 
     def key_alnum(self, key: str) -> tuple[str, str]:
         """F9/F10: a chord key's unshifted half- and full-width alnum faces."""
-        found = self._by_id.get(key)
-        if found is None:  # a key id from a test table: its own text
-            return key, to_full_width(key)
+        found = self._by_id[key]
         return found.alnum, _full(found.id)
 
 

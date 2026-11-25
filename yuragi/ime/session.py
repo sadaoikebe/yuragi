@@ -85,11 +85,9 @@ def kana_script(reading: str, script: str) -> str:
     return reading
 
 
-def alnum_spelling(keys: str | list[tuple[str, str]], current: str | None, *, full: bool) -> str:
+def alnum_spelling(keys: list[tuple[str, str]], current: str | None, *, full: bool) -> str:
     """F9/F10: the typed keys; again on the same width cycles the letter case.
-    keys: each key's unshifted (half-width, full-width) alnum face, or a string of half-width faces."""
-    if isinstance(keys, str):
-        keys = [(c, to_full_width(c)) for c in keys]
+    keys: each key's unshifted (half-width, full-width) alnum face."""
     half = "".join(h for h, _ in keys)
     forms = [half.lower(), half.upper(), half[:1].upper() + half[1:].lower()]
     if full:

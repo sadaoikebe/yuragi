@@ -84,7 +84,7 @@ class DeviceStartupTest(unittest.TestCase):
                 if device == "cuda:0":
                     raise RuntimeError("warm-up conversion failed")
 
-            engine = Engine(None, Namespace())
+            engine = Engine(None, Namespace(data_dir=None))
             engine.loaded = SimpleNamespace(_lex=object(), _table={"keys": {}})
             request = ConversionRequest([], "", 0, None, ())
             args = server.argument_parser().parse_args([])

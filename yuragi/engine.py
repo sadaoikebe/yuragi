@@ -36,6 +36,8 @@ import threading
 import time
 import traceback
 
+from yuragi.ime.config import DEFAULT_RUNTIME_DIR
+
 PROTO = 1
 MAX_TOKENS = 200  # DESIGN「定数」: the input length a conversion handles
 # DESIGN「見張り」: exiting with this code after ready asks the broker to start the
@@ -53,7 +55,6 @@ GPU_FAILURES_BEFORE_RESTART = 2
 LM_RETRY_DELAY_S = 300
 LM_RETRY_FACTOR = 2
 LM_RETRIES = 1
-DEFAULT_DATA_DIR = Path.home() / ".yuragi-ime"
 # Warm-up input (DESIGN「暖機」): かいはつしてきた on the NICOLA-A plain layer, then Space.
 WARM_KEYS = (0x57, 0x4C, 0x48, 0x4F, 0x53, 0x44, 0x4B, 0x45)
 
@@ -139,7 +140,7 @@ class Channel:
 def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m yuragi.engine",
                                      description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR,
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_RUNTIME_DIR,
                         help="the user's data: config.json, learning.jsonl, "
                              "personal_lexicon.jsonl (default ~/.yuragi-ime)")
     parser.add_argument("--dict-dir", type=Path, default=None,
@@ -197,7 +198,7 @@ class Connection:
 class Engine:
     def __init__(self, channel: Channel, args: argparse.Namespace):
         self.channel = channel
-        self.data_dir = getattr(args, "data_dir", DEFAULT_DATA_DIR)
+        self.data_dir = args.data_dir
         self.keymap = None
         self.connections: dict[object, Connection] = {}
         self.loaded = None

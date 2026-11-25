@@ -26,7 +26,7 @@ def worker(device=None, failures=0, state="ready"):
 class DeviceChangeTest(unittest.TestCase):
     def make(self, *, device, battery_at_load=False, gpu_model="medium", failures=0,
              state="ready"):
-        engine = Engine(None, Namespace())
+        engine = Engine(None, Namespace(data_dir=None))
         engine.worker = worker(device, failures, state)
         engine.lm_on_battery = battery_at_load
         engine.settings = SimpleNamespace(lm_model=gpu_model)
@@ -65,7 +65,7 @@ class LmRetryTest(unittest.TestCase):
             return engine.lm_retry_after(server.LmTooSlow("too slow", fastest_ms))
 
     def test_once_more_only_near_the_limit(self):
-        engine = Engine(None, Namespace())
+        engine = Engine(None, Namespace(data_dir=None))
         self.assertIsNone(self.retry(engine, 3 * CALIBRATION_LIMIT_MS))
         self.assertIsNotNone(self.retry(engine, 351))  # the sign-in of 2026-11-20
         self.assertIsNone(self.retry(engine, 351))
@@ -74,7 +74,7 @@ class LmRetryTest(unittest.TestCase):
 
 class IdleTest(unittest.TestCase):
     def make(self, **sess):
-        engine = Engine(None, Namespace())
+        engine = Engine(None, Namespace(data_dir=None))
         state = dict(tokens=[], converted=False, _await=None)
         state.update(sess)
         engine.connections = {1: SimpleNamespace(sess=SimpleNamespace(**state))}

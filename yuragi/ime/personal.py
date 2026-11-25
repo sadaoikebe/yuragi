@@ -19,8 +19,9 @@ import sys
 
 from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_id
+from .config import DEFAULT_RUNTIME_DIR
 
-DEFAULT_PERSONAL_PATH = Path.home() / ".yuragi-ime" / "personal_lexicon.jsonl"
+DEFAULT_PERSONAL_PATH = DEFAULT_RUNTIME_DIR / "personal_lexicon.jsonl"
 # The default cost of a registered word (CONVERSION「辞書の重ね方」).
 DEFAULT_COST = 2600
 # A short list of what a user registers: its name in Mozc's id.def.

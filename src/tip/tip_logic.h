@@ -165,10 +165,6 @@ inline std::optional<KeyTable> ParseKeyTable(const tip_json::Value& json) {
     for (size_t i = 0; i < table.phases.size(); ++i) {
         const auto& from = phases.Get(kPhaseNames[i]);
         auto& row = table.phases[i];
-        if (i == (size_t)Phase::Editing && from.kind == tip_json::Value::Null) {
-            row = table.phases[(size_t)Phase::Converting];  // earlier engines omit this phase
-            continue;
-        }
         const auto& eat = from.Get("eat");
         const auto& pass = from.Get("pass");
         if (eat.kind != tip_json::Value::Array || pass.kind != tip_json::Value::Array) return {};

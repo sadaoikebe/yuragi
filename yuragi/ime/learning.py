@@ -43,8 +43,9 @@ from yuragi.lattice.alternation import Plan
 from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_ids
 from .bunsetsu import (Bunsetsu, Candidate, ZenzEvidence, from_words, learnable, learned_row,
                        normal_bunsetsu, word_piece)
+from .config import DEFAULT_RUNTIME_DIR
 
-DEFAULT_LEARNING_PATH = Path.home() / ".yuragi-ime" / "learning.jsonl"
+DEFAULT_LEARNING_PATH = DEFAULT_RUNTIME_DIR / "learning.jsonl"
 USER_WORD_COST = 6000
 COMPACT_MIN_LINES = 5000  # DESIGN「定数」
 LOCK_WAIT_S = 1.0  # a request waits this long at most, well under the broker's ENGINE_HANG_MS (5 s)
