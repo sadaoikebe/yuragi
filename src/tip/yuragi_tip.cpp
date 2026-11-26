@@ -861,7 +861,12 @@ public:
             if (old->ctx == state_->ctx && old->composition) {
                 HRESULT hr = FinalizeState(ec, old);
                 if (FAILED(hr)) {
+                    // The replies waiting here are not written; they count as applied, as when the
+                    // application refuses the session, so the keys behind them still go out.
+                    if (!state_->pending.empty()) state_->applied_seq = state_->pending.back().seq;
+                    state_->pending.clear();
                     state_->BreakContinuity();
+                    PostMessageW(keys_, kKeysMessage, 0, 0);
                     return hr;
                 }
             }
