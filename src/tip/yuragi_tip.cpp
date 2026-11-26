@@ -166,24 +166,27 @@ static const wchar_t* DisabledReason(ITfThreadMgr* tm) {
 
 static bool KeyboardDisabled(ITfThreadMgr* tm) { return DisabledReason(tm) != nullptr; }
 
-static bool KeyboardClosed(ITfThreadMgr* tm) {
-    if (!tm) return true;
+// The thread's open/close (DESIGN「オンとオフ」), or nothing while no one has set it.
+static std::optional<bool> KeyboardOpen(ITfThreadMgr* tm) {
+    if (!tm) return std::nullopt;
     ITfCompartmentMgr* cm = nullptr;
-    if (FAILED(tm->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return false;
-    bool closed = false;
+    if (FAILED(tm->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return std::nullopt;
+    std::optional<bool> open;
     ITfCompartment* c = nullptr;
     if (SUCCEEDED(cm->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &c)) && c) {
         VARIANT v;
         VariantInit(&v);
-        if (SUCCEEDED(c->GetValue(&v)) && v.vt == VT_I4 && v.lVal == 0) closed = true;
+        if (SUCCEEDED(c->GetValue(&v)) && v.vt == VT_I4) open = v.lVal != 0;
         VariantClear(&v);
         c->Release();
     }
     cm->Release();
-    return closed;
+    return open;
 }
 
-static bool OpenKeyboard(ITfThreadMgr* tm, TfClientId id) {
+static bool KeyboardClosed(ITfThreadMgr* tm) { return !tm || KeyboardOpen(tm) == false; }
+
+static bool SetKeyboardOpen(ITfThreadMgr* tm, TfClientId id, bool open) {
     if (!tm || id == TF_CLIENTID_NULL) return false;
     ITfCompartmentMgr* cm = nullptr;
     if (FAILED(tm->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return false;
@@ -193,7 +196,7 @@ static bool OpenKeyboard(ITfThreadMgr* tm, TfClientId id) {
         VARIANT v;
         VariantInit(&v);
         v.vt = VT_I4;
-        v.lVal = 1;
+        v.lVal = open ? 1 : 0;
         changed = SUCCEEDED(c->SetValue(id, &v));
         VariantClear(&v);
         c->Release();
@@ -1147,7 +1150,8 @@ class Tip final : public ITfTextInputProcessorEx,
             public ITfLangBarItemButton,
             public ITfSource,
             public ITfTextLayoutSink,
-            public ITfTextEditSink {
+            public ITfTextEditSink,
+            public ITfCompartmentEventSink {
     enum class Action { Pass, Send, ObserveAlt, Global, Buffer };
     enum class SendResult { Sent, Unavailable, FocusMoved };
     enum class ReplayResult { Sent, Retry, FocusMoved, Foreground, Failed };
@@ -1206,6 +1210,8 @@ public:
             *pp = static_cast<ITfTextLayoutSink*>(this);
         } else if (riid == IID_ITfTextEditSink) {
             *pp = static_cast<ITfTextEditSink*>(this);
+        } else if (riid == IID_ITfCompartmentEventSink) {
+            *pp = static_cast<ITfCompartmentEventSink*>(this);
         } else {
             *pp = nullptr;
             return E_NOINTERFACE;
@@ -1257,7 +1263,10 @@ public:
             cat->Release();
         }
         EnsureWindow();
-        OpenKeyboard(tm_, client_);
+        // DESIGN「オンとオフ」: this window's own on/off comes back (off the first time).
+        WatchOpenClose();
+        SetOpen(!direct_);
+        phase_ = direct_ ? tip_logic::Phase::Direct : tip_logic::Phase::Empty;
         PreserveKeys();
         ITfLangBarItemMgr* lbm = nullptr;
         if (SUCCEEDED(tm_->QueryInterface(IID_ITfLangBarItemMgr, (void**)&lbm))) {
@@ -1290,6 +1299,7 @@ public:
             scope_ctx_->Release();
             scope_ctx_ = nullptr;
         }
+        UnwatchOpenClose();
         if (tm_) {
             if (langbar_) {
                 ITfLangBarItemMgr* lbm = nullptr;
@@ -1323,6 +1333,15 @@ public:
     HRESULT STDMETHODCALLTYPE OnSetFocus(ITfDocumentMgr*, ITfDocumentMgr*) override {
         Budget budget(this);
         FocusMoved();
+        return S_OK;
+    }
+    // The application or Windows opened or closed the keyboard (DESIGN「オンとオフ」). A switch
+    // already on its way to the engine sets the open/close itself when its reply comes.
+    HRESULT STDMETHODCALLTYPE OnChange(REFGUID guid) override {
+        if (guid != GUID_COMPARTMENT_KEYBOARD_OPENCLOSE || setting_open_ || !tm_) return S_OK;
+        Budget budget(this);
+        const bool direct = KeyboardClosed(tm_);
+        if (direct != direct_ && !pending_mode_seq_) SwitchDirect(direct);
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnInitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
@@ -1992,6 +2011,7 @@ private:
                  tip_logic::Phase::Empty);
         if (mode_changed) {
             if (state_) state_->BreakContinuity();
+            SetOpen(!direct_);
             UpdateLangBar();
         }
         pending_ = r.pending;
@@ -2526,7 +2546,7 @@ private:
         }
         if (KeyboardClosed(tm_)) {
             if (!tip_logic::OpensKeyboard(command) || !tip_logic::Toggles(CurrentMode()) ||
-                KeyboardDisabled(tm_) || !ScopeAllowsInput() || !OpenKeyboard(tm_, client_))
+                KeyboardDisabled(tm_) || !ScopeAllowsInput() || !SetOpen(true))
                 return false;
             // Windows was off even if our last reported mode was kana.
             if (command == GlobalCommand::Toggle || command == GlobalCommand::On)
@@ -2550,17 +2570,65 @@ private:
         bool direct = command == GlobalCommand::Toggle ? !direct_ : command == GlobalCommand::Off;
         if (mode) {
             pending_mode_seq_ = SendRequest("set_mode", "\"mode\":" + tip_json::Quote(mode));
-            if (!pending_mode_seq_) input_mode_ = mode;
+            if (!pending_mode_seq_) {
+                input_mode_ = mode;
+                DirectNow(false);
+            }
         } else {
-            pending_mode_seq_ = SendRequest("set_direct", direct ? "\"direct\":true,\"commit\":true" :
-                                                                  "\"direct\":false");
-        }
-        if (!pending_mode_seq_) {
-            direct_ = direct;
-            FinishLocal();
-            UpdateLangBar();
+            SwitchDirect(direct);
         }
         return true;
+    }
+
+    // Direct input on or off. The engine hears of it first, so that what it commits lands before
+    // the keys after it; its reply sets direct_ and the open/close (NoteReply).
+    void SwitchDirect(bool direct) {
+        pending_mode_seq_ = SendRequest("set_direct", direct ? "\"direct\":true,\"commit\":true" :
+                                                              "\"direct\":false");
+        if (!pending_mode_seq_) DirectNow(direct);
+    }
+    // Without the engine: here and now.
+    void DirectNow(bool direct) {
+        direct_ = direct;
+        FinishLocal();
+        SetOpen(!direct);
+        UpdateLangBar();
+    }
+
+    // DESIGN「オンとオフ」: kana input is the keyboard open, direct input closed. Our own change
+    // is not news to OnChange.
+    bool SetOpen(bool open) {
+        if (KeyboardOpen(tm_) == open) return true;
+        setting_open_ = true;
+        const bool done = SetKeyboardOpen(tm_, client_, open);
+        setting_open_ = false;
+        return done;
+    }
+    void WatchOpenClose() {
+        ITfCompartmentMgr* cm = nullptr;
+        if (FAILED(tm_->QueryInterface(IID_ITfCompartmentMgr, (void**)&cm)) || !cm) return;
+        if (SUCCEEDED(cm->GetCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &openclose_)) && openclose_) {
+            ITfSource* src = nullptr;
+            if (SUCCEEDED(openclose_->QueryInterface(IID_ITfSource, (void**)&src))) {
+                if (FAILED(src->AdviseSink(IID_ITfCompartmentEventSink,
+                                           static_cast<ITfCompartmentEventSink*>(this), &openclose_cookie_)))
+                    openclose_cookie_ = TF_INVALID_COOKIE;
+                src->Release();
+            }
+        }
+        cm->Release();
+    }
+    void UnwatchOpenClose() {
+        if (!openclose_) return;
+        ITfSource* src = nullptr;
+        if (openclose_cookie_ != TF_INVALID_COOKIE &&
+            SUCCEEDED(openclose_->QueryInterface(IID_ITfSource, (void**)&src))) {
+            src->UnadviseSink(openclose_cookie_);
+            src->Release();
+        }
+        openclose_cookie_ = TF_INVALID_COOKIE;
+        openclose_->Release();
+        openclose_ = nullptr;
     }
 
     void PreserveKeys() {
@@ -2685,7 +2753,7 @@ private:
     Notice notice_ = Notice::None;
     bool stopped_told_ = false;
     const char* admin_request_ = nullptr;  // waiting for the connection (OpenAdmin)
-    bool direct_ = false;
+    bool direct_ = true;  // kept across Deactivate and ActivateEx: the on/off of this window
     std::string input_mode_ = "hiragana";
     bool composing_ = false, pending_ = false, timer_pending_ = false;
     bool fsm_idle_ = true;
@@ -2706,6 +2774,9 @@ private:
     std::optional<ULONGLONG> deadline_;  // of the call from Windows being handled (Budget)
     bool langbar_ = false;
     ITfLangBarItemSink* lb_sink_ = nullptr;
+    ITfCompartment* openclose_ = nullptr;
+    DWORD openclose_cookie_ = TF_INVALID_COOKIE;
+    bool setting_open_ = false;
 };
 
 // Read-only sessions for the input scope, notices, and the input's left context.
