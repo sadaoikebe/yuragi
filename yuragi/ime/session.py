@@ -1358,8 +1358,10 @@ class ImeSession:
         return self._commit_and_pass_key()
 
     def _accept_candidate(self) -> None:
+        """Mac's Return in the candidate window: the window closes, also at the last segment."""
         self.segments[self.focus].fixed = True
         self._move_segment(1)
+        self._clear_cands()
 
     def _select_row(self, row: int, *, close: bool = False) -> None:
         if self.focus >= 0 and row < len(self.candidates):

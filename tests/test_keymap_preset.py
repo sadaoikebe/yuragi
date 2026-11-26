@@ -167,6 +167,17 @@ class OneTableTest(unittest.TestCase):
         self.assertEqual(JIS.code(ctrl_semicolon), 0xBB | CTRL << 8)
         self.assertEqual(JIS.chord(0xBA, CTRL), Chord(":", CTRL))
 
+    def test_macos_on_jis_switches_with_a_lone_thumb_key_only_when_there_is_no_input(self):
+        # As Mac's 英数 and かな keys; with input, a lone thumb key converts as Space does.
+        (self.dir / "keymap.json").write_text(json.dumps({"use": "macos"}), encoding="utf-8")
+        compiled = keymap.load_keymap(self.dir).compile()
+        phases = ("empty", "composing", "converting")
+        for name, alone in (("無変換", "ime_off"), ("変換", "mode_hiragana"), ("Space", "insert_space")):
+            self.assertEqual([compiled.command_for(phase, Chord.parse(name)).id for phase in phases],
+                             [alone, "convert", "next_candidate"], name)
+        for name in ("英数", "半角/全角"):
+            self.assertEqual(compiled.command_for("empty", Chord.parse(name)).id, "ime_toggle", name)
+
     def test_mode_keys_are_looked_up_without_the_modifier_that_made_them(self):
         self.assertEqual(ANSI.chord(VK_DBE_ALPHANUMERIC, SHIFT), Chord("英数"))  # Shift+CapsLock
         self.assertEqual(ANSI.chord(VK_DBE_DBCSCHAR, CTRL), Chord("半角/全角", CTRL))  # Ctrl+`

@@ -131,6 +131,16 @@ class PartialCommitTest(unittest.TestCase):
                          ("converting", "", 1))
         self.assertEqual(k.press(VK_RETURN)["commit"], opened["composition"])
 
+    def test_macos_candidate_enter_at_the_last_segment_closes_the_window(self):
+        k = self.typed("かんじ")
+        k.s.keymap = self.macos_keymap()
+        k.convert()
+        opened = k.press(VK_DOWN)
+        self.assertEqual(opened["phase"], "selecting")
+        closed = k.press(VK_RETURN)
+        self.assertEqual((closed["phase"], closed["commit"]), ("converting", ""))
+        self.assertEqual(k.press(VK_RETURN)["commit"], closed["composition"])
+
     def test_macos_backspace_commits_without_the_last_character_and_learns_the_choice(self):
         k = self.typed("こうせいをみる", learning=True)
         k.s.keymap = self.macos_keymap()

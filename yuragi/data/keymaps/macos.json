@@ -6,8 +6,12 @@
   "bindings": [
     ["global", "Ctrl+Space", "ime_toggle"],
     ["global", "漢字", "ime_toggle"],
+    ["global", "英数", "ime_toggle"],
+    ["global", "半角/全角", "ime_toggle"],
     ["global", "ImeOn", "mode_hiragana"],
     ["global", "ImeOff", "ime_off"],
+    ["global", "変換", "mode_hiragana"],
+    ["global", "無変換", "ime_off"],
 
     ["empty", "Space", "insert_space"],
     ["empty", "Shift+Space", "insert_alt_space"],
@@ -16,6 +20,8 @@
     ["direct", "Ctrl+Shift+R", "reconvert"],
 
     ["composing", "Space", "convert"],
+    ["composing", "変換", "convert"],
+    ["composing", "無変換", "convert"],
     ["composing", "Shift+Space", "convert"],
     ["composing", "PageUp", "convert"],
     ["composing", "PageDown", "convert"],
@@ -108,6 +114,8 @@
     ["predicting", "End", "noop"],
 
     ["converting", "Space", "next_candidate"],
+    ["converting", "変換", "next_candidate"],
+    ["converting", "無変換", "next_candidate"],
     ["converting", "Shift+Space", "open_candidates"],
     ["converting", "Up", "open_candidates"],
     ["converting", "Down", "open_candidates"],
