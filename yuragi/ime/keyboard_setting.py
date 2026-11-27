@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import sys
 
+from typing import Mapping
+
+from yuragi.chord.fsm import thumb_sides
 from yuragi.chord.keys import DEFAULT_KEYBOARD, KEYBOARDS, VK_OEM_3, Keyboard
 
 _JAPANESE = 0x0411
@@ -22,6 +25,14 @@ def keyboard_for(vk_right_of_p: int | None, choice: str = "auto") -> Keyboard:
     if vk_right_of_p != VK_OEM_3:
         return DEFAULT_KEYBOARD
     return KEYBOARDS["jis106" if choice == "auto" else choice]
+
+
+def space_sides(keyboard: Keyboard, choice: str = "auto") -> Mapping[str, str]:
+    """The thumb keys' sides (config.json "space_thumb"). On 101 Space is the only thumb key,
+    so it stays either thumb's whatever the choice: one side would leave the other no chord."""
+    if choice == "auto" or keyboard is DEFAULT_KEYBOARD:
+        return thumb_sides()
+    return thumb_sides(choice)
 
 
 def japanese_vk_right_of_p() -> int | None:

@@ -354,9 +354,11 @@ class Engine:
 
     # -- sessions ----------------------------------------------------------------
     def new_session(self):
+        from yuragi.chord.fsm import ChordFsm
         from yuragi.ime.session import ImeSession
         loaded = self.loaded
         return ImeSession(
+            fsm=ChordFsm(sides=loaded.fsm.sides),
             _table=loaded._table, _lex=loaded._lex, _symbols=loaded._symbols,
             _learning=loaded._learning, personal=loaded.personal,
             prediction=loaded.prediction, predict_index=loaded.predict_index, keymap=self.keymap,

@@ -45,13 +45,14 @@ to an AmbShift already emitted.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Mapping
 
 TIMEOUT_MS = 80
 OVERLAP_MS = 20
 JOIN_MS = 30  # one thumb stroke presses its second key within this of the first
 
-# The thumb keys only one thumb presses. Space is either thumb's.
+# The thumb keys only one thumb presses. Space is either thumb's, unless the user
+# gives it one (thumb_sides): then it is a thumb key like 無変換 and 変換, with no carrier.
 THUMB_SIDE = {"muhenkan": "left", "henkan": "right"}
 _OTHER = {"left": "right", "right": "left"}
 
@@ -112,19 +113,25 @@ class ThumbOver:
 Token = Plain | AmbShift | ThumbTap | ThumbJoin | ThumbOver
 
 
-def thumb_side(struck: Iterable[str], held: Iterable[str] = (), over: Iterable[str] = ()) -> str | None:
+def thumb_sides(space: str | None = None) -> Mapping[str, str]:
+    """The thumb keys one thumb presses: THUMB_SIDE, and Space when it is given a side."""
+    return THUMB_SIDE if space is None else {**THUMB_SIDE, "space": space}
+
+
+def thumb_side(struck: Iterable[str], held: Iterable[str] = (), over: Iterable[str] = (),
+               sides: Mapping[str, str] = THUMB_SIDE) -> str | None:
     """The thumb the evidence settles, or None (no evidence, or a mis-stroke giving both).
 
     A stroke that pressed 無変換 is the left thumb's. A stroke made while
     another one held 変換 is the left thumb's too: the right one was busy.
     """
-    sides = {THUMB_SIDE[key] for key in struck if key in THUMB_SIDE}
-    sides |= {_OTHER[THUMB_SIDE[key]] for key in (*held, *over) if key in THUMB_SIDE}
-    return next(iter(sides)) if len(sides) == 1 else None
+    found = {sides[key] for key in struck if key in sides}
+    found |= {_OTHER[sides[key]] for key in (*held, *over) if key in sides}
+    return next(iter(found)) if len(found) == 1 else None
 
 
-def _one_thumb(keys: Iterable[str]) -> bool:
-    return len({THUMB_SIDE[key] for key in keys if key in THUMB_SIDE}) < 2
+def _one_thumb(keys: Iterable[str], sides: Mapping[str, str]) -> bool:
+    return len({sides[key] for key in keys if key in sides}) < 2
 
 
 @dataclass(slots=True)
@@ -145,6 +152,7 @@ class ChordFsm:
     timeout_ms: int = TIMEOUT_MS
     overlap_ms: int = OVERLAP_MS
     join_ms: int = JOIN_MS
+    sides: Mapping[str, str] = field(default_factory=thumb_sides)  # thumb key → its thumb
     state: State = "S1"
     held: dict[str, int] = field(default_factory=dict)  # thumb key → down time
     stroke: _Stroke | None = None  # the last thumb stroke begun
@@ -207,7 +215,7 @@ class ChordFsm:
     def _fits(self, key: str, now: int) -> bool:
         """The key is the fresh stroke's own: pressed soon after its first, by the same thumb."""
         stroke = self.stroke
-        return now - stroke.start <= self.join_ms and _one_thumb((*stroke.keys, key))
+        return now - stroke.start <= self.join_ms and _one_thumb((*stroke.keys, key), self.sides)
 
     def _plain(self) -> list[Token]:
         assert self.m_key is not None
@@ -226,7 +234,7 @@ class ChordFsm:
         at = (self.press, self.turn)
         token = AmbShift(self.m_key, *at, tuple(stroke.keys), stroke.before, origin=at)
         stroke.use, stroke.token = "chord", at
-        if "space" in stroke.keys and "space" in self.held:
+        if self._carries(stroke):
             self.carrier = "chord"
         self.m_key = None
         return [token]
@@ -248,7 +256,7 @@ class ChordFsm:
             out += [ThumbOver(self.press, self.turn, key) for key in stroke.over]
         out.append(ThumbTap(stroke.first))
         stroke.use = "tap"
-        if "space" in stroke.keys and "space" in self.held:
+        if self._carries(stroke):
             self.carrier = "tap"
             if self.m_key is not None:
                 self.m_under, self.m_from, self.m_to = "tap", self.m_time, None
@@ -256,11 +264,15 @@ class ChordFsm:
         self.turn = 0
         return out
 
+    def _carries(self, stroke: _Stroke) -> bool:
+        """The used stroke leaves a carrier: its Space is still down, and Space is either thumb's."""
+        return "space" in stroke.keys and "space" in self.held and "space" not in self.sides
+
     def _cover(self, now: int) -> int:
         return (now if self.m_to is None else min(now, self.m_to)) - self.m_from
 
     def _no_free_thumb(self) -> bool:
-        return not _one_thumb(self.m_held)
+        return not _one_thumb(self.m_held, self.sides)
 
     def _follower(self, now: int) -> list[Token]:
         """A character under the carrier, at the carrier's release or the next character: the cover comparison."""
@@ -405,7 +417,7 @@ class ChordFsm:
                 out = [ThumbJoin(*stroke.token, key)]
             if self.m_key is not None:
                 self.m_held.add(key)
-            if key == "space" and stroke.use == "chord":
+            if key == "space" and stroke.use == "chord" and "space" not in self.sides:
                 self.carrier = "chord"
                 if self.m_key is not None:
                     self.m_under, self.m_from, self.m_to = "chord", now, None

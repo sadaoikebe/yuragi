@@ -13,11 +13,11 @@ from datetime import datetime
 from itertools import islice
 from math import isfinite
 import time
-from typing import Callable
+from typing import Callable, Mapping
 import unicodedata
 
 from yuragi.chord.fsm import (
-    AmbShift, ChordFsm, Plain, ThumbJoin, ThumbOver, ThumbTap, Token, thumb_side,
+    THUMB_SIDE, AmbShift, ChordFsm, Plain, ThumbJoin, ThumbOver, ThumbTap, Token, thumb_side,
 )
 from yuragi.chord.keys import (
     ALT_VKS, DEFAULT_KEYBOARD, MODIFIER_VKS, SHIFT, SPACE, VK_SPACE, Chord, Keyboard,
@@ -110,7 +110,8 @@ class FrozenText(str):
     __slots__ = ()
 
 
-def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
+def to_lattice_token(tok: Token | Literal, table: dict,
+                     sides: Mapping[str, str] = THUMB_SIDE) -> dict | None:
     if isinstance(tok, Literal):
         return {"kind": "literal", "text": FrozenText(tok.text) if tok.frozen else tok.text}
     if isinstance(tok, Plain):
@@ -126,7 +127,7 @@ def to_lattice_token(tok: Token | Literal, table: dict) -> dict | None:
             k = table["keys"].get(tok.key, {}).get(face)
             if k:
                 faces[face] = k
-        side = thumb_side(tok.struck, tok.held, tok.over)
+        side = thumb_side(tok.struck, tok.held, tok.over, sides)
         if side is not None:
             # The thumb keys pressed say which thumb it was (JIS 無変換/変換): only its face is left.
             faces = {face: k for face, k in faces.items() if face == side}
@@ -1620,7 +1621,7 @@ class ImeSession:
             if isinstance(tok, (ThumbJoin, ThumbOver)):
                 self._add_evidence(tok)
                 continue
-            mapped = to_lattice_token(tok, self._table)
+            mapped = to_lattice_token(tok, self._table, self.fsm.sides)
             if mapped is None:
                 # An empty face (] alone, Q right, ...): nothing is typed.
                 if isinstance(tok, AmbShift):
@@ -1670,7 +1671,7 @@ class ImeSession:
 
     def _carry_side(self, tok: AmbShift) -> None:
         """A chord that typed nothing still says which thumb it was: its press keeps the direction."""
-        side = thumb_side(tok.struck, tok.held, tok.over)
+        side = thumb_side(tok.struck, tok.held, tok.over, self.fsm.sides)
         press = self._press_alias.get(tok.press, tok.press)
         if side is not None and press is not None and press not in self._carry:
             self._carry[press] = frozenset((face_of(side, tok.turn),))
@@ -1691,8 +1692,8 @@ class ImeSession:
             new = replace(old, struck=(*old.struck, evidence.key))
         else:
             new = replace(old, over=(*old.over, evidence.key))
-        mapped = to_lattice_token(new, self._table)
-        if mapped == to_lattice_token(old, self._table):
+        mapped = to_lattice_token(new, self._table, self.fsm.sides)
+        if mapped == to_lattice_token(old, self._table, self.fsm.sides):
             self.tokens[index] = new
             return
         start, end = self._edit_bounds()
@@ -1789,7 +1790,7 @@ class ImeSession:
     def _lattice(self) -> list[dict]:
         out = []
         for t in self.tokens:
-            d = to_lattice_token(t, self._table)
+            d = to_lattice_token(t, self._table, self.fsm.sides)
             assert d is not None  # _ingest drops empty faces before inserting tokens.
             out.append(d)
         if self._carry:

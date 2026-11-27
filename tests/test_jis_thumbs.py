@@ -5,7 +5,7 @@ w is か; with the left thumb え, with the right が. q has a left face only (�
 """
 import unittest
 
-from yuragi.chord.fsm import AmbShift
+from yuragi.chord.fsm import AmbShift, ChordFsm, thumb_sides
 from yuragi.chord.keys import (
     KEYBOARDS, SHIFT, SPACE, VK_CONVERT, VK_ESCAPE, VK_NONCONVERT, VK_RETURN, VK_SPACE, Chord,
 )
@@ -35,9 +35,10 @@ LEX = MozcLex({"え": [Entry("絵", "え", 1, 1, 100)], "が": [Entry("蛾", "�
 
 
 class Typist(Keys):
-    def __init__(self):
+    def __init__(self, space=None):
+        """space: the thumb the user gave Space (config.json "space_thumb"), or None for either."""
         super().__init__(ImeSession(_table=load_table(JIS.kana), _lex=LEX, keyboard=JIS,
-                                    keymap=Keymap(BINDINGS)))
+                                    keymap=Keymap(BINDINGS), fsm=ChordFsm(sides=thumb_sides(space))))
 
     def play(self, spec):
         """Spec "w+0 O+12 H+20 w-70": + is down, - is up, at ms from now; O N H are Space, 無変換, 変換."""
@@ -70,6 +71,23 @@ class ThumbEvidenceTest(unittest.TestCase):
                 k = Typist()
                 k.play(spec)
                 self.assertEqual(k.faces(), faces)
+
+    def test_a_space_given_a_thumb_is_that_thumbs(self):
+        for space, faces in ((None, ["えが"]), ("left", ["え"]), ("right", ["が"])):
+            with self.subTest(space):
+                k = Typist(space)
+                k.play("w+0 O+10 w-60 O-70")
+                self.assertEqual(k.faces(), faces)
+
+    def test_a_character_under_a_space_given_a_thumb_is_plain(self):
+        """As under 変換: the other thumb cannot be on that Space, so it carries no chord."""
+        spec = "w+0 O+10 w-40 e+60 e-120 O-150"
+        k = Typist()
+        k.play(spec)
+        self.assertEqual(len(k.faces()), 2)
+        k = Typist("right")
+        self.assertEqual(k.play(spec)["composition"], "蛾た")
+        self.assertEqual(k.faces(), ["が"])
 
     def test_a_face_that_is_empty_types_nothing(self):
         k = Typist()

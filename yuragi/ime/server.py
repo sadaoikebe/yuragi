@@ -37,7 +37,9 @@ from pathlib import Path
 
 from yuragi.ime.bunsetsu import candidate_note
 from yuragi.ime.session import ImeSession
+from yuragi.chord.fsm import ChordFsm
 from yuragi.chord.keys import DEFAULT_KEYBOARD
+from yuragi.ime.keyboard_setting import space_sides
 from yuragi.ime.learning import DEFAULT_LEARNING_PATH, LearningStore
 from yuragi.ime.personal import DEFAULT_PERSONAL_PATH, PersonalLexicon
 from yuragi.ime import power
@@ -298,9 +300,11 @@ def load_session(args, *, lex=None, keyboard=None) -> ImeSession:
     keyboard: Windows' keyboard setting (the engine reads it); 101 when None.
     """
     store = LearningStore(args.learning_file) if args.learning == "on" else None
+    keyboard = keyboard or DEFAULT_KEYBOARD
+    sides = space_sides(keyboard, getattr(args, "space_thumb", "auto"))
     sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
                       prediction=getattr(args, "prediction", DEFAULT_PREDICTION),
-                      keyboard=keyboard or DEFAULT_KEYBOARD)
+                      keyboard=keyboard, fsm=ChordFsm(sides=sides))
     sess.load()
     if sess.prediction != "off":
         # Sort the base readings once. Personal additions have their own small index.

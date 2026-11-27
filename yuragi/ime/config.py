@@ -1,11 +1,13 @@
 """The engine's settings file, ~/.yuragi-ime/config.json.
 
-Four settings, each one of a few values (the first is the default):
+Five settings, each one of a few values (the first is the default):
 
   learning     "on" or "off": learn from conversions (DESIGN「学習履歴のファイル」)
   prediction   "auto", "tab" or "off": continuations of unconverted input
   lm_rescore   true or false: rescore the candidates with the language model
   keyboard     "auto" or "kb232": a JIS keyboard Windows cannot tell from kbd106 (docs/JIS.md §2)
+  space_thumb  "auto", "right" or "left": the thumb that presses Space on a JIS keyboard
+               ("auto": either, decided at conversion)
 
 A key the engine does not know is ignored. No file means the defaults; a file
 that cannot be used (broken JSON, a wrong value) means the defaults too, and
@@ -28,6 +30,7 @@ SETTINGS = {
     "prediction": ("auto", "tab", "off"),
     "lm_rescore": (True, False),
     "keyboard": ("auto", "kb232"),
+    "space_thumb": ("auto", "right", "left"),
 }
 DEFAULTS = {name: values[0] for name, values in SETTINGS.items()}
 
