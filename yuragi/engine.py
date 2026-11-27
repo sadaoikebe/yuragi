@@ -243,7 +243,7 @@ class Engine:
         settings = self.read_settings(args, config, server)
         self.settings = settings
         from yuragi.ime.keyboard_setting import system_keyboard
-        keyboard = system_keyboard()
+        keyboard = system_keyboard(settings.keyboard)
         log(f"keyboard: {keyboard.name}")
 
         with server.freeze_after_dictionary_load():

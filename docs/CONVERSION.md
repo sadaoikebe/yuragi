@@ -467,8 +467,9 @@ small は CPU で 82 ms（2 CPU で 156 ms）。文を打つときの 1 回の�
 
 ## 10. 設定
 
-`~/.yuragi-ime/config.json` の項目は 3 つ（`yuragi/ime/config.py`。先頭が既定値）:
-`learning`（`on`／`off`）、`prediction`（`auto`／`tab`／`off`）、`lm_rescore`（`true`／`false`）。
+`~/.yuragi-ime/config.json` の項目は 4 つ（`yuragi/ime/config.py`。先頭が既定値）:
+`learning`（`on`／`off`）、`prediction`（`auto`／`tab`／`off`）、`lm_rescore`（`true`／`false`）、
+`keyboard`（`auto`／`kb232`。[JIS.md](JIS.md) §2）。
 
 - 知らないキーは無視する。値が選択肢に合わない・JSON のオブジェクトでないときは、すべて既定値で動き、ログに 1 行残す。
 - 読むのはエンジンの起動時。設定ウィンドウの「設定」タブで書き換え、知っているキーだけを一時ファイルに書いてから置き換える。
