@@ -19,6 +19,7 @@ from tests.support import Keys, small_lex, type_plain
 VK_SPACE, VK_RETURN, VK_LEFT, VK_UP, VK_DOWN = 0x20, 0x0D, 0x25, 0x26, 0x28
 VK_RIGHT, VK_ESC, VK_F7, VK_END, VK_HOME = 0x27, 0x1B, 0x76, 0x23, 0x24
 VK_EISU, VK_PAGEUP = 0xF0, 0x21  # Shift+CapsLock on US delivers 英数
+VK_PAGEDOWN, VK_CONVERT, VK_NONCONVERT = 0x22, 0x1C, 0x1D
 
 
 class PartialCommitTest(unittest.TestCase):
@@ -182,6 +183,62 @@ class PartialCommitTest(unittest.TestCase):
         typed = k.plain("2")
         self.assertEqual((k.committed, typed["phase"], typed["composition"]),
                          (prediction["composition"], "composing", "２"))
+
+    def japanist_keymap(self):
+        directory = self.path.parent
+        settings = load_keymap(directory, list_presets=True)
+        self.assertIn("japanist", settings.presets)
+        settings.use = "japanist"
+        settings.save(directory)
+        return load_keymap(directory).compile()
+
+    def thumb(self, k, vk, mods=None):
+        """A lone 変換 or 無変換 (the thumb keys decide on release)."""
+        k.send("down", vk, mods, step=200)
+        return k.send("up", vk, mods)
+
+    def test_japanist_up_down_move_and_shift_resizes_then_henkan_converts_the_segment(self):
+        k = self.typed("わたしはがっこうにいく")
+        k.s.keymap = self.japanist_keymap()
+        converted = self.thumb(k, VK_CONVERT)
+        self.assertEqual(self.surfaces(converted), ["私は", "学校に", "行く"])
+        self.assertEqual(k.press(VK_DOWN)["focus"], 1)
+        shrunk = k.press(VK_UP, ["shift"])
+        self.assertEqual((shrunk["phase"], self.surfaces(shrunk)),
+                         ("resizing", ["私は", "がっこう", "に", "行く"]))
+        grown = k.press(VK_DOWN, ["shift"])
+        self.assertEqual((grown["phase"], self.surfaces(grown)[1]), ("resizing", "がっこうに"))
+        k.press(VK_UP, ["shift"])
+        again = self.thumb(k, VK_CONVERT)
+        self.assertEqual((again["phase"], self.surfaces(again)),
+                         ("converting", ["私は", "学校", "に", "行く"]))
+        self.assertEqual(k.press(VK_UP)["focus"], 0)
+
+    def test_japanist_henkan_steps_ctrl_muhenkan_steps_back_and_page_keys_turn_pages(self):
+        k = self.typed("かんじ")
+        k.s.keymap = self.japanist_keymap()
+        self.thumb(k, VK_CONVERT)
+        opened = self.thumb(k, VK_CONVERT)
+        self.assertEqual((opened["phase"], opened["cand_index"]), ("selecting", 1))
+        back = k.press(VK_NONCONVERT, ["ctrl"])
+        self.assertEqual((back["phase"], back["cand_index"]), ("selecting", 0))
+        self.assertTrue(back["has_next_page"])
+        turned = k.press(VK_PAGEDOWN)
+        self.assertEqual((turned["phase"], turned["candidate_page"]), ("selecting", 1))
+        self.assertEqual(k.press(VK_PAGEUP)["candidate_page"], 0)
+        last = k.press(VK_END)  # on the last page: its own row of candidates
+        self.assertEqual((last["candidate_page"], last["composition"]), (1, last["candidates"][-1]))
+        self.assertEqual(k.press(VK_HOME)["composition"], back["candidates"][0])
+
+    def test_japanist_muhenkan_leaves_the_reading_and_space_commits_before_a_space(self):
+        k = self.typed("かんじ")
+        k.s.keymap = self.japanist_keymap()
+        self.thumb(k, VK_CONVERT)
+        kept = self.thumb(k, VK_NONCONVERT)
+        self.assertEqual((kept["composition"], kept["commit"]), ("かんじ", ""))
+        spaced = self.thumb(k, VK_SPACE)
+        self.assertEqual((k.committed, spaced["phase"], spaced["composition"]),
+                         ("かんじ", "composing", "　"))
 
     def test_compounds_are_one_interval_and_can_still_be_split(self):
         for reading in ("れんらくする", "ごたんとうしゃ", "じゅうまんえん"):

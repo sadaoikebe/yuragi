@@ -24,7 +24,7 @@
 | 5 | 設定ファイル | `~/.yuragi-ime/keymap.json`。旧 MS-IME と同じく、プリセットか「ユーザー定義」を選ぶ。ユーザー定義は**プリセット＋差分**で持つ（§5） |
 | 6 | Space（親指キー） | 表の `Space` は「Space の単独打鍵」。修飾付きの Space は親指キーにしない（§4） |
 | 7 | 文字キー | 入力なし・入力中では常に文字。変換中より先の局面でだけ割り当てられる（§4） |
-| 8 | 割り当てのないキー | 入力がある間、「MS-IME」では確定してアプリに通し、「macOS」では入力を残す。Alt の押下では確定する（§4.3） |
+| 8 | 割り当てのないキー | 入力がある間、「MS-IME」では確定してアプリに通し、「macOS」「Japanist」では入力を残す。Alt の押下では確定する（§4.3） |
 | 9 | オン/オフ・モードのキー、キーを送る | TIP が自分で実行する「常時」の割り当て。Alt 付きのものは TSF の PreservedKey に登録する（§7.5） |
 | 10 | キーの出来事の扱い | `OnTestKeyDown` と `OnKeyDown` は同じ答えを返す。up は食べない（§7.3、§7.4） |
 | 11 | 反映 | 設定ウィンドウで保存 → エンジンが読み直す（再起動しない）→ 全アプリの TIP に配る（§8.3） |
@@ -280,7 +280,7 @@ Mozc のコマンド名との対応表は持たない。プリセットは手で
 | 局面 | 修飾なし・Shift・Ctrl 付き | Alt 付き（Ctrl なし）・Win 付き |
 |---|---|---|
 | direct、empty | アプリに通す | アプリに通す |
-| composing 以降 | 「MS-IME」は **確定してアプリに通す**（`commit_and_pass`）。「macOS」は **食べて入力を残す**（`noop`） | アプリに通す（Alt を押したときに確定している） |
+| composing 以降 | 「MS-IME」は **確定してアプリに通す**（`commit_and_pass`）。「macOS」「Japanist」は **食べて入力を残す**（`noop`） | アプリに通す（Alt を押したときに確定している） |
 
 - MS-IME は、入力がある間、働きの無いキーの多くを確定してからアプリに通す（Insert、PageUp、Ctrl+C、Ctrl+V、Ctrl+Shift+矢印など）。
   食べて何もしないキー（Shift+Enter など）と、確定せずに通すキー（F1、Ctrl+Tab、Ctrl+Home など）もある。これらは MS-IME のプリセットに `noop`・`pass_through` の行として書く。
@@ -350,6 +350,60 @@ TIP はどちらのファイルも読まない（§8）。
   入力中の文字に空白を足す Option＋Space（全角）も同じ理由で無い。Control＋Option＋Space（半角）は Ctrl+Alt+Space として局面別に割り当てられるが、
   Mac ではシステムの「次の入力ソースへ」のショートカットが有効なら IME に届かないキーなので（[macos.md](keybind/macos.md) §1・§6）、行を置かない。入力中の文字に空白を足したいときは、`insert_full_space`・`insert_half_space` を利用者が割り当てる（§5.3）。
 - 確定取り消し、再変換、候補の辞書情報やタブ、macOS のライブ変換は未対応。入力中の Ctrl+Q と、予測候補や変換候補の窓での Home / End は何もしない。
+
+#### Japanist プリセット
+
+設定ウィンドウの「キー」タブから「Japanist」を選んで保存する。割り当ては [japanist.json](../yuragi/data/keymaps/japanist.json)。
+富士通 Japanist 2003 の既定のキー割り当て（親指シフトキーボード指定時の表と、その利用者の記録。出典は [NOTICE.md](../NOTICE.md) の「Other references」）を、ゆらぎにあるコマンドへ写した。
+新しいコマンドは作らず、行き先の無い働きは割り当てない（下の「再現しないもの」）。単文節変換や入力予測などエンジンの振る舞いと、かな配列（NICOLA）は他のプリセットと同じ。
+
+- 変換は変換キー。Space は Japanist と同じく空白で、変換しない。変換を続けて押すと次の候補、Ctrl+無変換で前の候補（Japanist の「前変換」）。
+- 変換作業中（変換済み・候補窓・文節長変更中）の ↑・↓ は文節の移動、Shift+↑・Shift+↓ は文節を縮める・伸ばす。←・→ は入力中と文節内入力（§3.1）のカーソル移動で、変換済み・候補窓・文節長変更中は何もしない。
+- 入力中・変換中の無変換は、読み（ひらがな）を候補として選ぶ。Japanist と同じく、次の文字を打つと確定する。
+- 割り当ての無いキーは、入力がある間は食べて入力を残す（`unbound_input` は `noop`。Japanist の「読み入力中の未設定キーはアプリケーションに通知する」の既定がオフであることに合わせた）。
+- 漢字・英数・半角/全角・ひらがな・カタカナ・ImeOn・ImeOff の行は MS-IME のプリセットと同じ（モードのキーの扱いをプリセットでそろえる）。
+- 変換キーの無い US キーボード（`kbd101`）では、このプリセットのままでは変換できない（表はキーボードによらず 1 枚。§4.1）。Space で変換したいときは、ユーザー定義で `composing` の `Space` に `convert`、`converting` の `Space` に `next_candidate` を割り当てる（§5.3）。
+
+| Japanist の働き（既定のキー） | ゆらぎのコマンド（局面） | ずれ |
+|---|---|---|
+| かな漢字 on/off（漢字） | `ime_toggle`（global） | — |
+| 変換（変換） | `convert`（composing）、`next_candidate`（converting 以降）、`convert_segment`（resizing）、`convert_edited_segment`（editing） | — |
+| 再変換（確定済みの文字で変換） | `reconvert`（empty） | ゆらぎの再変換はまだ作っていない（§3.2）。作るまでは行が無いのと同じ |
+| 無変換（無変換） | `to_hiragana`（composing、converting 以降） | 候補窓が開く。続けて押すと、親指の面が紛らわしい読みの別のひらがなへ進む |
+| 前変換（Ctrl+無変換） | `prev_candidate`（converting 以降、predicting） | — |
+| 入力予測の次・前の候補（Ctrl+変換・Ctrl+無変換） | `predict`（composing の Ctrl+変換）、`next_candidate`・`prev_candidate`（predicting） | 予測候補が出ていない入力中の Ctrl+変換は、Japanist では語尾変換 |
+| 予測候補の削除（Ctrl+M、Delete） | `forget_candidate`（predicting） | ゆらぎは予測の学習を忘れる。辞書の単語は消さない |
+| 英字に戻す（Ctrl+X） | `to_half_alnum`（composing 以降） | 半角に決まる。確定済みの文字には効かない |
+| 単語登録（Ctrl+T） | `open_word_register`（empty） | 単語登録のタブを開くだけで、読みや候補は渡らない。入力がある間の Ctrl+T は何もしない |
+| 確定（Enter） | `commit`（composing 以降） | — |
+| 取消（Esc） | `cancel`（composing）、`cancel_conversion`（converting 以降、predicting）、`cancel_resize`（resizing） | — |
+| 後退（BackSpace） | `delete_before`（composing、converting 以降）、`cancel_conversion`（predicting） | — |
+| 削除（Delete） | `delete_after`（composing、editing） | 変換済みでは何もしない |
+| 左右・先頭・末尾へのカーソル移動（←・→・Home・End） | `cursor_left`・`cursor_right`・`cursor_home`・`cursor_end`（composing、editing） | 文節内入力では入力全体の端で止まる |
+| 上下へのカーソル移動（↑・↓。入力中） | `commit_and_pass`（composing） | 確定してからアプリに通す |
+| 左・右文節移動（↑・↓。変換作業中） | `segment_left`・`segment_right`（converting 以降） | — |
+| 文節を 1 文字縮める・伸ばす（Shift+↑・Shift+↓） | `segment_shrink`・`segment_expand`（converting 以降） | ゆらぎは 1 打ずつ（§3.2）。文節長変更中になり、変換で変換し直す |
+| 次・前の候補群（PageDown・PageUp） | `next_page`・`prev_page`（selecting） | 候補窓が開いているときだけ |
+| 候補の先頭・最後（Home・End。変換作業中） | `candidate_first`・`candidate_last`（selecting） | 候補窓が開いているときだけ |
+| 候補の番号 | `select_candidate_1`〜`9`（selecting） | — |
+| 空白（Space） | `insert_space`（empty）、`insert_full_space`（composing 以降） | 入力中は入力中の文字に全角空白を足し、変換済みなら確定してから空白で次の入力を始める（§3.2）。半角にする設定は無い |
+| 挿入（Insert） | `commit_and_pass`（composing、converting） | 確定してからアプリに通す |
+
+再現しないもの（割り当てず、入力がある間は何もしない。入力が無いときはアプリに通る）:
+
+| Japanist の働き（既定のキー） | 理由 |
+|---|---|
+| 語尾変換（Ctrl+変換。変換作業中） | 末尾の文節に移って変換し直す 1 つのコマンドが無い（`segment_last` と `next_candidate` の 2 打になる） |
+| 区切直し変換（Shift+変換） | 文節の境界を変えずに文節長変更に入るコマンドが無い。境界は Shift+↑・Shift+↓ で直す |
+| クイック単漢字（Ctrl+J）、クイック類義語（Ctrl+I）、クイック和英（Ctrl+K） | 単漢字・類義語・和英の辞書と候補の出し方が無い |
+| マルチボード（Ctrl+D）、部首一覧（Ctrl+Shift+B）、記号一覧（Ctrl+Shift+L）、郵便番号辞書検索（Ctrl+Shift+M） | 入力の補助の窓が無い |
+| 単語抹消（Ctrl+M。予測候補以外） | 辞書から単語を消す画面が無い |
+| 挿入／上書きの切り替え（Ctrl+Shift+A） | 上書きの入力が無い |
+| 消去（Ctrl+Shift+BackSpace） | 出典から働きの中身を確かめられない |
+| ブリッジメニュー（Shift+F10、Ctrl+→） | ゆらぎの IME メニュー（`open_menu`）は入力なしの局面だけで、そこでこのキーを食べるとアプリの右クリックメニューと単語単位の移動を奪う |
+| 動作環境（Ctrl+Alt+漢字） | モードのキーに修飾付きの行は書けない（§4.1）。設定ウィンドウを開く `open_settings` は利用者が別のキーに割り当てる |
+| ローマ字入力の on/off（ローマ字） | ゆらぎの入力は NICOLA だけ（§5.1） |
+| 英数・ひらがな・半角/全角の Japanist の意味（英数モード、ひらがなモード、文字幅の切り替え） | 上のとおり MS-IME のプリセットにそろえた |
 
 ### 5.3 利用者の設定の形式（ユーザー定義）
 

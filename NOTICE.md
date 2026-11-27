@@ -274,8 +274,13 @@ from a photo and traced into an outline (`assets/icon/src/glyph.json`); the
 | CorvusSKK | MIT ほか。TSF の読み物。ソースは同梱していない |
 | Mozc win32 tip | BSD-3-Clause。作法の参照。ソースは同梱していない |
 | NICOLA 配列規格書（日本語入力コンソーシアム） http://nicola.sunicom.co.jp/spec/kikaku.htm | かな配列と同時打鍵の判定規則はこの規格に基づく |
+| 「Ｊａｐａｎｉｓｔのキー割り当て（デフォルト設定）～親指シフト・キーボード（FMV－KB２３２、FKB７６２８）指定時～」（shibue、ブログ「東京の空の下より」、2011年） http://dohenkutsu.cocolog-nifty.com/japanist_key_assign.pdf | Japanist プリセット（`yuragi/data/keymaps/japanist.json`）の、キーの働きの参照 |
 
 `data/nicola_a.json` is a hiragana face table written from the kana
 assignment in that specification. `data/nicola_j.json` is the same for the
 JIS keyboard, following the specification and the NICOLA JIS draft cited in
 `docs/JIS-LAYOUT.md`.
+
+Japanist is a product of Fujitsu. The Japanist preset is written by hand from
+the facts in the references above (which key does what); it contains no
+Japanist code, data or text, and yuragi is not affiliated with Fujitsu.
