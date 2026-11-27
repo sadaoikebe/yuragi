@@ -6,6 +6,7 @@
 |---|---|---|
 | `ansi101` | 英語（`kbd101`） | NICOLA-A |
 | `jis106` | 日本語（`kbd106`） | NICOLA-J |
+| `kb232` | 日本語（`kbd106`）。富士通 FMV-KB232 | NICOLA-J（移設キーを付け替え。[JIS-LAYOUT.md](JIS-LAYOUT.md#fmv-kb232) §2） |
 
 親指キーは Space・無変換・変換の 3 個。親指がどれを押したかを証拠として残し、同時打鍵では左右の面から変換が選ぶ。文字と組まなかった無変換・変換は IME の機能キーとして働く。判定の仕様は [JIS-FSM.md](JIS-FSM.md)。物理位置、刻印名、文字面、局面ごとの既定は [JIS-LAYOUT.md](JIS-LAYOUT.md) を実装基準とする。
 

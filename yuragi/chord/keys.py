@@ -148,6 +148,7 @@ class Key:
     shift: str  # what it types with Shift ("" nothing)
     alnum: str  # what it types in alnum (half width)
     kana: bool  # in the kana table: it joins the chord FSM
+    literal: str = ""  # what it types in kana outside the chord ("" nothing; the table's literals)
 
     @property
     def name(self) -> str:
@@ -161,8 +162,10 @@ class Keyboard:
         raw = json.loads(path.read_text(encoding="utf-8"))
         self.name: str = raw["name"]
         self.kana = (path.parent / raw["kana"]).resolve()
-        faces = json.loads(self.kana.read_text(encoding="utf-8"))["keys"]
-        keys = [Key(int(vk, 16), key, shift, alnum[0] if alnum else key, key in faces)
+        table = json.loads(self.kana.read_text(encoding="utf-8"))
+        faces, literals = table["keys"], table.get("literals", {})
+        keys = [Key(int(vk, 16), key, shift, alnum[0] if alnum else key, key in faces,
+                    literals.get(key, ""))
                 for vk, key, shift, *alnum in raw["keys"]]
         self._by_vk = {key.vk: key for key in keys}
         self._by_id = {key.id: key for key in keys}
@@ -224,7 +227,7 @@ class Keyboard:
         if key is None:
             return None
         if not shift:
-            return None if key.kana else ""
+            return None if key.kana else key.literal
         if key.shift.isascii() and key.shift.isalpha():
             return self.alnum_character(vk, shift, caps_lock=caps_lock)
         return _KANA_SHIFT.get(key.shift) or to_full_width(key.shift)
