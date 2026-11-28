@@ -9,6 +9,7 @@
 - [CONVERSION.md](CONVERSION.md) — 変換の仕様（キーとトークン、同時打鍵の判定、左右交互、変換、セッション、文節と候補、学習、n-best、LM、設定）
 - [KEYBIND.md](KEYBIND.md) — キーバインドの設計（局面とコマンド、プリセット、TIP の食べる表と送り直し）。前提にした Windows のキー入力と各 IME の資料は [keybind/](keybind/)
 - [JIS.md](JIS.md) — JIS 106 対応の実装仕様（キーボードで変わるもの、TIP とエンジンの接続、検証、親指キーの接続）
+- [MACOS.md](MACOS.md) — macOS 版の設計方針（リポジトリ、開発環境、構成、キーボード、ハードル、進める順序、実機で確かめたこと）
 - [JIS-FSM.md](JIS-FSM.md) — 親指キーが Space・無変換・変換の 3 個のときの同時打鍵の状態機械
 - [JIS-LAYOUT.md](JIS-LAYOUT.md) — JIS 106 の全キーの配置と、MS-IME プリセットの局面ごとの割り当て
 - [EVALUATION.md](EVALUATION.md) — 変換の評価と診断、実打鍵の記録と再生

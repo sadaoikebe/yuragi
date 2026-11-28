@@ -16,6 +16,7 @@
 | `report.py` | 表から `docs/keybind/macos-table.md` を作る |
 | `seq.sh [名前 ...]` | 順序や画像が要る確認（候補ウインドウのタブ、英数・かな 2 回、再変換など）。`out/seq/<名前>.txt` と画像 |
 | `guide.py <タグ> [手順 ...]` | 人が本物のキーを押す手順（窓に赤字で押すキーが出る）。`out/guide-<タグ>.jsonl`。`globe`（地球儀キーの詳しい手順）、`globe-caps`（地球儀キーと Caps Lock）の組がある |
+| `imk/` | 記録するだけの入力プログラム（InputMethodKit に何が届くか）。[imk/README.md](imk/README.md) |
 
 ## 使い方
 
