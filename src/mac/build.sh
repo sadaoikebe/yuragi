@@ -9,8 +9,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 (cd "$ROOT" && "$PYTHON" -m yuragi.ime.keymap src/mac/out/default_keymap.h)
 clang++ -std=c++17 -fobjc-arc -O2 -I../tip -Iout -c logic.mm -o out/logic.o
-swiftc -O -swift-version 5 -import-objc-header logic.h main.swift Candidates.swift Controller.swift Engine.swift Keys.swift KeyTap.swift Log.swift \
-    out/logic.o -lc++ -o "$APP/Contents/MacOS/Yuragi"
+clang++ -std=c++17 -O2 -c ../broker/broker_core.cpp -o out/broker_core.o
+swiftc -O -swift-version 5 -import-objc-header logic.h main.swift Candidates.swift Controller.swift Engine.swift Peers.swift Keys.swift KeyTap.swift Log.swift \
+    out/logic.o out/broker_core.o -lc++ -o "$APP/Contents/MacOS/Yuragi"
 swiftc -O -swift-version 5 ctl.swift -o out/ctl
 swiftc -O -swift-version 5 icon.swift -o out/icon
 out/icon ゆ "$APP/Contents/Resources/hira.tiff"

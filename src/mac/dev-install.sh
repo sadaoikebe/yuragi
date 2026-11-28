@@ -25,7 +25,9 @@ for option, name in (("--lm-model", "medium"), ("--lm-cpu-model", "small")):
     if os.path.isdir(os.path.join(model, name)):
         args += [option, os.path.join(model, name)]
 with open(sys.argv[1], "w", encoding="utf-8") as f:
-    json.dump({"python": os.environ["PYTHON"], "app": root, "args": args}, f, ensure_ascii=False, indent=1)
+    admin = ["-m", "yuragi.ime.admin_ui"] + (["--runtime-dir", os.environ["DATA_DIR"]] if os.environ["DATA_DIR"] else [])
+    json.dump({"python": os.environ["PYTHON"], "app": root, "args": args, "admin_args": admin},
+              f, ensure_ascii=False, indent=1)
 PY
 rm -rf "$DEST"
 cp -R out/Yuragi.app "$DEST"

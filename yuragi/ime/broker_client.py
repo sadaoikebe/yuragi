@@ -1,18 +1,21 @@
 """The management tools' line to the broker for status, restart and keymap reload.
 
-The broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session> (Windows only;
-elsewhere there is no broker). These functions connect and say hello as a TIP
-would. A retry restarts the engine; a keymap reload keeps its sessions.
-Nothing here starts a broker.
+On Windows the broker listens on \\\\.\\pipe\\yuragi-ime-<user SID>-<session>; on macOS
+the input program does, on a Unix domain socket (SOCKET_PATH; docs/MACOS.md). Elsewhere
+there is no broker. These functions connect and say hello as a TIP would. A retry
+restarts the engine; a keymap reload keeps its sessions. Nothing here starts a broker.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+import socket
+import sys
 import time
 
 HELLO = {"op": "hello", "proto": 1}
+SOCKET_PATH = Path.home() / "Library" / "Application Support" / "yuragi-ime" / "broker.sock"
 
 
 def pipe_address() -> str:
@@ -93,10 +96,53 @@ class _Connection:
         self.file.close()
 
 
-def _connect(address: str | None, timeout: float) -> _Connection | None:
-    if os.name != "nt":
-        return None  # the broker runs on Windows only
+class _SocketConnection:
+    def __init__(self, address: str, timeout: float):
+        self.timeout = timeout
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.socket.settimeout(timeout)
+            self.socket.connect(address)  # OSError: no input program
+        except OSError:
+            self.socket.close()
+            raise
+        self.buffer = b""
+
+    def send(self, msg: dict) -> None:
+        self.socket.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+
+    def read_line(self, seq: int | None = None) -> dict | None:
+        """As _Connection.read_line."""
+        deadline = time.monotonic() + self.timeout
+        while True:
+            if b"\n" in self.buffer:
+                line, self.buffer = self.buffer.split(b"\n", 1)
+                reply = json.loads(line)
+                if isinstance(reply, dict) and (seq is None or reply.get("seq") == seq):
+                    return reply
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            self.socket.settimeout(remaining)
+            try:
+                chunk = self.socket.recv(4096)
+            except TimeoutError:
+                return None
+            if not chunk:
+                return None
+            self.buffer += chunk
+
+    def close(self) -> None:
+        self.socket.close()
+
+
+def _connect(address: str | None, timeout: float) -> _Connection | _SocketConnection | None:
     try:
+        if sys.platform == "darwin":
+            return _SocketConnection(address or str(SOCKET_PATH), timeout)
+        if os.name != "nt":
+            return None  # no broker
         return _Connection(address or pipe_address(), timeout)
     except OSError:
         return None  # no broker: not running for this user

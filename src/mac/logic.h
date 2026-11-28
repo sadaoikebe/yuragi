@@ -18,12 +18,12 @@ typedef NS_ENUM(NSInteger, YRPhase) {
           phase:(YRPhase)phase unsettled:(BOOL)unsettled;
 @end
 
-// One line from the engine (tip_logic::Message; DESIGN「返事の項目」).
+// One line from the watcher to a session (tip_logic::Message; DESIGN「返事の項目」).
 @interface YRMessage : NSObject
-@property(readonly) BOOL ready;  // {"ready":true,...}
-@property(readonly) NSString *event;  // "lm_done", "warning", "keymap", or empty
-@property(readonly) BOOL hasSid, hasSeq;
-@property(readonly) long long sid, seq;
+@property(readonly) NSString *event;  // "state", "reset", "keymap", "lm_done", or empty
+@property(readonly) NSString *state;  // of the hello reply, a state event, or a request the engine did not get
+@property(readonly) BOOL hasSeq;
+@property(readonly) long long seq;
 @property(readonly, nullable) YRKeyTable *keymap;
 @property(readonly) NSString *composition, *commit, *global;
 @property(readonly) BOOL pending, eatPending, again, error, suggestionOnly, hasPhase, hasEat, eat;
@@ -40,6 +40,37 @@ typedef NS_ENUM(NSInteger, YRPhase) {
 @property(readonly) uint64_t suggestAt;
 // nil when the line is not a JSON object.
 + (nullable YRMessage *)parse:(NSString *)line;
+@end
+
+// What the watcher asks of the process around it (broker::Platform). All on the main thread.
+@protocol YRWatcherPlatform
+- (nullable NSString *)startEngine;  // nil: started; else why not
+- (void)writeEngine:(NSString *)line;
+- (void)killEngine;  // engineExit: follows once its output has been read
+- (void)writeSession:(uint64_t)sid line:(NSString *)line;  // called inside a watcher call: deliver after it returns
+- (void)engineStopped:(NSString *)reason;  // given up: "exited" or "hang"
+- (void)openAdmin;
+- (void)log:(NSString *)line;
+@end
+
+typedef NS_ENUM(NSInteger, YRState) { YRStateStarting, YRStateReady, YRStateDown };
+
+// The engine's watcher (broker::Broker; DESIGN「見張り」): starts it again when it ends, gives up
+// after repeated exits, ends one that does not answer.
+@interface YRWatcher : NSObject
+- (instancetype)initWithPlatform:(id<YRWatcherPlatform>)platform;
+@property(readonly) YRState state;
+@property(readonly) int64_t nextDeadline;  // milliseconds on the platform's clock; INT64_MAX: none
+- (void)start;
+- (void)sessionOpened:(uint64_t)sid;  // an input field: connected, and its hello said
+- (void)peerConnected:(uint64_t)sid;  // the settings window's connection: it says hello itself
+- (void)sessionClosed:(uint64_t)sid;
+- (void)session:(uint64_t)sid line:(NSString *)line;
+- (void)engineLine:(NSString *)line;
+- (void)engineStderrLine:(NSString *)line;
+- (void)engineExit:(int)code;
+- (void)timer;
+- (void)retry;
 @end
 
 NS_ASSUME_NONNULL_END

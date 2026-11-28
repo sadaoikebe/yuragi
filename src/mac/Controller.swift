@@ -89,13 +89,13 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
                             alt: flags.contains(.option), win: flags.contains(.command),
                             phase: phase, unsettled: !waiting.isEmpty) else { return nil }
         let seq = engine.nextSeq()
-        var request: [String: Any] = ["sid": sid, "seq": seq, "op": "down", "vk": vk,
+        var request: [String: Any] = ["seq": seq, "op": "down", "vk": vk,
                                       "t": real ?? UInt64(event.timestamp * 1000), "mods": Keys.mods(flags)]
         if flags.contains(.capsLock) { request["caps_lock"] = true }
         if phase == .empty { addContext(&request) }
-        guard engine.send(request) else { return nil }
         waiting.append(seq)
         lastSent = seq
+        engine.send(sid, request)
         if Log.debug {
             Log.write("down \(event.keyCode) seq \(seq) phase \(phase.rawValue) tap \(real != nil)"
                       + " late \(real.map { Int(nowMs()) - Int($0) } ?? -1)")
@@ -140,19 +140,25 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
 
     private func request(_ op: String, _ extra: [String: Any] = [:]) {
         let seq = Engine.shared.nextSeq()
-        var message: [String: Any] = ["sid": sid, "seq": seq, "op": op, "t": nowMs()]
+        var message: [String: Any] = ["seq": seq, "op": op, "t": nowMs()]
         message.merge(extra) { _, new in new }
-        if Engine.shared.send(message) {
-            waiting.append(seq)
-            lastSent = seq
-        }
+        waiting.append(seq)
+        lastSent = seq
+        Engine.shared.send(sid, message)
     }
 
     // -- the engine's answers --------------------------------------------------------------
 
-    func reply(_ m: YRMessage) {
+    func receive(_ m: YRMessage) {
+        if m.event == "lm_done" { request("resolve") }
+        // DESIGN「見えている文字の確定」: the engine ended, and every conversion with it.
+        if m.event == "reset" || m.state == "down" { engineLost() }
+        if m.event == "state" { noticed = false }
+        guard m.hasSeq else { return }
         let seq = Int(m.seq)
         waiting.removeAll { $0 <= seq }
+        // The engine did not get this request (it is starting or down): its key stays eaten.
+        if !m.state.isEmpty { return }
         if Log.debug {
             Log.write("reply \(seq) eat \(m.hasEat ? "\(m.eat)" : "none") commit \(m.commit.count) shown \(m.composition.count)"
                       + " phase \(m.phase.rawValue) global \(m.global) again \(m.again)")
@@ -194,8 +200,6 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         setTimer(m.hasTimer && !m.pending ? m.timer : nil)
     }
 
-    func lmDone() { request("resolve") }
-
     private func showCandidates(_ m: YRMessage, _ field: IMKTextInput) {
         guard m.showsCandidates else { CandidateWindow.shared.hide(); return }
         var caret = NSRect.zero
@@ -214,11 +218,12 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         case "mode_hiragana": request("set_mode", ["mode": "hiragana"])
         case "mode_katakana": request("set_mode", ["mode": "katakana"])
         case "mode_full_alnum": request("set_mode", ["mode": "full_alnum"])
+        case "open_settings", "open_word_register": Engine.shared.openSettings()
         default: Log.write("command \(command) not handled yet")
         }
     }
 
-    func engineLost() {
+    private func engineLost() {
         waiting.removeAll()
         setTimer(nil)
         setSuggestTimer(nil)
@@ -334,13 +339,14 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         if !KeyTap.shared.running {
             add("「入力監視」の許可が要ります", nil)
             add("許可の設定を開く", #selector(openPermission(_:)))
-        } else if Engine.shared.state == .stopped {
+        } else if Engine.shared.state == .down {
             add("もう一度試す", #selector(retry(_:)))
         } else if Engine.shared.state == .starting {
             add("（変換の準備をしています）", nil)
         }
-        // An empty menu makes the OS end the input after every change of the marked text.
-        return menu.items.isEmpty ? nil : menu
+        // A menu without items makes the OS end the input after every change of the marked text.
+        add("設定を開く", #selector(openSettings(_:)))
+        return menu
     }
 
     @objc func openPermission(_ sender: Any?) {
@@ -350,7 +356,9 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         }
     }
 
-    @objc func retry(_ sender: Any?) { Engine.shared.start() }
+    @objc func openSettings(_ sender: Any?) { Engine.shared.openSettings() }
+
+    @objc func retry(_ sender: Any?) { Engine.shared.retry() }
 
     override func activateServer(_ sender: Any!) {
         noticed = false

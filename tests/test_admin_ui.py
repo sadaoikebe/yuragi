@@ -85,6 +85,64 @@ class ModelTest(Base):
             self.assertFalse(m.save_keys(m.key_settings()).ok)
 
 
+@unittest.skipIf(sys.platform == "win32", "uses a locked file and a signal")
+class PosixActivationTest(unittest.TestCase):
+    def test_second_launch_signals_the_first(self):
+        import signal
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "data" / "config.json"
+            before = signal.getsignal(signal.SIGUSR1)
+            self.addCleanup(signal.signal, signal.SIGUSR1, before)
+            with admin_ui._posix_activation(path) as event:
+                self.assertFalse(event.is_set())
+                with admin_ui._posix_activation(path) as second:
+                    self.assertIsNone(second)
+                self.assertTrue(event.wait(1))
+            with admin_ui._posix_activation(path) as event:  # the lock went with its owner
+                self.assertIsNotNone(event)
+
+
+class SocketClientTest(unittest.TestCase):
+    """The macOS line (broker_client._SocketConnection) against a small server."""
+
+    def serve(self, answers):
+        import socket
+        import threading
+        directory = tempfile.TemporaryDirectory(dir="/tmp")  # a socket path is short
+        self.addCleanup(directory.cleanup)
+        address = str(Path(directory.name) / "s")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(server.close)
+        server.bind(address)
+        server.listen(1)
+        got = []
+
+        def run():
+            connection, _ = server.accept()
+            with connection, connection.makefile("rwb") as lines:
+                for line in lines:
+                    request = json.loads(line)
+                    got.append(request)
+                    for answer in answers.get(request["op"], []):
+                        lines.write((json.dumps(answer) + "\n").encode())
+                    lines.flush()
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        return address, got
+
+    @unittest.skipIf(sys.platform == "win32", "Unix domain socket")
+    def test_reload_skips_events_and_returns_the_reply(self):
+        address, got = self.serve({
+            "hello": [{"proto": 1, "state": "ready", "warnings": []}],
+            "reload_keymap": [{"event": "keymap", "keymap": {}}, {"seq": 1, "keymap_reload": "applied"}]})
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.assertEqual(broker_client.reload_keymap(address), {"seq": 1, "keymap_reload": "applied"})
+            self.assertIsNone(broker_client.status(address + "-none"))
+        self.assertEqual([request["op"] for request in got], ["hello", "reload_keymap"])
+
+
 @unittest.skipUnless(sys.platform == "win32", "uses Windows named objects")
 class ActivationTest(unittest.TestCase):
     def test_open_during_startup_signals_existing_instance(self):

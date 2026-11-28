@@ -8,5 +8,6 @@ let server = IMKServer(name: Bundle.main.infoDictionary?["InputMethodConnectionN
                        bundleIdentifier: Bundle.main.bundleIdentifier)
 if server == nil { Log.write("IMKServer not created") }
 Engine.shared.start()
+Peers.shared.start()
 KeyTap.shared.start(ask: false)
 NSApplication.shared.run()
