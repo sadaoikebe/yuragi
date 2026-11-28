@@ -5,6 +5,7 @@ import unittest
 
 from yuragi.chord.fsm import Plain
 from yuragi.chord.keys import VK_CONVERT, VK_ESCAPE, VK_NONCONVERT, VK_SPACE
+from yuragi.ime.bunsetsu import KANA_READINGS
 from yuragi.ime.server import dispatch
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.table import load_table
@@ -69,6 +70,17 @@ class KanaKeyTest(unittest.TestCase):
         self.assertEqual([k.tap(VK_F7)["composition"] for _ in range(5)],
                          ["クジンバ", "クジンミ", "クアンバ", "クアンミ", "クジンバ"])
         self.assertEqual([k.tap(VK_F6)["composition"] for _ in range(2)], ["くじんば", "くじんみ"])
+
+    def test_the_kana_rows_stay_few_however_many_thumb_presses_are_open(self):
+        # 14 presses allow 16384 readings; walking to the last row would take them all.
+        k = Keys(kana_session(self.lex))
+        for _ in range(14):
+            k.chords("s")
+        k.idle()
+        k.tap(VK_F7)
+        [clause] = k.s.segments
+        rows = clause.choices.cache[:clause.choices.last() + 1]
+        self.assertEqual(len([c for c in rows if c.kind == "kana"]), 2 * KANA_READINGS)
 
     def test_f10_gives_the_typed_keys_and_cycles_case(self):
         s = self.session()

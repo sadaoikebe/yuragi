@@ -1008,7 +1008,7 @@ class ImeSession:
 
         F6 hiragana, F7 katakana: the kana rows that close out every clause's
         candidate stream, one hiragana/katakana pair per reading the typed
-        chords allow; selecting one is an ordinary candidate pick, so a later
+        chords allow (the cheapest KANA_READINGS of them); selecting one is an ordinary candidate pick, so a later
         commit learns it like any other selection. Pressed again while a row
         of that script is selected, F6/F7 step to the next reading's row,
         wrapping to the first: a single thumb key leaves left/right faces

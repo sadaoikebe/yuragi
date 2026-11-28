@@ -25,6 +25,9 @@ PAGE_SIZE = 9
 # last. The learned symbol comes first overall.
 SYMBOL_OFFSET = 3
 SYMBOL_HEAD = 6
+# The kana rows of a clause: its cheapest readings. Each thumb press that leaves the
+# face open doubles the readings the keys allow.
+KANA_READINGS = 64
 
 
 def content(lid: int) -> bool:
@@ -253,7 +256,8 @@ def candidates(tokens: list[dict], lex: MozcLex, left: int, right: int,
         dictionary.append(c)
         yield c
     # Even a reading absent from every dictionary prefix remains reachable.
-    for c in _paths(tokens, lex, left, right, kana=True, learning=learning):
+    kana = _paths(tokens, lex, left, right, kana=True, learning=learning)
+    for c in islice(kana, KANA_READINGS):
         hira = c.reading
         kata = katakana(hira)
         yield Candidate(hira, hira, c.score, c.lid, c.rid, "kana")
