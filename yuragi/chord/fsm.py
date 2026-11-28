@@ -318,7 +318,7 @@ class ChordFsm:
         if kind == "M":
             self.pressed_at[key] = now
             out = self._m_down(key, now)
-        elif kind == "O":
+        elif kind == "O" and key not in self.held:
             out = self._o_down(key, now)
         else:
             return []

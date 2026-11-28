@@ -107,6 +107,11 @@ class ThumbKeyRulesTest(unittest.TestCase):
         out = play("O+0 a+10 a-60 N+100 b+110 b-150 H+200 c+210 c-260 d+300 d-350 N-400 H-410 O-420")
         self.assertEqual(out, [AmbShift("a"), AmbShift("b"), AmbShift("c"), Plain("d")])
 
+    def test_a_thumb_key_held_down_leaves_nothing_behind(self):
+        # The downs a held key keeps sending change nothing: once the keys are up, typing is as before.
+        out = play("w+0 O+10 w-60 O+510 O+543 O+576 O-600 e+700 e-760")
+        self.assertEqual([(type(t), t.key) for t in out], [(AmbShift, "w"), (Plain, "e")])
+
     def test_reset_keeps_the_held_keys_and_clear_drops_them(self):
         fsm = ChordFsm()
         fsm.on_down("O", "henkan", 0)
