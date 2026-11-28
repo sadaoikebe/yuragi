@@ -51,7 +51,7 @@
     versions\<tag>\app\                     Python のソース
     versions\<tag>\engine.json              このタグが使う共有物への道順（ブローカーが読む。形は src/broker/support.h）
     shared\runtime\<id>\                    同梱 Python + tkinter + torch + 依存。id = 版とハッシュ
-    shared\dict\<id>\                       Mozc 辞書
+    shared\dict\<コミット>\                 Mozc 辞書
     shared\cache\<id>.pkl                   辞書キャッシュ
     shared\model\<リビジョン>\              LM モデル
     staging\                                更新の作業場。成功したら versions へ移す
@@ -68,10 +68,9 @@ HKCU\…\CurrentVersion\Run   yuragi-ime = "…\<tag>\yuragi-broker.exe"
 
 - **版ごとにフォルダを分ける。** 更新は「新しいフォルダを作って、登録を付け替える」だけで、
   読み込まれている DLL には触らない。だからアプリを開いたまま更新できる。
-- **ランタイム・辞書・モデルは共有する。** ランタイムは Python の版、torch の版と種類、
-  `requirements.txt` のハッシュで、モデルはリビジョンで名前を付ける。
+- **ランタイム・辞書・モデルは共有する。** ランタイムは Python の版、torch の種類、
+  `requirements.txt` のハッシュで、辞書は上流のコミットで、モデルはリビジョンで名前を付ける。
   同じ名前のフォルダがあれば再利用する。
-  ランタイムに入るものは pip 自体を除き、版とハッシュを固定している（「共通の仕組み」）。
 - **学習履歴と個人辞書はプログラムのフォルダの外**に置く。
 - **Python は同梱ランタイム 1 本。** ほかの Python を探さない。
 
@@ -472,18 +471,24 @@ Windows 側の IME を開き、指定された入力モードにする（[KEYBIN
 
 ### 共通の仕組み
 
-- **取得物の版と照合**
-  - リリースの配布物は指定したタグのものを取得する。
-  - Python の埋め込み版は `python.org` から指定した版を取得し、`setup.ps1` に記載した SHA-256 と照合する。
-  - Mozc 辞書は上流のコミットを指定し、取得したファイルを辞書マニフェストの SHA-256 と照合する。
-    上流のコミットとファイルの一覧・ハッシュは、マニフェスト（`data/dictionary-manifest.json`）の 1 か所にだけ書く。
-  - `get-pip.py` は `bootstrap.pypa.io` から取得し、pip を PyPI から入れる。どちらも版とハッシュの指定は無い。
-  - torch は PyTorch から、種類（`cpu`・`cu126`・`cu128`）ごとの wheel の SHA-256 を `setup.ps1` に固定して
-    `--no-deps` で入れる。transformers と、torch と transformers が要るものはすべて、版と SHA-256 を
-    `packaging/requirements.txt` に固定し、PyPI から `--require-hashes` で入れる（書いていないもの、ハッシュの違うものは入らない）。
-  - pip は利用者の pip の設定（`pip.ini`・`PIP_*` の環境変数）もキャッシュも使わない（`--isolated --no-cache-dir`）。
-  - 言語モデルは Hugging Face のリビジョンを指定し、エンジンが読むファイルを、`packaging/fetch_model.py` に
-    固定した大きさと SHA-256 と照合する。
+- **取得物の版と照合**: 取得するものはすべて版を指定する。SHA-256 と照合するのは、実行されるものだけ。
+  - リリースの配布物は指定したタグのものを取得する。`setup.ps1` と同じ場所から来るので、照合はしない。
+  - 実行されるもの（照合する）
+    - Python の埋め込み版は `python.org` から指定した版を取得し、`setup.ps1` に記載した SHA-256 と照合する。
+    - pip は PyPI の wheel を、`setup.ps1` に記載した版と SHA-256 で取得する。ランタイムには入れず、
+      wheel のまま動かす。
+    - torch・transformers と、その 2 つが要るものはすべて、版と SHA-256 をロックファイル
+      （`packaging/requirements.txt`）に固定し、`--require-hashes` で 1 回で入れる（書いていないもの、
+      ハッシュの違うものは入らない）。torch は選んだ種類（`cpu`・`cu126`・`cu128`）の PyTorch の索引から、
+      ほかは PyPI から来る。torch の行には 3 種類のハッシュが並ぶ。
+    - ロックファイルは手で書かない。`packaging/requirements.in`（torch と transformers の 2 行）から
+      `python packaging/lock.py` が作る。
+    - pip は利用者の pip の設定（`pip.ini`・`PIP_*` の環境変数）もキャッシュも使わない（`--isolated --no-cache-dir`）。
+  - データ（版の指定だけ。照合しない）
+    - Mozc 辞書は上流のコミットを指定する（`yuragi/lattice/mozc_dict.py` の `UPSTREAM_COMMIT` の 1 行）。
+    - 言語モデルは Hugging Face のリビジョンを指定する（`packaging/fetch_model.py`）。
+    - どちらも読むだけで、中のコードは実行されない。欠けたり壊れたりしたものは、読み込みか段 3 の試運転で止まる。
+      新しい辞書にするには、コミットの 1 行を書き換える。
   - 版と出典の一覧は [NOTICE.md](../NOTICE.md) を参照。
 - **README の 1 行の形**: 「前回の残り（`%TEMP%\yuragi-setup.ps1`）を消す → 取得 → 取得できたとき（`$?`）だけ実行」。
   取得に失敗したとき、前回取得した古いスクリプトは走らない。Windows PowerShell 5.1 には `&&` が無いので

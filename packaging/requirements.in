@@ -1,0 +1,3 @@
+# What the engine imports. packaging/lock.py writes requirements.txt from this.
+torch==2.9.1
+transformers==4.57.1

@@ -230,13 +230,11 @@ class Engine:
             from yuragi.ime.keymap import load_keymap
             import yuragi.ime.lm_async  # noqa: F401  (its worker starts after the warm-up)
             self.keymap = self.read_keymap(load_keymap(self.data_dir))
-            manifest = json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))
         except (ImportError, SyntaxError, OSError, ValueError) as exc:
             log(where(exc))
             fatal("program-files-unreadable")
 
-        # The installer checked the files' hashes; here, that they are there.
-        missing = [name for name in manifest["files"] if not (mozc_dict.DICT_DIR / name).exists()]
+        missing = [name for name in [*mozc_dict.LOADER_FILES, "id.def"] if not (mozc_dict.DICT_DIR / name).exists()]
         if missing:
             log(f"dictionary: missing {', '.join(missing)}")
             fatal("dictionary-missing")

@@ -690,9 +690,8 @@ def main():
                 "git_status": git("status", "--porcelain").decode().splitlines()}
     except (OSError, subprocess.CalledProcessError):
         code = {}
-    # The manifest describes the default dictionary only.
-    upstream = (json.loads(mozc_dict.MANIFEST.read_text(encoding="utf-8"))["upstream_commit"]
-                if args.dictionary_dir == DICT_DIR else "unknown")
+    # The commit is the default dictionary's only.
+    upstream = mozc_dict.UPSTREAM_COMMIT if args.dictionary_dir == DICT_DIR else "unknown"
     manifest = {"format_version": 1, "python": platform.python_version(), **code,
                 "engine_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in engine_files},
                 "inputs_sha256": hashes, "upstream_commit": upstream,

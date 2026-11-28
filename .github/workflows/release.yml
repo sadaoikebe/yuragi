@@ -1,6 +1,6 @@
 # リリース作成 (DESIGN「インストール・更新・アンインストール」): タグ v* を push すると、Windows ランナーで
 # TIP (64・32 ビット) とブローカーをタグ入りの Release でビルド・試験し、setup が
-# 取得するアセット (DLL 2 つ・ブローカー・ソース zip・各 SHA-256・タグ/ハッシュを刻んだ setup.ps1)
+# 取得するアセット (DLL 2 つ・ブローカー・ソース zip・tkinter 一式・タグ/ハッシュを刻んだ setup.ps1)
 # と、アンインストールの入口 uninstall.ps1 を公開する。公開前の検証が1つでも失敗すればリリースは出ない。
 # 公開のあとで、配布先の確認とインストールの試験をする。
 name: release
@@ -13,21 +13,18 @@ permissions:
   contents: read
 
 jobs:
-  # 同梱 Python と torch の版の数字は setup.ps1 の 1 か所だけに書く。以降のジョブはここで読んだものを使う。
+  # 同梱 Python の版の数字は setup.ps1 の 1 か所だけに書く。以降のジョブはここで読んだものを使う。
   pins:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.read.outputs.python }}
-      torch: ${{ steps.read.outputs.torch }}
     steps:
       - uses: actions/checkout@v4
       - id: read
         run: |
           python=$(sed -n 's/^\$EmbedPythonVersion = "\([0-9.]*\)".*/\1/p' packaging/setup.ps1)
-          torch=$(sed -n 's/^\$TorchVersion = "\([0-9.]*\)".*/\1/p' packaging/setup.ps1)
-          test -n "$python" && test -n "$torch" || { echo "packaging/setup.ps1: no EmbedPythonVersion or TorchVersion line"; exit 1; }
+          test -n "$python" || { echo "packaging/setup.ps1: no EmbedPythonVersion line"; exit 1; }
           echo "python=$python" >> "$GITHUB_OUTPUT"
-          echo "torch=$torch" >> "$GITHUB_OUTPUT"
 
   build:
     needs: pins

@@ -1,5 +1,4 @@
-"""The dictionary's files on disk: the cache the engine starts from, and the
-manifest the installer checks a downloaded dictionary against."""
+"""The dictionary's files on disk: the cache the engine starts from."""
 from __future__ import annotations
 
 from contextlib import redirect_stderr
@@ -8,9 +7,8 @@ from pathlib import Path
 import pickle
 import tempfile
 import unittest
-from unittest.mock import patch
 
-from yuragi.lattice import dict_manifest, mozc_dict
+from yuragi.lattice import mozc_dict
 from tests.support import small_lex
 
 
@@ -43,21 +41,6 @@ class CacheTest(Files):
                 cache.write_bytes(data)
                 self.assertIsNone(mozc_dict.read_cache(cache))
                 self.assertIn("rebuilding", log.getvalue())
-
-
-class ManifestTest(Files):
-    def test_verify_names_what_differs_from_the_manifest(self):
-        for name in dict_manifest.REQUIRED:
-            (self.dir / name).write_text(name, encoding="utf-8")
-        with patch.object(mozc_dict, "DICT_DIR", self.dir):
-            manifest = dict_manifest.build("test", "0000")
-            self.assertEqual(dict_manifest.verify(manifest), [])
-            (self.dir / "suffix.txt").unlink()  # a download that stopped
-            (self.dir / "dictionary03.txt").write_text("dictionary03.tx", encoding="utf-8")  # cut short
-            (self.dir / "dictionary10.txt").write_text("x", encoding="utf-8")
-            self.assertEqual(dict_manifest.verify(manifest),
-                             ["changed dictionary03.txt", "missing suffix.txt",
-                              "unrecorded dictionary10.txt (the loader would read it)"])
 
 
 if __name__ == "__main__":

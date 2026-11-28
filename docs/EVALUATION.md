@@ -23,7 +23,7 @@ python3 -m tools.replay_stage1 <ログ>          # 実打鍵ログの再生と�
 
 連接表の全 0 行へのペナルティと環境変数 `ZERO_ROW_PENALTY` は [CONVERSION.md](CONVERSION.md) の「変換」。
 
-辞書キャッシュは `data/cache/` に作る。名前は辞書マニフェストのハッシュとキャッシュ形式で決まり、
+辞書キャッシュは `data/cache/` に作る。名前は辞書のコミットとキャッシュ形式で決まり、
 変わったら初回だけ辞書テキストから作り直す。
 
 ## Mozc の評価（`run_mozc_eval`）

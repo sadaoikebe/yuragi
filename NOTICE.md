@@ -30,7 +30,7 @@ Location: `%LOCALAPPDATA%\yuragi-ime\shared\dict\<id>\` when installed;
 All files (`dictionary*.txt`, `connection_single_column.txt`, `suffix.txt`,
 `id.def`, `evaluation.tsv`, `README.txt`, `README.md`) are fetched from
 `src/data/dictionary_oss/` at the upstream commit pinned in
-`data/dictionary-manifest.json` by `python -m tools.eval.fetch_mozc_dict`.
+`yuragi/lattice/mozc_dict.py` by `python -m tools.eval.fetch_mozc_dict`.
 None of these files is
 stored in git. Runtime conversion uses this dictionary.
 
@@ -48,7 +48,7 @@ Location: `data/symbol.tsv` (in the release's source zip and the installed
 application).
 
 `src/data/symbol/symbol.tsv` of Mozc at the same upstream commit as the
-dictionary (pinned in `data/dictionary-manifest.json`), stored in git
+dictionary (pinned in `yuragi/lattice/mozc_dict.py`), stored in git
 without changes.
 Conversion uses it to offer symbols for their readings (きごう, やじるし).
 It is not part of `src/data/dictionary*`, so the IPAdic / ICOT and Okinawa
@@ -178,7 +178,7 @@ below. Each package keeps the license files its own wheel carries, in
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
 | Python (Windows embeddable package) | 3.13.7 | PSF License Agreement (Python Software Foundation License Version 2), together with the licenses of the components Python bundles | https://www.python.org/ftp/python/3.13.7/ |
-| pip | latest at install time (not pinned) | MIT | https://bootstrap.pypa.io/get-pip.py, which installs pip from PyPI |
+| pip (runs the installation of the packages; not kept in the runtime) | 26.3 | MIT | PyPI |
 | PyTorch (`torch`, CPU build, or on a PC with a CUDA-capable NVIDIA GPU the CUDA 12.8 / 12.6 build) | 2.9.1 | BSD-3-Clause; the third-party components it bundles are listed with their licenses in its `LICENSE` and `NOTICE`. The CUDA builds also bundle NVIDIA CUDA runtime libraries (cuBLAS, cuDNN and others), redistributed by PyTorch under NVIDIA's license terms for them | https://download.pytorch.org/whl/cpu, https://download.pytorch.org/whl/cu128, https://download.pytorch.org/whl/cu126 |
 | transformers | 4.57.1 | Apache-2.0 | PyPI |
 
@@ -192,8 +192,8 @@ The embeddable package has no tkinter, which the settings window needs.
 The release workflow copies these files, unmodified, from the regular
 Python of the same version (3.13.7, 64-bit, installed on the build runner
 by `actions/setup-python`) into the release asset
-`python-3.13.7-tkinter-amd64.zip`. `setup.ps1` checks its SHA-256 and
-unpacks it into the runtime folder.
+`python-3.13.7-tkinter-amd64.zip`. `setup.ps1` unpacks it into the runtime
+folder.
 
 | Files | Component | License |
 | --- | --- | --- |
@@ -205,11 +205,9 @@ The regular Python does not ship Tcl's own `license.terms`, so the asset
 does not have it either. Its text (and Tk's) is in the runtime's
 `LICENSE.txt`, which comes with the embeddable package.
 
-The packages above are pinned (`$TorchVersion` in `packaging/setup.ps1`,
-`packaging/requirements.txt`), and so are their dependencies: each with its
-version and SHA-256 in `packaging/requirements.txt` (torch's wheels by their
-SHA-256 in `packaging/setup.ps1`). These are the dependencies, with the
-licenses their wheels declare:
+The packages above and their dependencies are pinned, each with its version
+and SHA-256 in `packaging/requirements.txt`. These are the dependencies, with
+the licenses their wheels declare:
 
 | Package | License declared by the wheel |
 | --- | --- |

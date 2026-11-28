@@ -40,13 +40,13 @@ winget install --id Microsoft.VisualStudio.BuildTools -e --accept-package-agreem
 
 利用者の権限で入れるもの: Python 3.13（64 ビット）。CMake と Ninja は Build Tools の CMake コンポーネントに入っている
 （無ければ `python -m pip install cmake ninja`）。エンジンを開発用に動かすなら、
-`packaging/requirements.txt` の依存と torch（CPU 版で足りる）も。
+`packaging/requirements.txt` の torch と依存も（CPU 版で足りる:
+`pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r packaging/requirements.txt`）。
 
 ## ビルドと試験
 
 ```sh
-python -m tools.eval.fetch_mozc_dict                 # 初回のみ。Mozc OSS 辞書
-python -m yuragi.lattice.dict_manifest verify       # 辞書がマニフェストと一致するか（write --upstream-commit で書き出し）
+python -m tools.eval.fetch_mozc_dict                 # Mozc OSS 辞書。初回と、辞書のコミット（UPSTREAM_COMMIT）を変えたとき
 python -m unittest discover                   # 全試験（リポジトリの直下で）
 cmake -S src/broker -B build/broker -DCMAKE_BUILD_TYPE=Release && cmake --build build/broker && ctest --test-dir build/broker
 cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release && cmake --build build/tip && ctest --test-dir build/tip

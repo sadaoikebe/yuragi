@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from array import array
 from contextlib import suppress
-import hashlib
-import json
 import os
 import pickle
 import re
@@ -18,27 +16,19 @@ from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[2]
 DICT_DIR = ROOT / "third_party" / "mozc_oss_dict"
-MANIFEST = ROOT / "data" / "dictionary-manifest.json"
+# The google/mozc commit the dictionary is fetched from (tools.eval.fetch_mozc_dict). The only
+# place it is written: to take a newer dictionary, change this line. It also names the
+# installer's shared copy of the dictionary (DESIGN「置き場所」) and the cache.
+UPSTREAM_COMMIT = "8be758dcc2330011d052a670b39cf8ffbaa1c253"
 CACHE_FORMAT = "mozc_lex_v6"
 
 
-def files_digest(manifest: Path = MANIFEST) -> str:
-    """The hash of the manifest's file list (names, sizes, SHA-256): another dictionary, another digest.
+def cache_name() -> str:
+    """The cache file's name: its format and the dictionary's commit.
 
-    It names the installer's shared copy of the dictionary (DESIGN「置き場所」) and the cache.
+    Text changed by hand in a working tree keeps the old cache: delete it.
     """
-    files = json.loads(Path(manifest).read_text(encoding="utf-8"))["files"]
-    return hashlib.sha256(json.dumps(files, sort_keys=True).encode("ascii")).hexdigest()[:16]
-
-
-def cache_name(manifest: Path = MANIFEST) -> str:
-    """The cache file's name: the format and the hash of the manifest's file list.
-
-    A cache is read for the dictionary the manifest names; the installer verifies the
-    files against it (DESIGN「起動時の読み込み」). Text changed by hand in a working
-    tree keeps the old cache: delete it.
-    """
-    return f"{CACHE_FORMAT}-{files_digest(manifest)}.pkl"
+    return f"{CACHE_FORMAT}-{UPSTREAM_COMMIT[:16]}.pkl"
 
 
 CACHE_DIR = ROOT / "data" / "cache"
@@ -47,8 +37,7 @@ CACHE_DIR = ROOT / "data" / "cache"
 class DictionaryFormatError(ValueError):
     """A dictionary line that is not reading/lid/rid/cost/surface (DESIGN「起動時の読み込み」).
 
-    The files are checked against the manifest's hashes, so this never happens
-    with an intact dictionary; when it does, loading stops instead of skipping.
+    Mozc's dictionary has none; when one appears, loading stops instead of skipping.
     """
 
 

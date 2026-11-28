@@ -1,56 +1,36 @@
-"""Download Mozc OSS dictionary text (not a full Mozc build)."""
+"""Download Mozc OSS dictionary text (not a full Mozc build).
+
+  python -m tools.eval.fetch_mozc_dict [--out DIR]     (default third_party/mozc_oss_dict)
+
+The files come from the google/mozc commit in yuragi/lattice/mozc_dict.py
+(UPSTREAM_COMMIT). After changing that line, run this again.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
+import argparse
+import sys
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "third_party" / "mozc_oss_dict"
-# The files, their SHA-256 and the upstream commit they are fetched from
-# (upstream_commit) are all in the manifest, and only there.
-MANIFEST = ROOT / "data" / "dictionary-manifest.json"
-BASE = "https://raw.githubusercontent.com/google/mozc/{}/src/data/dictionary_oss/"
+from yuragi.lattice.mozc_dict import DICT_DIR, LOADER_FILES, UPSTREAM_COMMIT
 
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-
-
-def _is_current(dest: Path, expected: str) -> bool:
-    # Only an exact match counts: a file fetched from another upstream
-    # revision (e.g. master) is replaced, not kept.
-    return dest.exists() and _sha256(dest) == expected
+# What the loader reads, id.def for the names of the parts of speech, the evaluation set,
+# and the upstream notices that travel with them.
+FILES = [*LOADER_FILES, "id.def", "evaluation.tsv", "README.txt", "README.md"]
+BASE = f"https://raw.githubusercontent.com/google/mozc/{UPSTREAM_COMMIT}/src/data/dictionary_oss/"
 
 
 def main(argv=()) -> None:
-    """python -m tools.eval.fetch_mozc_dict [--out DIR] (default third_party/mozc_oss_dict)."""
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=None,
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=DICT_DIR,
                         help="where to put the files (the installer: shared\\dict\\<commit>)")
-    out = parser.parse_args(argv).out or OUT
+    out = parser.parse_args(argv).out
     out.mkdir(parents=True, exist_ok=True)
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    base = BASE.format(manifest["upstream_commit"])
-    for name, entry in manifest["files"].items():
-        dest = out / name
-        if _is_current(dest, entry["sha256"]):
-            print("skip", name, dest.stat().st_size)
-            continue
-        print("GET", name)
-        urllib.request.urlretrieve(base + name, dest)
-        print(" ", dest.stat().st_size)
+    for name in FILES:
+        print("GET", name, flush=True)
+        urllib.request.urlretrieve(BASE + name, out / name)  # raises when the download is cut short
 
 
 if __name__ == "__main__":
-    import sys
     main(sys.argv[1:])

@@ -37,14 +37,9 @@ $Repo = "sadaoikebe/yuragi"
 $Tag = "__TAG__"                         # リリース時に workflow が刻む
 $EmbedPythonVersion = "3.13.7"
 $EmbedPythonSha256 = "__EMBED_SHA256__"  # 同上 (python.org の公式 zip の SHA-256)
-$TorchVersion = "2.9.1"
-# torch の wheel (CPython 3.13・64 ビット Windows) の SHA-256。種類ごとに 1 つ。torch は --no-deps で入れ、
-# その依存は packaging\requirements.txt に (ハッシュ付きで) ある。版を上げたら 3 つとも取り直す。
-$TorchSha256 = @{
-    cpu = "404a7ab2fffaf2ca069e662f331eb46313692b2f1630df2720094284f390ccef"
-    cu126 = "625703f377a53e20cade81291ac742f044ea46a1e86a3949069e62e321025ba3"
-    cu128 = "ad9183864acdd99fc5143d7ca9d3d2e7ddfc9a9600ff43217825d4e5e9855ccc"
-}
+# ランタイムを組み立てる pip (PyPI の wheel)。ランタイムには入れず、wheel のまま動かす。
+$PipVersion = "26.3"
+$PipSha256 = "f3b60b20ffaadd4415ed7957212a38ac63fa4c5fa375bd0f4a797777940fad13"
 $Local = Join-Path $env:LOCALAPPDATA "yuragi-ime"
 $Shared = Join-Path $Local "shared"
 $Versions = Join-Path $Local "versions"
@@ -163,9 +158,9 @@ Say "次のものをダウンロードします (取得済みのものは省略)
 Say "  ゆらぎ本体・TIP・ブローカー・tkinter (GitHub Releases、約 35MB)"
 Say "  Python $EmbedPythonVersion (python.org、約 30MB)"
 if ($TorchVariant -eq "cpu") {
-    Say "  PyTorch $TorchVersion CPU 版 (download.pytorch.org、約 200MB)"
+    Say "  PyTorch CPU 版 (download.pytorch.org、約 200MB)"
 } else {
-    Say "  PyTorch $TorchVersion GPU 版 $TorchVariant (download.pytorch.org、約 3GB。展開後 約 5GB)"
+    Say "  PyTorch GPU 版 $TorchVariant (download.pytorch.org、約 3GB。展開後 約 5GB)"
 }
 Say "  transformers・huggingface_hub ほか (PyPI)"
 Say "  Mozc 辞書 (github.com/google/mozc、約 93MB)"
@@ -225,13 +220,11 @@ Get-Asset "$baseUrl/yuragi-broker.exe" $brokerPath
 $StageApp = Join-Path $Stage "app"
 Expand-Archive -LiteralPath $sourceZip -DestinationPath $StageApp
 
-# 同梱ランタイム: Python の版・依存の固定・torch の版で名前が決まる。中身が同じなら共有する。
-# 「tk」は tkinter 一式 (リリースのアセット。同じ版の通常版 Python から取ったもの) 入りの印。
+# 同梱ランタイム: Python の版・PyTorch の種類・ロックファイル (torch と依存の版とハッシュ) で名前が決まる。
+# 中身が同じなら共有する。
 $requirements = Join-Path $StageApp "packaging\requirements.txt"
 $reqHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash.Substring(0, 12).ToLower()
-# CPU 版は従来の名前のまま (既存のランタイムを使い続ける)。GPU 版は名前に印を付けて別に作る。
-$torchId = if ($TorchVariant -eq "cpu") { "torch$TorchVersion" } else { "torch$TorchVersion-$TorchVariant" }
-$runtimeId = "py$EmbedPythonVersion-tk-$torchId-$reqHash"
+$runtimeId = "py$EmbedPythonVersion-$TorchVariant-$reqHash"
 $Runtime = Join-Path $Shared "runtime\$runtimeId"
 New-Shared $Runtime {
     param($dir)
@@ -250,19 +243,18 @@ New-Shared $Runtime {
     @(("python" + $EmbedPythonVersion.Substring(0, 4).Replace(".", "") + ".zip"), ".", "Lib", "Lib\site-packages", "import site") |
         Set-Content -LiteralPath $pth -Encoding ASCII
     $py = Join-Path $dir "python.exe"
-    $getPip = Join-Path $Download "get-pip.py"
-    Invoke-WebRequest -UseBasicParsing "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
+    $pip = Join-Path $Download "pip-$PipVersion-py3-none-any.whl"
+    Invoke-WebRequest -UseBasicParsing "https://files.pythonhosted.org/packages/py3/p/pip/pip-$PipVersion-py3-none-any.whl" -OutFile $pip
+    if ((Get-FileHash -LiteralPath $pip -Algorithm SHA256).Hash.ToLower() -ne $PipSha256) {
+        Fail "SHA-256 不一致: pip-$PipVersion-py3-none-any.whl"
+    }
+    # ロックファイルのとおりに入れる (--require-hashes: 書いていないもの・ハッシュの違うものは入らない)。
+    # torch は選んだ種類の PyTorch の索引から、ほかは PyPI から来る。
     # pip は利用者の設定 (pip.ini・PIP_* の環境変数) もキャッシュも使わない (--isolated --no-cache-dir)。
     # PIP_REQUIRE_VIRTUALENV などがあると入らず、PIP_INDEX_URL などがあると取得先が変わるため。
-    Invoke-Checked "pip のインストール" { & $py $getPip --isolated --no-cache-dir --no-warn-script-location }
-    # 版とハッシュを固定して入れる (--require-hashes: 書いていないもの・ハッシュの違うものは入らない)。
-    $torchRequirement = Join-Path $Download "torch-requirement.txt"
-    "torch==$TorchVersion --hash=sha256:$($TorchSha256[$TorchVariant])" | Set-Content -LiteralPath $torchRequirement -Encoding ASCII
-    Invoke-Checked "PyTorch $TorchVersion ($TorchVariant) のインストール" {
-        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --require-hashes --no-deps --index-url $TorchIndex -r $torchRequirement
-    }
-    Invoke-Checked "依存パッケージのインストール" {
-        & $py -m pip install --isolated --no-cache-dir --no-warn-script-location --require-hashes -r $requirements
+    Invoke-Checked "PyTorch ($TorchVariant) と依存パッケージのインストール" {
+        & $py "$pip\pip" install --isolated --no-cache-dir --no-warn-script-location --disable-pip-version-check `
+            --require-hashes --only-binary :all: --index-url $TorchIndex --extra-index-url "https://pypi.org/simple" -r $requirements
     }
     if ($TorchVariant -ne "cpu") {
         # 情報だけ。モデルを暖機できるデバイスはエンジンが判定する。
@@ -271,21 +263,17 @@ New-Shared $Runtime {
 }
 $script:Python = Join-Path $Runtime "python.exe"
 
-# 辞書の置き場所の名前は、マニフェストのファイル一覧のハッシュ (キャッシュの名前と同じもの)。
-# 辞書が変われば必ず別の名前になる。
+# 辞書の置き場所の名前は、取得元の google/mozc のコミット (yuragi\lattice\mozc_dict.py)。
 Push-Location -LiteralPath $StageApp
 try {
-    $dictId = & $script:Python -c "import os,sys; sys.path.insert(0, os.getcwd()); from yuragi.lattice.mozc_dict import files_digest; print(files_digest())"
+    $dictId = & $script:Python -c "import os,sys; sys.path.insert(0, os.getcwd()); from yuragi.lattice.mozc_dict import UPSTREAM_COMMIT; print(UPSTREAM_COMMIT)"
 } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { Fail "辞書マニフェストを読めませんでした。" }
+if ($LASTEXITCODE -ne 0) { Fail "辞書のコミットを読めませんでした。" }
 $script:Dict = Join-Path $Shared "dict\$dictId"
 New-Shared $script:Dict {
     param($dir)
     Invoke-Checked "Mozc 辞書のダウンロード" {
         Invoke-App $script:Python $StageApp @("tools.eval.fetch_mozc_dict", "--out", $dir)
-    }
-    Invoke-Checked "Mozc 辞書の SHA-256 照合" {
-        Invoke-App $script:Python $StageApp @("yuragi.lattice.dict_manifest", "verify", "--dict-dir", $dir)
     }
 }
 # 言語モデル (CONVERSION「装置とモデル」): CPU 用の small は常に、GPU 版 PyTorch なら GPU 用の medium も。
