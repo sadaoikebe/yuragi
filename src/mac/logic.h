@@ -32,6 +32,12 @@ typedef NS_ENUM(NSInteger, YRPhase) {
 @property(readonly) BOOL hasTimer;
 @property(readonly) uint64_t timer;
 @property(readonly) NSArray<NSValue *> *segments;  // NSRange of code points in composition
+// The candidate window: the focused clause's page, or predictions offered without the focus (suggesting).
+@property(readonly) BOOL showsCandidates, suggesting, hasNextPage;
+@property(readonly) NSArray<NSString *> *candidates, *candidateNotes;  // notes: empty, or one per candidate
+@property(readonly) NSInteger candIndex, page;
+@property(readonly) BOOL hasSuggestAt;  // when to send "suggest"
+@property(readonly) uint64_t suggestAt;
 // nil when the line is not a JSON object.
 + (nullable YRMessage *)parse:(NSString *)line;
 @end

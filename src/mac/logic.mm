@@ -60,6 +60,18 @@ static NSString *Text(const std::string &s) {
     for (const auto &s : m.segments)
         [segments addObject:[NSValue valueWithRange:NSMakeRange(s.display_start, s.display_end - s.display_start)]];
     out->_segments = segments;
+    out->_showsCandidates = m.ShowsCandidates();
+    out->_suggesting = m.suggesting;
+    out->_hasNextPage = m.has_next_page;
+    NSMutableArray *candidates = [NSMutableArray new], *notes = [NSMutableArray new];
+    for (const auto &c : m.candidates) [candidates addObject:Text(c)];
+    for (const auto &n : m.candidate_notes) [notes addObject:Text(n)];
+    out->_candidates = candidates;
+    out->_candidateNotes = notes;
+    out->_candIndex = m.cand_index;
+    out->_page = m.page;
+    out->_hasSuggestAt = m.suggest_at.has_value();
+    out->_suggestAt = m.suggest_at.value_or(0);
     return out;
 }
 @end

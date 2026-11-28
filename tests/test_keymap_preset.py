@@ -169,6 +169,14 @@ class OneTableTest(unittest.TestCase):
         for name in ("英数", "半角/全角"):
             self.assertEqual(compiled.command_for("empty", Chord.parse(name)).id, "ime_toggle", name)
 
+    def test_without_keymap_json_a_mac_uses_the_macos_preset(self):
+        for platform_preset, alone in (("macos", "insert_space"), (keymap.DEFAULT_PRESET, None)):
+            with patch.object(keymap, "PLATFORM_PRESET", platform_preset):
+                settings = keymap.load_keymap(self.dir)
+            self.assertEqual(settings.use, platform_preset)
+            if alone:
+                self.assertEqual(settings.compile().command_for("empty", Chord.parse("Space")).id, alone)
+
     def test_mode_keys_are_looked_up_without_the_modifier_that_made_them(self):
         self.assertEqual(ANSI.chord(VK_DBE_ALPHANUMERIC, SHIFT), Chord("英数"))  # Shift+CapsLock
         self.assertEqual(ANSI.chord(VK_DBE_DBCSCHAR, CTRL), Chord("半角/全角", CTRL))  # Ctrl+`

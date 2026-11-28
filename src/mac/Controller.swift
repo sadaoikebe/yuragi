@@ -4,6 +4,8 @@ import Carbon
 import Cocoa
 import InputMethodKit
 
+/// DESIGN「定数」 CONTEXT_CHARS: the code points of left context an input start carries.
+let contextChars = 200
 /// DESIGN「定数」 KEY_BUDGET_MS: how long one key may keep the application waiting.
 let keyBudget = 0.2
 /// Marked text for an eaten key that shows nothing yet (the chord is still being judged): a zero
@@ -24,6 +26,11 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
     private var ignoreBefore = 0  // replies to requests older than this change nothing (a reset followed)
     private var roman = false
     private var timer: DispatchSourceTimer?
+    private var suggestTimer: DispatchSourceTimer?
+    private var lastSent = 0  // the newest request: a suggestion answered after it is stale
+    private var focusStart = 0  // UTF-16 offset of the focused clause in the marked text
+    private var noticed = false  // the notice was shown since this field became active
+    private var lastCommit: (seq: Int, text: String)?  // for the engine to tell that the input goes on from it
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
@@ -43,6 +50,7 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         let real = event.isARepeat ? nil : tap.arrive(event.keyCode)
         guard let (seq, vk) = send(event, at: real) else {
             if Log.debug { Log.write("passed \(event.keyCode)") }
+            notice(event)
             if !event.isARepeat { tap.settle(event.keyCode, vk: 0, sentTo: nil) }
             return false
         }
@@ -84,13 +92,45 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         var request: [String: Any] = ["sid": sid, "seq": seq, "op": "down", "vk": vk,
                                       "t": real ?? UInt64(event.timestamp * 1000), "mods": Keys.mods(flags)]
         if flags.contains(.capsLock) { request["caps_lock"] = true }
+        if phase == .empty { addContext(&request) }
         guard engine.send(request) else { return nil }
         waiting.append(seq)
+        lastSent = seq
         if Log.debug {
             Log.write("down \(event.keyCode) seq \(seq) phase \(phase.rawValue) tap \(real != nil)"
                       + " late \(real.map { Int(nowMs()) - Int($0) } ?? -1)")
         }
         return (seq, vk)
+    }
+
+    /// DESIGN「通信」: the text left of the caret when an input starts, and the commit it follows.
+    private func addContext(_ request: inout [String: Any]) {
+        // Terminal answers with the text on its screen, prompt included (MACOS.md §6.4).
+        guard let field = field, field.bundleIdentifier() != "com.apple.Terminal" else { return }
+        let caret = field.selectedRange().location
+        var left: String?
+        if caret != NSNotFound {
+            let units = min(caret, 2 * contextChars)
+            let text = units == 0 ? "" : field.attributedSubstring(from: NSRange(location: caret - units, length: units))?.string
+            left = text.map { String(String.UnicodeScalarView($0.unicodeScalars.suffix(contextChars))) }
+        }
+        request["left_context"] = left ?? NSNull()
+        if Log.debug { Log.write("context \(left.map { "\($0.count)" } ?? "none") follows \(lastCommit.map { left == nil || left!.hasSuffix($0.text) } ?? false)") }
+        if let last = lastCommit {
+            // null: the caret is not where that commit ended.
+            request["after_commit_seq"] = (left == nil || left!.hasSuffix(last.text)) ? last.seq : NSNull()
+        }
+    }
+
+    /// DESIGN「小さな表示」: a character key typed for kana while nothing converts, once per field.
+    private func notice(_ event: NSEvent) {
+        guard !roman, !noticed, let problem = Engine.shared.problem, let field = field,
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+              let vk = Keys.vk[event.keyCode], vk >= 0x30 else { return }
+        noticed = true
+        var caret = NSRect.zero
+        field.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+        CandidateWindow.shared.notice(problem, at: caret)
     }
 
     func keyUp(code: UInt16, vk: UInt32, t: UInt64) {
@@ -102,7 +142,10 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         let seq = Engine.shared.nextSeq()
         var message: [String: Any] = ["sid": sid, "seq": seq, "op": op, "t": nowMs()]
         message.merge(extra) { _, new in new }
-        if Engine.shared.send(message) { waiting.append(seq) }
+        if Engine.shared.send(message) {
+            waiting.append(seq)
+            lastSent = seq
+        }
     }
 
     // -- the engine's answers --------------------------------------------------------------
@@ -118,11 +161,20 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
             let eat = m.eat || m.eatPending
             if seq == awaited { awaitedEat = eat } else if !eat { Log.write("a late reply passed its key: lost") }
         }
-        if seq < ignoreBefore || m.suggestionOnly { return }
+        if seq < ignoreBefore { return }
         guard let field = field else { return }
+        if m.suggestionOnly {
+            // Only the window and the next deadline; nothing if a key went out since.
+            if seq == lastSent {
+                showCandidates(m, field)
+                setSuggestTimer(m.hasSuggestAt ? m.suggestAt : nil)
+            }
+            return
+        }
         if m.error {
             commitShown(field)
             phase = .empty
+            CandidateWindow.shared.hide()
             return
         }
         if !m.commit.isEmpty {
@@ -130,20 +182,47 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
             shown = ""
             placeholder = false
             inserted = true
+            lastCommit = (seq, m.commit)
         }
         // The waiting mark stays while the key that will replace it is being answered.
         let keep = placeholder && m.composition.isEmpty && awaited != nil
         if (!m.composition.isEmpty || !shown.isEmpty) && !keep { mark(m, field) }
         if m.hasPhase { phase = m.phase }
-        if !m.global.isEmpty { Log.write("command \(m.global) not handled yet") }
+        showCandidates(m, field)
+        setSuggestTimer(m.hasSuggestAt ? m.suggestAt : nil)
+        if !m.global.isEmpty { run(m.global, field) }
         setTimer(m.hasTimer && !m.pending ? m.timer : nil)
     }
 
     func lmDone() { request("resolve") }
 
+    private func showCandidates(_ m: YRMessage, _ field: IMKTextInput) {
+        guard m.showsCandidates else { CandidateWindow.shared.hide(); return }
+        var caret = NSRect.zero
+        field.attributes(forCharacterIndex: m.suggesting ? 0 : focusStart, lineHeightRectangle: &caret)
+        if Log.debug { Log.write("candidates \(m.candidates.count) selected \(m.candIndex) suggesting \(m.suggesting) at \(Int(caret.minX)),\(Int(caret.minY)) h \(Int(caret.height))") }
+        CandidateWindow.shared.show(
+            CandidateList(items: m.candidates, notes: m.candidateNotes, selected: m.candIndex, page: m.page,
+                          hasNextPage: m.hasNextPage, suggesting: m.suggesting), at: caret)
+    }
+
+    /// A command the engine leaves to the input program (KEYBIND §7.5).
+    private func run(_ command: String, _ field: IMKTextInput) {
+        switch command {
+        case "ime_off", "ime_toggle":
+            field.selectMode("com.apple.inputmethod.Roman")  // the kana mode off is the Roman mode (MACOS.md §4.3)
+        case "mode_hiragana": request("set_mode", ["mode": "hiragana"])
+        case "mode_katakana": request("set_mode", ["mode": "katakana"])
+        case "mode_full_alnum": request("set_mode", ["mode": "full_alnum"])
+        default: Log.write("command \(command) not handled yet")
+        }
+    }
+
     func engineLost() {
         waiting.removeAll()
         setTimer(nil)
+        setSuggestTimer(nil)
+        CandidateWindow.shared.hide()
         phase = .empty
         if let field = field { commitShown(field) }
     }
@@ -162,6 +241,7 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
                                  range: NSRange(location: 0, length: length))
         }
         var caret = length
+        focusStart = 0
         for (index, value) in m.segments.enumerated() {
             let from = min(utf16(value.rangeValue.location), length)
             let to = min(utf16(value.rangeValue.location + value.rangeValue.length), length)
@@ -169,7 +249,10 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
             let focused = index == m.focus
             marked.addAttributes([.underlineStyle: (focused ? NSUnderlineStyle.thick : .single).rawValue,
                                   .markedClauseSegment: index], range: NSRange(location: from, length: to - from))
-            if focused && m.phase == .editing { caret = to }
+            if focused {
+                focusStart = from
+                if m.phase == .editing { caret = to }
+            }
         }
         if m.caret >= 0 { caret = min(utf16(m.caret), length) }
         field.setMarkedText(marked, selectionRange: NSRange(location: caret, length: 0),
@@ -194,6 +277,23 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         source.resume()
     }
 
+    /// DESIGN「タイマー」: predictions are asked for at the engine's deadline, unless a key is being answered.
+    private func setSuggestTimer(_ at: UInt64?) {
+        suggestTimer?.cancel()
+        suggestTimer = nil
+        guard let at = at else { return }
+        let source = DispatchSource.makeTimerSource(queue: .main)
+        let now = nowMs()
+        source.schedule(deadline: .now() + .milliseconds(Int(at > now ? at - now : 0)))
+        source.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.suggestTimer = nil
+            if self.waiting.isEmpty { self.request("suggest") }
+        }
+        suggestTimer = source
+        source.resume()
+    }
+
     // -- ending the input -------------------------------------------------------------------
 
     private func commitShown(_ field: IMKTextInput) {
@@ -213,6 +313,8 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
     override func commitComposition(_ sender: Any!) {
         if Log.debug { Log.write("commitComposition shown \(shown.count) phase \(phase.rawValue)") }
         if let field = (sender as? IMKTextInput) ?? field { commitShown(field) }
+        CandidateWindow.shared.hide()
+        setSuggestTimer(nil)
         guard phase != .empty || !waiting.isEmpty else { return }
         setTimer(nil)
         phase = .empty
@@ -220,7 +322,38 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         ignoreBefore = waiting.last ?? ignoreBefore
     }
 
+    // -- the input menu (DESIGN「メニュー」) ----------------------------------------------------
+
+    override func menu() -> NSMenu! {
+        let menu = NSMenu()
+        func add(_ title: String, _ action: Selector?) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        if !KeyTap.shared.running {
+            add("「入力監視」の許可が要ります", nil)
+            add("許可の設定を開く", #selector(openPermission(_:)))
+        } else if Engine.shared.state == .stopped {
+            add("もう一度試す", #selector(retry(_:)))
+        } else if Engine.shared.state == .starting {
+            add("（変換の準備をしています）", nil)
+        }
+        // An empty menu makes the OS end the input after every change of the marked text.
+        return menu.items.isEmpty ? nil : menu
+    }
+
+    @objc func openPermission(_ sender: Any?) {
+        KeyTap.shared.start(ask: true)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func retry(_ sender: Any?) { Engine.shared.start() }
+
     override func activateServer(_ sender: Any!) {
+        noticed = false
         Engine.shared.start()
         KeyTap.shared.start(ask: true)
         KeyTap.shared.listening = !roman

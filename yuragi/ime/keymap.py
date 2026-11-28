@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from functools import cache
 from hashlib import sha256
@@ -18,6 +19,8 @@ from .commands import COMMANDS, Command, INPUT, SEND_KEYS
 
 PRESET_PATH = Path(__file__).resolve().parents[1] / "data" / "keymaps" / "ms-ime.json"
 DEFAULT_PRESET = "ms-ime"
+# The preset used when keymap.json names none: on a Mac, the keys of the Japanese input of macOS.
+PLATFORM_PRESET = "macos" if sys.platform == "darwin" else DEFAULT_PRESET
 KEYMAP_NAME = "keymap.json"
 CUSTOM = "custom"
 DEFAULT_TOGGLE = Chord("`", ALT)  # tip.json's default: Alt+` as pressed, which Windows makes 漢字
@@ -294,11 +297,13 @@ def load_keymap(data_dir: Path, *, list_presets: bool = False) -> KeymapSettings
         raw = _read_object(data_dir / KEYMAP_NAME)
     except FileNotFoundError:
         settings.legacy = _legacy_overrides(data_dir)
+        if not settings.legacy:
+            settings.use = load_preset(PLATFORM_PRESET)
     except (OSError, ValueError) as exc:
         settings.error = f"{KEYMAP_NAME} を読めません ({exc})"
     else:
         try:
-            use = raw.get("use", DEFAULT_PRESET)
+            use = raw.get("use", PLATFORM_PRESET)
             if use == CUSTOM or "custom" in raw:
                 try:
                     custom = raw.get("custom")

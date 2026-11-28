@@ -169,6 +169,13 @@ final class Engine {
         }
     }
 
+    /// DESIGN「状態」, as the user is told.
+    var problem: String? {
+        if !KeyTap.shared.running { return "「入力監視」の許可が要ります。メニューバーの「ゆ」から設定を開けます" }
+        if state == .stopped { return "日本語変換が止まっています。メニューバーの「ゆ」から「もう一度試す」を選んでください" }
+        return nil
+    }
+
     private func lost() {
         guard state != .stopped else { return }
         state = .stopped
