@@ -8,12 +8,15 @@ InputMethodKit の入力プログラム（`Yuragi.app`）。方針は [docs/MACO
 | `main.swift` | 起動。`IMKServer` を作り、エンジンの見張りを始める |
 | `Controller.swift` | 入力欄ごとのコントローラ。打鍵を食べるかの判断、要求、返事の反映、変換中の文字、確定、予測の問い合わせ、文書の左文脈、入力メニュー（「設定を開く」「もう一度試す」） |
 | `Candidates.swift` | 候補窓と小さな表示。フォーカスもクリックも取らないパネル |
-| `Engine.swift` | エンジンの子プロセスとその見張り、設定ウィンドウの起動（`engine.json` の `admin_args`）。起動（`engine.json`）、行の読み書き、終了の検知、見張りのタイマー、返事を待つ。起動し直すか・止めるかの判断は `src/broker/broker_core`（DESIGN「見張り」） |
+| `Engine.swift` | エンジンの子プロセスとその見張り、設定ウィンドウを開くこと。起動、行の読み書き、終了の検知、見張りのタイマー、返事を待つ。起動し直すか・止めるかの判断は `src/broker/broker_core`（DESIGN「見張り」） |
+| `Launch.swift` | `engine.json` から Python のプロセスを作る。エンジン（`args`）と、設定ウィンドウの処理（`admin_args`）。入力プログラムと設定ウィンドウの両方が使う |
+| `settings/` | 設定ウィンドウ（SwiftUI）。バンドルの中の別のアプリ（`Contents/Helpers/Yuragi Settings.app`）になる。`App.swift`（窓とサイドバー）、`Panes.swift`（一般・単語登録・学習・状態）、`KeyPane.swift`（キー）、`Model.swift`（表示するもの）、`Service.swift`（処理を頼む相手 `yuragi/ime/admin_service.py` との 1 行 1 JSON） |
 | `Peers.swift` | 設定ウィンドウとの通信口。この利用者だけが開ける Unix ソケット（`~/Library/Application Support/yuragi-ime/broker.sock`）。相手は `yuragi/ime/broker_client.py` |
 | `KeyTap.swift` | イベントの監視。押下の実際の時刻と解放を採り、起きた順にエンジンへ渡す |
 | `KeyOrder.swift` | 監視が見たキーの順序の判断（解放をいつエンジンへ送れるか、押下の実際の時刻）。OS の部品を使わない。試験は `tests/KeyOrderTests.swift` |
 | `Keys.swift` | macOS のキーコードから、エンジンが使う Win32 の仮想キーへの表（US キーボード） |
 | `logic.h`・`logic.mm` | `src/tip/tip_logic.h` の判断（返事の解釈、食べる表）と `broker_core` の見張りを Swift から使うための層 |
+| `strings/` | OS が入力メニューに出す名前（見出しと、モードの「ひらがな (Yuragi)」「英字 (Yuragi)」。標準の日本語入力のモードと見分けられる名前にする）。日本語と英語 |
 | `Log.swift` | `~/Library/Logs/yuragi-ime/input.log` |
 | `ctl.swift`・`icon.swift` | 入力ソースの登録・有効化・選択の道具、メニューバーのアイコンを作る道具 |
 | `build.sh`・`dev-install.sh`・`dev-uninstall.sh` | ビルド、開発用のインストールと削除 |
@@ -34,7 +37,8 @@ src/mac/dev-uninstall.sh      # 消す。利用者のデータ（~/.yuragi-ime�
 - 初回だけ、システム設定 > キーボード > 入力ソース > 編集 > ＋ > 日本語 で「Yuragi」を追加する（MACOS.md §6.3）。入れ直しでは要らない。
 - エンジンの起動のしかたは `~/Library/Application Support/yuragi-ime/versions/dev/engine.json`（形は `src/broker/support.h`）。`DATA_DIR=<フォルダ> src/mac/dev-install.sh` で、エンジンのデータの場所を利用者のもの（`~/.yuragi-ime`）から変えられる。
 - 記録は `~/Library/Logs/yuragi-ime/` の `input.log`（入力プログラム）と `engine.log`（エンジンの標準エラー）。打った内容は書かない。同じフォルダに `debug` という名前のファイルを置いている間だけ、打鍵のキーコードを書く。
-- 設定ウィンドウは、入力メニューの「設定を開く」か、`.venv/bin/python -m yuragi.ime.admin_ui`。2 つめを起動すると、開いている窓が前に出る（`<データの場所>/admin.lock`）。
+- 設定ウィンドウは、入力メニューの「設定を開く」か、`open "$HOME/Library/Input Methods/Yuragi.app/Contents/Helpers/Yuragi Settings.app"`。開いているときは、その窓が前に出る。`--args -pane words` を付けると、そのペインで開く（`general`・`words`・`learning`・`keys`・`status`。開いている窓には効かない）。
+- 設定ウィンドウの処理だけを試す: `echo '{"op":"state"}' | .venv/bin/python -m yuragi.ime.admin_service --runtime-dir <フォルダ>`。
 - 見張りの確認: `pkill -f yuragi.engine`（起動し直す。3 回続けると止まる）、`pkill -STOP -f yuragi.engine` のあと 1 キー打つ（5 秒で終わらせて起動し直す）。`input.log` に出る。
 - 合成したキーでの確認: `tools/keyprobe/mac/out/probe app io.github.yuragi.inputmethod.Yuragi.Japanese "wlhosdke {Space} {Return}" | python3 tools/keyprobe/mac/summary.py`（入力欄に「開発してきた」が入る）。先に入力ソースを選んで、`input.log` に `engine ready` が出るのを待つ。
 
@@ -50,6 +54,8 @@ src/mac/dev-uninstall.sh      # 消す。利用者のデータ（~/.yuragi-ime�
 | 記録とエンジンの出力の読み書きは、失敗を返す呼び出し（`write(contentsOf:)`、`read(2)`）で行う | `FileHandle` の古い呼び出し（`write(_:)`、`availableData`、`seekToEndOfFile`）は、失敗すると Swift で捕まえられない例外を投げ、入力プログラムが落ちる（ディスクが一杯のとき） |
 | 解放は、それより前の押下が `handle` に届くまでエンジンに送らない（`KeyOrder.swift`） | イベントの監視は押下を InputMethodKit より先に見る。解放を先に送ると、エンジンに届く順序が実際と変わる |
 | 入力メニュー（`menu()`）は、項目の無いメニューを返さない | 空のメニューを返すと、変換中の文字が変わるたびに OS が入力を打ち切る（`commitComposition` が呼ばれ、文字は入らない） |
+| 設定ウィンドウに出す文言と、できる・できないの判断は、Python（`admin_service.py`）で決める | Windows 版の窓と同じ規則・同じ文言になる。Swift の側に写しを持つと、片方だけ変わる |
+| 入力メニューに出る名前は、`strings/` の `InfoPlist.strings` に、バンドルの名前（`CFBundleName`）とモードの ID の両方を書く | 無い項目は、OS がキーの名前（`CFBundleName`、`com.apple.inputmethod.Japanese`）をそのまま出す |
 | キーの返事は `KEY_BUDGET_MS`（200 ミリ秒）まで待ち、間に合わなければ食べる | アプリは `handle` の返事を待って止まる |
 
 ## まだ無いもの

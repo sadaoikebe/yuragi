@@ -218,7 +218,8 @@ final class YuragiController: IMKInputController, EngineSession, KeyUpReceiver {
         case "mode_hiragana": request("set_mode", ["mode": "hiragana"])
         case "mode_katakana": request("set_mode", ["mode": "katakana"])
         case "mode_full_alnum": request("set_mode", ["mode": "full_alnum"])
-        case "open_settings", "open_word_register": Engine.shared.openSettings()
+        case "open_settings": Engine.shared.openSettings()
+        case "open_word_register": Engine.shared.openSettings(pane: "words")
         default: Log.write("command \(command) not handled yet")
         }
     }

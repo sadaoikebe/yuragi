@@ -88,6 +88,8 @@ powershell -ExecutionPolicy Bypass -File .\src\tip\dev-register.ps1   # タグ d
 - 設定ウィンドウ: `python -m yuragi.ime.admin_ui`（tkinter、標準ライブラリだけ）。ロジックは tkinter に
   依存しない `AdminModel`（試験は `tests/test_admin_ui.py`）にあり、画面は薄い殻。画面の文言はすべて日本語
   （`admin_ui.SETTINGS` などの表）。DPI 対応を申告する。`--runtime-dir` で置き場所を変えられる。
+  macOS の窓は SwiftUI（`src/mac/settings/`）で、同じ `AdminModel` を `python -m yuragi.ime.admin_service`
+  （1 行 1 JSON、試験は `tests/test_admin_service.py`）越しに使う。
 
 - キー入力（TSF に届くキー、Alt、PreservedKey、US 配列の読み替え）の前提は [keybind/windows.md](keybind/windows.md)。
   その前提は、ゆらぎとは別の確認用の TIP と `checks.py` で実機で確かめる。MS-IME の動きを見る道具も同じ所にある（`tools/keyprobe/README.md`）。

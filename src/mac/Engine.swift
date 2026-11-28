@@ -2,7 +2,7 @@
 // one JSON object per line on the engine's stdin and stdout. The decisions are broker_core's
 // (YRWatcher); this file owns the process, the pipes and the timer. Everything here but the
 // readers runs on the main thread.
-import Foundation
+import Cocoa
 
 protocol EngineSession: AnyObject {
     /// A reply, or `lm_done`, `reset` and `state` events (DESIGN「通信」).
@@ -70,7 +70,6 @@ final class Engine: NSObject, YRWatcherPlatform {
     func peerClosed(_ id: Int) { call { watcher.sessionClosed(UInt64(id)) } }
 
     /// DESIGN「メニュー」「設定を開く」.
-    func openSettings() { openAdmin() }
 
     func nextSeq() -> Int {
         lastSeq += 1
@@ -164,35 +163,8 @@ final class Engine: NSObject, YRWatcherPlatform {
 
     // -- YRWatcherPlatform -----------------------------------------------------------------
 
-    /// versions/<tag>/engine.json beside the shared files (MACOS.md §4.6; the form is src/broker/support.h).
-    private var configURL: URL {
-        let tag = Bundle.main.object(forInfoDictionaryKey: "YuragiTag") as? String ?? "dev"
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/yuragi-ime/versions/\(tag)/engine.json")
-    }
-
-    /// A Python process of this version: the engine (`args`) or the settings window (`admin_args`).
-    private func python(_ key: String) -> (Process, [String])? {
-        guard let data = try? Data(contentsOf: configURL),
-              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let python = config["python"] as? String, let app = config["app"] as? String,
-              let args = config[key] as? [String] else { return nil }
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: python)
-        child.arguments = args
-        child.currentDirectoryURL = URL(fileURLWithPath: app)
-        var env = ProcessInfo.processInfo.environment
-        env.removeValue(forKey: "PYTHONPATH")
-        env.removeValue(forKey: "PYTHONHOME")
-        for (key, value) in ["PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1", "HF_HUB_OFFLINE": "1"] {
-            env[key] = value
-        }
-        child.environment = env
-        return (child, args)
-    }
-
     func startEngine() -> String? {
-        guard let (child, args) = python("args") else { return "engine.json unreadable: \(configURL.path)" }
+        guard let (child, args) = Launch.python("args") else { return "engine.json unreadable: \(Launch.config.path)" }
         // The user's data (yuragi.ime.config.DEFAULT_RUNTIME_DIR, or the engine's --data-dir).
         let at = args.firstIndex(of: "--data-dir").map { $0 + 1 }
         dataDir = at.flatMap { $0 < args.count ? URL(fileURLWithPath: args[$0]) : nil }
@@ -291,13 +263,19 @@ final class Engine: NSObject, YRWatcherPlatform {
     }
 
     /// The settings window: its own process. A second one hands over to the first (admin_ui).
-    func openAdmin() {
-        guard let (child, _) = python("admin_args") else { Log.write("no admin_args in engine.json"); return }
-        child.standardInput = FileHandle.nullDevice
-        child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
-        do { try child.run() } catch { Log.write("settings window not started: \(error.localizedDescription)") }
+    /// The settings window is its own application inside this bundle (settings/): opening it again
+    /// brings the one that is running to the front. `pane` is where a new one opens (settings/App.swift).
+    func openSettings(pane: String? = nil) {
+        let app = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/Yuragi Settings.app")
+        let how = NSWorkspace.OpenConfiguration()
+        how.activates = true
+        if let pane { how.arguments = ["-pane", pane] }
+        NSWorkspace.shared.openApplication(at: app, configuration: how) { _, error in
+            if let error { Log.write("settings window not opened: \(error.localizedDescription)") }
+        }
     }
+
+    func openAdmin() { openSettings() }
 
     func log(_ line: String) { Log.write(line) }
 }

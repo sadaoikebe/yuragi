@@ -85,23 +85,6 @@ class ModelTest(Base):
             self.assertFalse(m.save_keys(m.key_settings()).ok)
 
 
-@unittest.skipIf(sys.platform == "win32", "uses a locked file and a signal")
-class PosixActivationTest(unittest.TestCase):
-    def test_second_launch_signals_the_first(self):
-        import signal
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "data" / "config.json"
-            before = signal.getsignal(signal.SIGUSR1)
-            self.addCleanup(signal.signal, signal.SIGUSR1, before)
-            with admin_ui._posix_activation(path) as event:
-                self.assertFalse(event.is_set())
-                with admin_ui._posix_activation(path) as second:
-                    self.assertIsNone(second)
-                self.assertTrue(event.wait(1))
-            with admin_ui._posix_activation(path) as event:  # the lock went with its owner
-                self.assertIsNotNone(event)
-
-
 class SocketClientTest(unittest.TestCase):
     """The macOS line (broker_client._SocketConnection) against a small server."""
 

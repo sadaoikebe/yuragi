@@ -1,0 +1,8 @@
+/* Names the OS looks up for the input menu: the heading of this input program's items and its modes.
+   Without an entry it shows the key itself. */
+"CFBundleName" = "Yuragi";
+"CFBundleDisplayName" = "Yuragi";
+"com.apple.inputmethod.Japanese" = "Hiragana (Yuragi)";
+"com.apple.inputmethod.Roman" = "Romaji (Yuragi)";
+"io.github.yuragi.inputmethod.Yuragi.Japanese" = "Hiragana (Yuragi)";
+"io.github.yuragi.inputmethod.Yuragi.Roman" = "Romaji (Yuragi)";

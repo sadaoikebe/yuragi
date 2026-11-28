@@ -676,54 +676,6 @@ def _watch_windows_activation(root, event):
     root.after(100, _watch_windows_activation, root, event)
 
 
-@contextlib.contextmanager
-def _posix_activation(config_file: Path):
-    """As _windows_activation: a locked file holds the owner's process ID, and SIGUSR1 signals it.
-
-    Yields a threading.Event that is set at each signal, or None when another process owns the window.
-    """
-    import fcntl
-    import signal
-    import threading
-
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_file.parent / "admin.lock", "a+", encoding="ascii") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            lock.seek(0)
-            owner = lock.read().strip()
-            if owner.isdigit():
-                os.kill(int(owner), signal.SIGUSR1)
-            yield None
-            return
-        event = threading.Event()
-        # The handler first: the signal ends a process that has none.
-        signal.signal(signal.SIGUSR1, lambda *_: event.set())
-        lock.seek(0)
-        lock.truncate()
-        lock.write(str(os.getpid()))
-        lock.flush()
-        yield event
-
-
-def _raise_posix_admin(root):
-    if root.state() in ("iconic", "withdrawn"):
-        root.deiconify()
-    root.lift()
-    # Started by a background program, the window opens behind the application in front.
-    root.attributes("-topmost", True)
-    root.attributes("-topmost", False)
-    root.focus_force()
-
-
-def _watch_posix_activation(root, event):
-    if event.is_set():
-        event.clear()
-        _raise_posix_admin(root)
-    root.after(100, _watch_posix_activation, root, event)
-
-
 def _run_window(model: AdminModel, dict_dir: Path | None, event=None) -> int:
     if dict_dir is not None:
         from yuragi.lattice import mozc_dict
@@ -733,10 +685,9 @@ def _run_window(model: AdminModel, dict_dir: Path | None, event=None) -> int:
     root = tk.Tk()
     AdminWindow(root, model)  # opens on 単語登録
     if event is not None:
-        windows = sys.platform == "win32"
         root.update_idletasks()
-        (_raise_windows_admin if windows else _raise_posix_admin)(root)
-        root.after(100, _watch_windows_activation if windows else _watch_posix_activation, root, event)
+        _raise_windows_admin(root)
+        root.after(100, _watch_windows_activation, root, event)
     root.mainloop()
     return 0
 
@@ -747,8 +698,9 @@ def main(argv=None) -> int:
     parser.add_argument("--dict-dir", type=Path, default=None)
     args = parser.parse_args(argv)
     model = AdminModel(args.runtime_dir)
-    activation = _windows_activation if sys.platform == "win32" else _posix_activation
-    with activation(model.config_file) as event:
+    if sys.platform != "win32":
+        return _run_window(model, args.dict_dir)
+    with _windows_activation(model.config_file) as event:
         if event is None:
             return 0
         return _run_window(model, args.dict_dir, event)
