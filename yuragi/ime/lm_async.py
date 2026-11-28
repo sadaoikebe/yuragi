@@ -12,6 +12,11 @@ A conversion waits for the LM: its picks are the conversion. The deadline
 cut but a fault detector, set above every normal conversion; a
 conversion that reaches it (a stuck or broken LM) is logged and takes the
 Viterbi 1-best so that typing goes on.
+
+LM_FAULTS conversions in a row that raised or reached the deadline end the
+LM's use in this engine (a stuck worker, a GPU that went away): conversions no
+longer wait for it. Nothing loads the LM again by itself: loading is heavy, and
+an LM that keeps failing must not load the machine again and again.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ DEADLINE_MS = 600
 # 2026-11-20), so a normal one stays under it on a slow PC too.
 DEADLINE_CALIBRATIONS = 10
 REQUIRED_LM_DEADLINE_MS = 10_000
+LM_FAULTS = 2  # in a row: the LM is not used any more
 POLL_MS = 10
 PREFETCH_DELAY_MS = 30
 
@@ -65,8 +71,9 @@ class LmWorker:
     def __init__(self, loader, lex, *, clock=time.monotonic, on_disabled=None, retry_after=None,
                  timing=False):
         """The loader returns a warmed converter. If it raises, retry_after(exc) gives the
-        seconds to wait before loading again, or None: then on_disabled() is called once
-        on the worker thread. Conversions go without the LM until it is loaded."""
+        seconds to wait before loading again, or None: then on_disabled() is called once.
+        It is also called once after LM_FAULTS faults in a row (fault()).
+        Conversions go without the LM until it is loaded."""
         self.loader = loader
         self.on_disabled = on_disabled
         self.retry_after = retry_after
@@ -80,7 +87,7 @@ class LmWorker:
         self._slots: dict[int, Job] = {}  # id(owner) -> queued prefetch
         self._running: Job | None = None
         self._stopped = False
-        self.failures = 0  # jobs that raised (a GPU that went away, say)
+        self.faults = 0  # in a row: jobs that raised or were not done by the deadline
         self.thread = threading.Thread(target=self._run, name="lm-worker", daemon=True)
         self.thread.start()
 
@@ -141,6 +148,18 @@ class LmWorker:
         """A queued job that will never run (caller holds the lock)."""
         job.cancelled = True
         job.done.set()
+
+    def fault(self) -> None:
+        """A wanted conversion raised or was not done by its deadline."""
+        with self._cond:
+            self.faults += 1
+            if self.faults < LM_FAULTS or self.state != "ready":
+                return
+            self.state = "disabled"
+            self.stop()
+        print(f"LM not used any more ({LM_FAULTS} faults in a row)", file=sys.stderr, flush=True)
+        if self.on_disabled is not None:
+            self.on_disabled()
 
     def stop(self) -> None:
         """Engine shutdown: finish nothing new, cut the running job short.
@@ -227,13 +246,15 @@ class LmWorker:
         except Exception as exc:
             # That conversion is the Viterbi 1-best; the next one tries again.
             job.error = True
-            self.failures += 1
             print(f"LM job failed ({type(exc).__name__})", file=sys.stderr, flush=True)
+            self.fault()  # before the result is published: the next conversion sees it
         with self._cond:
             with job.completion_lock:
                 job.completed_at = self.clock()
             self._running = None
             job.done.set()
+            if not job.error and not job.cancelled:
+                self.faults = 0
         if self.timing:
             print(f"LM worker job={id(job)} submitted={job.submitted_at:.6f} "
                   f"eligible={max(job.submitted_at, job.not_before):.6f} "
@@ -423,6 +444,7 @@ class ConnectionPipeline:
                 return None
             return job.picks
         self.worker.cancel_owner(self)
+        self.worker.fault()
         self._trace_resolution(job, now, "deadline")
         if self.require_lm:
             raise TimeoutError("LM conversion timed out")

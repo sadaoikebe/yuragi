@@ -64,6 +64,10 @@ class ManualWorker:
         self.conversions = 0
         self.clock = Clock()
         self.draining = False  # complete_all(): later conversions complete at once too
+        self.faults = 0
+
+    def fault(self):
+        self.faults += 1
 
     def available(self):
         return self.ready
@@ -594,12 +598,103 @@ class DeadlineTest(unittest.TestCase):
                 commits += reply["commit"]
         self.assertTrue(job.cancelled)
         self.assertIn("fault", log.getvalue())  # detected, not silent
+        self.assertEqual(worker.faults, 1)
         worker.complete_all()  # a late result changes nothing
         self.assertFalse(pipe.handle({"op": "timeout", "t": 0})["pending"])
         expected = run_reference(self.session, head + tail.events, None)
         self.assertEqual((commits, final_state(reply)), expected)
         self.assertNotEqual(expected, run_reference(self.session, head + tail.events,
                                                     PickyModel()))
+
+
+class FaultyModel(PickyModel):
+    """Does what `mode` says: "ok", "raise", or "block" (until `release` is set)."""
+
+    def __init__(self):
+        self.mode = "ok"
+        self.release = threading.Event()
+
+    def gate(self):
+        if self.mode == "raise":
+            raise RuntimeError("CUDA error")
+        if self.mode == "block":
+            self.release.wait(30)
+
+    def reading_nll(self, context, readings):
+        self.gate()
+        return super().reading_nll(context, readings)
+
+    def candidate_nll(self, context, candidates):
+        self.gate()
+        return super().candidate_nll(context, candidates)
+
+    def review(self, context, reading, draft, accepted, reachable):
+        self.gate()
+        return super().review(context, reading, draft, accepted, reachable)
+
+
+class FaultTest(unittest.TestCase):
+    """An LM that keeps failing is given up: no conversion waits for it, nothing loads it again."""
+
+    def setUp(self):
+        self.lex = small_lex("きしゃ 帰社 2000\nきしゃ 記者 1000\nきしゃ 汽車 2000")
+        self.model = FaultyModel()
+        self.clock = Clock()
+        self.disabled = []
+        self.worker = LmWorker(lambda: ZenzConverter(self.model), self.lex, clock=self.clock,
+                               on_disabled=lambda: self.disabled.append(None))
+        self.addCleanup(self.stop)
+        self.assertTrue(self.worker.wait_until_loaded())
+        self.pipe = ConnectionPipeline(ImeSession(_table=load_table(), _lex=self.lex), self.worker,
+                                       clock=self.clock, prefetch="off")
+        self.typist = Typist()
+
+    def stop(self):
+        self.model.release.set()
+        self.worker.stop()
+        self.worker.thread.join(5)
+        self.assertFalse(self.worker.thread.is_alive())
+
+    def convert(self, mode):
+        """Type, convert and commit one word; whether the conversion waited for the LM."""
+        self.model.mode = mode
+        self.typist.kana("きしゃ").space()
+        events, self.typist.events = self.typist.events, []
+        with redirect_stderr(io.StringIO()):
+            for event in events:
+                reply = self.pipe.handle(dict(event))
+            waited = reply["pending"]
+            if waited:
+                if mode == "block":
+                    self.clock.now += DEADLINE_MS / 1000
+                else:
+                    self.assertTrue(self.pipe.job.done.wait(5))
+                self.assertFalse(self.pipe.handle(TERMINAL)["pending"])
+            for event in self.typist.tap(VK_RETURN).events:
+                self.pipe.handle(dict(event))
+        self.typist.events = []
+        return waited
+
+    def test_a_stuck_lm_is_given_up_after_two_conversions(self):
+        self.assertTrue(self.convert("block"))
+        self.assertTrue(self.worker.available())
+        self.assertTrue(self.convert("block"))  # behind the stuck one: its deadline comes too
+        self.assertFalse(self.worker.available())
+        self.assertFalse(self.convert("block"))  # no more waiting
+        self.assertEqual(len(self.disabled), 1)
+
+    def test_an_lm_that_raises_is_given_up_after_two_conversions(self):
+        self.assertTrue(self.convert("raise"))
+        self.assertTrue(self.convert("raise"))
+        self.assertFalse(self.convert("raise"))
+        self.assertEqual(len(self.disabled), 1)
+
+    def test_faults_are_counted_in_a_row(self):
+        for mode in ("raise", "ok", "raise", "ok"):
+            self.assertTrue(self.convert(mode))
+        self.assertTrue(self.worker.available())
+        self.assertEqual(self.disabled, [])
+
 
 if __name__ == "__main__":
     unittest.main()

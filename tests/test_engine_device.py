@@ -18,16 +18,15 @@ from yuragi.ime import power, server
 from yuragi.ime.zenz import CALIBRATION_LIMIT_MS
 
 
-def worker(device=None, failures=0, state="ready"):
+def worker(device=None, state="ready"):
     template = None if device is None else SimpleNamespace(model=SimpleNamespace(device=device))
-    return SimpleNamespace(template=template, failures=failures, state=state)
+    return SimpleNamespace(template=template, state=state)
 
 
 class DeviceChangeTest(unittest.TestCase):
-    def make(self, *, device, battery_at_load=False, gpu_model="medium", failures=0,
-             state="ready"):
+    def make(self, *, device, battery_at_load=False, gpu_model="medium", state="ready"):
         engine = Engine(None, Namespace(data_dir=None))
-        engine.worker = worker(device, failures, state)
+        engine.worker = worker(device, state)
         engine.lm_on_battery = battery_at_load
         engine.settings = SimpleNamespace(lm_model=gpu_model)
         return engine
@@ -54,6 +53,13 @@ class DeviceChangeTest(unittest.TestCase):
         # small too slow on battery: no LM; on AC the GPU may do.
         disabled = self.make(device=None, battery_at_load=True, state="disabled")
         self.assertIsNotNone(self.change(disabled, battery=False))
+
+    def test_an_lm_given_up_is_not_loaded_again(self):
+        """Only the power source restarts the engine: an LM that keeps failing would be
+        loaded again and again."""
+        for device in ("cuda:0", "cpu"):
+            given_up = self.make(device=device, state="disabled")
+            self.assertIsNone(self.change(given_up, battery=False))
 
 
 class LmRetryTest(unittest.TestCase):

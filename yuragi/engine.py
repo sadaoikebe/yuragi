@@ -45,11 +45,12 @@ MAX_TOKENS = 200  # DESIGN「定数」: the input length a conversion handles
 # DESIGN「見張り」: exiting with this code after ready asks the broker to start the
 # engine again without counting it as a failure (broker_core.h ENGINE_RESTART_CODE).
 RESTART_CODE = 75
-# CONVERSION「装置とモデル」: when the LM device should change (power source, a GPU
-# that failed), the engine restarts once nobody has typed for this long.
+# CONVERSION「装置とモデル」: when the LM device should change (the power source),
+# the engine restarts once nobody has typed for this long.
 IDLE_BEFORE_RESTART_S = 60
 POWER_POLL_S = 15
-GPU_FAILURES_BEFORE_RESTART = 2
+# At exit, an LM worker that does not stop (stuck in the LM) is not waited for longer.
+WORKER_EXIT_S = 5
 # CONVERSION「装置とモデル」: an LM found too slow is calibrated once more, this long
 # after, if it was within LM_RETRY_FACTOR times the limit (a busy moment at sign-in,
 # 2026-11-20: 351 ms there, 186 ms on the same PC when it was quiet). A PC far
@@ -319,7 +320,7 @@ class Engine:
         return LM_RETRY_DELAY_S
 
     def lm_disabled(self) -> None:
-        log("LM not used (it could not be loaded)")
+        log("LM not used (it could not be loaded, or it kept failing)")
         self.channel.warning("lm")
 
     def warm_up(self) -> None:
@@ -431,8 +432,6 @@ class Engine:
             return None
         template = worker.template
         on_gpu = template is not None and str(template.model.device).startswith("cuda")
-        if on_gpu and worker.failures >= GPU_FAILURES_BEFORE_RESTART:
-            return "the LM failed on the GPU"
         battery = on_battery()
         if on_gpu and battery:
             return "on battery: leaving the GPU"
@@ -535,7 +534,11 @@ def main(argv=None) -> int:
     log("stdin closed; exiting")
     if engine.worker is not None:
         engine.worker.stop()
-        engine.worker.thread.join()
+        engine.worker.thread.join(WORKER_EXIT_S)
+        if engine.worker.thread.is_alive():
+            log("the LM worker did not stop; exiting without it")
+            sys.stderr.flush()
+            os._exit(0)
     return 0
 
 
