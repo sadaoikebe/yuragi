@@ -1,5 +1,5 @@
 // ctl list | register <app path> | enable <id> | disable <id> | select <id> | current
-// Input sources of the probe (and the current one), through Text Input Sources.
+// The input sources of Yuragi and of its probe (and the current one), through Text Input Sources.
 import Carbon
 import Foundation
 
@@ -21,7 +21,7 @@ func line(_ s: TISInputSource) -> String {
 let a = CommandLine.arguments
 switch a.count > 1 ? a[1] : "" {
 case "list":
-    for s in all() where ((prop(s, kTISPropertyInputSourceID) as String?) ?? "").contains("YuragiProbe") { print(line(s)) }
+    for s in all() where ((prop(s, kTISPropertyInputSourceID) as String?) ?? "").contains("io.github.yuragi.") { print(line(s)) }
 case "register":
     print("register status=\(TISRegisterInputSource(URL(fileURLWithPath: a[2]) as CFURL))")
 case "enable":

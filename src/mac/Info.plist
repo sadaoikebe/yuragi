@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key><string>ja</string>
+	<key>CFBundleExecutable</key><string>Yuragi</string>
+	<key>CFBundleIdentifier</key><string>io.github.yuragi.inputmethod.Yuragi</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>Yuragi</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>LSMinimumSystemVersion</key><string>13.0</string>
+	<key>LSBackgroundOnly</key><true/>
+	<key>YuragiTag</key><string>dev</string>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>InputMethodConnectionName</key><string>Yuragi_1_Connection</string>
+	<key>InputMethodServerControllerClass</key><string>YuragiController</string>
+	<key>tsInputMethodCharacterRepertoireKey</key>
+	<array><string>Hira</string><string>Kana</string><string>Latn</string></array>
+	<key>tsInputMethodIconFileKey</key><string>hira.tiff</string>
+	<key>ComponentInputModeDict</key>
+	<dict>
+		<key>tsInputModeListKey</key>
+		<dict>
+			<key>com.apple.inputmethod.Japanese</key>
+			<dict>
+				<key>TISInputSourceID</key><string>io.github.yuragi.inputmethod.Yuragi.Japanese</string>
+				<key>TISIntendedLanguage</key><string>ja</string>
+				<key>tsInputModeAlternateMenuIconFileKey</key><string>hira.tiff</string>
+				<key>tsInputModeCharacterRepertoireKey</key>
+				<array><string>Hira</string><string>Kana</string><string>Hani</string></array>
+				<key>tsInputModeDefaultStateKey</key><true/>
+				<key>tsInputModeIsVisibleKey</key><true/>
+				<key>tsInputModeJISKeyboardShortcutKey</key><integer>1</integer>
+				<key>tsInputModeMenuIconFileKey</key><string>hira.tiff</string>
+				<key>tsInputModePaletteIconFileKey</key><string>hira.tiff</string>
+				<key>tsInputModePrimaryInScriptKey</key><true/>
+				<key>tsInputModeScriptKey</key><string>smJapanese</string>
+			</dict>
+			<key>com.apple.inputmethod.Roman</key>
+			<dict>
+				<key>TISInputSourceID</key><string>io.github.yuragi.inputmethod.Yuragi.Roman</string>
+				<key>TISIntendedLanguage</key><string>en</string>
+				<key>tsInputModeAlternateMenuIconFileKey</key><string>roman.tiff</string>
+				<key>tsInputModeCharacterRepertoireKey</key>
+				<array><string>Latn</string></array>
+				<key>tsInputModeDefaultStateKey</key><false/>
+				<key>tsInputModeIsVisibleKey</key><true/>
+				<key>tsInputModeJISKeyboardShortcutKey</key><integer>0</integer>
+				<key>tsInputModeMenuIconFileKey</key><string>roman.tiff</string>
+				<key>tsInputModePaletteIconFileKey</key><string>roman.tiff</string>
+				<key>tsInputModePrimaryInScriptKey</key><true/>
+				<key>tsInputModeScriptKey</key><string>smRoman</string>
+			</dict>
+		</dict>
+		<key>tsVisibleInputModeOrderedArrayKey</key>
+		<array>
+			<string>com.apple.inputmethod.Japanese</string>
+			<string>com.apple.inputmethod.Roman</string>
+		</array>
+	</dict>
+</dict>
+</plist>

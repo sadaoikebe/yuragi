@@ -17,7 +17,7 @@
 - [assets/icon/THEME.md](../assets/icon/THEME.md) — 見た目のテーマ（アイコンの形と色、`.ico` の大きさと作り方、使いどころ）
 
 同時打鍵の状態機械（S1〜S7）の仕様は [JIS-FSM.md](JIS-FSM.md) にあります。
-TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/broker/README.md`](../src/broker/README.md)。
+TIP は [`src/tip/README.md`](../src/tip/README.md)、ブローカーは [`src/broker/README.md`](../src/broker/README.md)、macOS の入力プログラムは [`src/mac/README.md`](../src/mac/README.md)。
 
 ## 開発環境
 
@@ -29,7 +29,7 @@ Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても�
 
 `tests/test_installer_scripts.py` の PowerShell の部分は、`YURAGI_PWSH` で指定したもの、無ければ `pwsh`、それも無ければ Windows PowerShell 5.1（`powershell`）を使う（どれも無ければ飛ばす）。
 
-### macOS（変換エンジン。入力プログラムの方針は [MACOS.md](MACOS.md)）
+### macOS（変換エンジンと入力プログラム。方針は [MACOS.md](MACOS.md)）
 
 Apple シリコンの Mac、Xcode、Homebrew の `python@3.13`・`python-tk@3.13`・`cmake`。Linux と同じ試験が回る。CI の macOS ジョブと同じ。
 
@@ -43,6 +43,7 @@ Apple シリコンの Mac、Xcode、Homebrew の `python@3.13`・`python-tk@3.13
 ```
 
 エンジンは標準入出力で 1 行 1 JSON を話す（`yuragi/engine.py` の冒頭）。選ばれた装置とモデルは標準エラーの `LM calibration` の行に出る。
+入力プログラムのビルドと開発用のインストールは [`src/mac/README.md`](../src/mac/README.md)。
 
 ### Windows（TIP の DLL とブローカーの exe）
 

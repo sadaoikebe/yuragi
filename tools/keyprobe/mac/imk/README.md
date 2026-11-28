@@ -9,9 +9,8 @@ InputMethodKit の入力プログラムに何が届くかを、実機で記録�
 | `main.swift` | 入力プログラム `YuragiProbe`。届いたイベントと、イベントの監視で見えたキーを `~/Library/Logs/yuragi-probe/imk.jsonl` に JSON の行で書く。既定ではキーを食べずに通す |
 | `Info.plist` | 入力ソースの定義。ひらがな（`…YuragiProbe.Japanese`、アイコン「ゆ」）と英字（`…YuragiProbe.Roman`、アイコン「Y」）の 2 モード |
 | `icon.swift` | メニューバーのアイコン（1 文字）を作る |
-| `ctl.swift` | 入力ソースの登録・有効化・選択。`ctl list｜register <アプリ>｜enable <ID>｜disable <ID>｜select <ID>｜current` |
-| `build.sh` | `out/YuragiProbe.app`（簡易の署名）と `out/ctl` を作る |
-| `install.sh` | 作って `~/Library/Input Methods/` に置き、2 つのモードを有効にする |
+| `build.sh` | `out/YuragiProbe.app`（簡易の署名）と `out/ctl` を作る。`ctl`（入力ソースの登録・有効化・選択。`ctl list｜register <アプリ>｜enable <ID>｜disable <ID>｜select <ID>｜current`）とアイコンの道具の元は `src/mac/` |
+| `install.sh` | 作って `~/Library/Input Methods/` に置き、2 つのモードを有効にする。有効にならないときは、システム設定で 1 度追加する（MACOS.md §6.3） |
 | `uninstall.sh` | 入力プログラム、記録のフォルダ、「入力監視」の許可の記録を消す |
 | `session.py` | 記録を 1 回採る。プローブを選び、人が打つのを待ち、ABC に戻して、採れた分を表示する |
 
