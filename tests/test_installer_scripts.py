@@ -21,11 +21,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PWSH = os.environ.get("YURAGI_PWSH") or shutil.which("pwsh") or shutil.which("powershell")
+UTF8_OUTPUT = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;"
 
 
 def pwsh(script: str) -> str:
-    result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
-                            capture_output=True, text=True, timeout=120)
+    """The script's output. As UTF-8: the console's code page differs from machine to machine."""
+    result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", UTF8_OUTPUT + script],
+                            capture_output=True, encoding="utf-8", errors="replace", timeout=120)
     if result.returncode != 0:
         raise AssertionError(result.stdout + result.stderr)
     return result.stdout
@@ -69,7 +71,7 @@ class PowerShellTest(unittest.TestCase):
                             encoding="utf-8-sig")
             def run(encoded):
                 return subprocess.run([PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-                                      capture_output=True, text=True, timeout=120)
+                                      capture_output=True, encoding="utf-8", errors="replace", timeout=120)
 
             args = ["-Action", "install"]
             for key, value in odd.items():
