@@ -316,12 +316,9 @@ static bool MediumIntegrity() {
 }
 
 // Whether this process may start the broker (DESIGN「ブローカーを起動する条件」).
-static bool MaySpawn() {
-    tip_logic::SpawnFacts facts;
-    facts.tag_matches = TagMatches();
-    facts.medium_integrity = MediumIntegrity();
-    return tip_logic::MaySpawn(facts);
-}
+// Every condition must hold. The broker's own single-instance lock and
+// CONNECT_MIN_INTERVAL_MS bound how often it is started; there is no count.
+static bool MaySpawn() { return TagMatches() && MediumIntegrity(); }
 
 // The broker beside this DLL (Program Files: nobody else can replace it),
 // away from the application's job, with no handles and the user's default

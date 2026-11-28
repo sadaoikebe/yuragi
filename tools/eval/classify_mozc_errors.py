@@ -103,7 +103,7 @@ def read_rows(path: Path) -> list[dict]:
 def load_snapshot(dictionary_dir: Path, cache: Path | None):
     """The engine's lexicon (finish_lex), without load_lex's cache-writing side effect."""
     if cache is not None:
-        lex = mozc_dict.load_cache(cache, allow_legacy=True)
+        lex = mozc_dict.load_cache(cache)
     else:
         # These existing parsers use a module path. Restore it even on failure.
         original = mozc_dict.DICT_DIR

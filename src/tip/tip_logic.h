@@ -611,17 +611,6 @@ private:
     uint64_t last_ = 0;
 };
 
-// DESIGN「ブローカーを起動する条件」: whether this TIP may start the broker. Every condition must hold.
-// The broker's own single-instance lock and CONNECT_MIN_INTERVAL_MS bound how
-// often it is started; there is no count.
-struct SpawnFacts {
-    bool tag_matches = false;  // HKCU\Software\yuragi-ime\Tag == this DLL's tag
-    bool medium_integrity = false;  // not sandboxed (AppContainer/low), not elevated
-};
-inline bool MaySpawn(const SpawnFacts& f) {
-    return f.tag_matches && f.medium_integrity;
-}
-
 // Keep the candidate list below the caret unless its bottom would leave the work area.
 inline int CandidateTop(int caret_top, int caret_bottom, int height, int gap, int work_bottom) {
     int below = caret_bottom + gap;

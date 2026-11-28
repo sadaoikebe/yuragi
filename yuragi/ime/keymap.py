@@ -146,15 +146,8 @@ class Keymap:
         return {"rev": sha256(canonical).hexdigest()[:12], **table}
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"invalid JSON constant: {value}")
-
-
 def _read_object(path: Path) -> dict:
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8-sig"), parse_constant=_reject_json_constant)
-    except RecursionError as exc:
-        raise ValueError("JSON の入れ子が深すぎます") from exc
+    raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
         raise ValueError("JSON オブジェクトが必要です")
     return raw

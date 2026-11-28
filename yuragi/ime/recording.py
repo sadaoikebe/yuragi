@@ -43,8 +43,6 @@ class Recorder:
 
     def __init__(self, stream: TextIO, prompts: list[Prompt], *, qpc_frequency: int,
                  qpc_origin: int):
-        if not prompts or len({p.id for p in prompts}) != len(prompts):
-            raise ValueError("prompts must be nonempty with unique ids")
         self.stream = stream
         self.prompts = prompts
         self.index = 0

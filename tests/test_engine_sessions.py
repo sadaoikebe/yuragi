@@ -330,7 +330,7 @@ class LmPipelineTest(EngineCase):
 
         loaded = loaded_session()
         worker = ManualWorker(loaded._lex, PickyModel(), delay=lambda _index: 100)
-        engine = self.engine(loaded, worker, argv=["--lm-grace-ms", "0"])
+        engine = self.engine(loaded, worker)
         self.open(engine, 1)
         engine.connections[1].pipeline.clock = worker.clock
         self.type_a(engine, 1)

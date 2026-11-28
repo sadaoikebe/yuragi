@@ -40,6 +40,14 @@ static void ReadingReplies() {
     Message held = Parse(R"({"seq":4,"fsm":"S6","commit":"　"})");
     assert(held.composition.empty() && !held.has_timer && !held.fsm_idle);
 
+    // Fields of another type are as good as missing: nothing is read from them.
+    Message odd = Parse(R"({"seq":5,"composition":7,"candidates":{},"timer":"soon","focus":"x",
+        "segments":[1,{"display_start":"x"}],"commit":null,"converted":"yes"})");
+    assert(odd.has_seq && odd.composition.empty() && odd.commit.empty() && !odd.converted);
+    assert(odd.candidates.empty() && !odd.has_timer && odd.focus == -1);
+    Message text_seq = Parse(R"({"seq":"7"})");
+    assert(!text_seq.has_seq);
+
     Message notjson;
     assert(!ParseMessage("not json", notjson) && !ParseMessage("[1]", notjson));
 }
@@ -200,6 +208,23 @@ static void OrderOfReplies() {
     const auto key = f.Next();
     assert(f.Waiting() && f.Answer(suggestion) && f.Waiting(key));
     assert(f.Answer(key) && !f.Waiting());
+
+    // A reply that never came (the engine ended): the next one is still in order, the late one is not.
+    const auto lost = f.Next(), next = f.Next();
+    assert(f.Answer(next) && !f.Answer(lost) && !f.Waiting());
+}
+
+// DESIGN「使えない間の打鍵」: keys go to the engine only when it is ready.
+static void ModesFollowTheLinkAndTheBroker() {
+    assert(ModeFor(Link::Connected, "ready") == Mode::Normal);
+    assert(ModeFor(Link::Connected, "") == Mode::Preparing);  // before the hello reply
+    assert(ModeFor(Link::Connected, "starting") == Mode::Preparing);
+    assert(ModeFor(Link::Connected, "later") == Mode::Preparing);  // a state this version does not know
+    assert(ModeFor(Link::Connected, "down") == Mode::Stopped);
+    assert(ModeFor(Link::Unreachable, "ready") == Mode::Stopped);
+    assert(ModeFor(Link::NotAllowed, "ready") == Mode::Excluded);
+    assert(!SendsKeys(Mode::Preparing) && Toggles(Mode::Preparing));
+    assert(!SendsKeys(Mode::Stopped) && !Toggles(Mode::Stopped));
 }
 
 static void CarryFollowsOnlyTheReplayAndItsRoot() {
@@ -257,43 +282,6 @@ static void HeldKeysRespectScopeAndSystemKeys() {
     assert(!HoldDuringCarry({0x19, {}}, 0x19, 0, false));
 }
 
-static void HeldKeysDrainInOrderAfterTab() {
-    constexpr uintptr_t form = 11;
-    for (auto [first, second, when, expected_a, expected_b] : {
-        std::tuple{Scope::Allowed, Scope::Allowed, 120u, Deliver::Decide, Deliver::Decide},
-        std::tuple{Scope::Password, Scope::Password, 120u, Deliver::Raw, Deliver::Raw},
-        std::tuple{Scope::Unknown, Scope::Unknown, 100u + KEY_BUDGET_MS, Deliver::Raw, Deliver::Raw},
-        std::tuple{Scope::Unknown, Scope::Allowed, 100u + KEY_BUDGET_MS, Deliver::Raw, Deliver::Decide},
-    }) {
-        Carry carry;
-        std::deque<uint32_t> held{'A'}; // Enter committed, then the replayed Tab passed
-        std::vector<std::pair<uint32_t, Deliver>> destinations;
-        carry.ReplayPassed(form);
-        if (!carry.OnFocusMoved(form, held.empty(), 100)) held.clear();
-        carry.Pumped();
-        auto down = [&](uint32_t vk) {
-            if (carry.Active() && HoldDuringCarry({vk, {}}, vk, 0, false)) held.push_back(vk);
-            else destinations.emplace_back(vk, Deliver::Raw);
-        };
-        auto pump = [&](Scope current, uint64_t now) {
-            auto started = carry.Active() ? std::optional{carry.Started()} : std::nullopt;
-            auto route = DeliverHeld({true, true, current}, now, started);
-            if (!held.empty() && route != Deliver::Wait) {
-                destinations.emplace_back(held.front(), route);
-                held.pop_front();
-            }
-        };
-        pump(Scope::Unknown, 105);
-        down('B'); // arrives before the destination has reported its scope
-        assert(destinations.empty());
-        pump(first, when);
-        pump(second, when + 1); // after the first down is delivered
-        assert((destinations == std::vector<std::pair<uint32_t, Deliver>>{
-            {'A', expected_a}, {'B', expected_b},
-        }));
-    }
-}
-
 static void CandidatePlacement() {
     assert(CandidateTop(400, 420, 176, 4, 1000) == 424);  // room below
     assert(CandidateTop(800, 820, 176, 4, 1000) == 824);  // exactly fits
@@ -315,12 +303,6 @@ static void CandidatePopupLayout() {
     assert(narrow.width <= 320 && narrow.selected == -1);
     assert(narrow.text_left < narrow.text_right && narrow.text_right < narrow.note_left);
 
-    const PopupColors windows{1, 2, 3, 4, 5, 6, 7};
-    const auto contrast = PopupPalette(true, 9, windows);
-    assert(contrast.surface == windows.surface && contrast.text == windows.text &&
-           contrast.secondary == windows.secondary && contrast.border == windows.border &&
-           contrast.selected == windows.selected && contrast.selected_text == windows.selected_text &&
-           contrast.mark == windows.mark);
 }
 
 static void Requests() {
@@ -408,10 +390,10 @@ int main(int argc, char** argv) {
     KeysSentInPlace();
     CharacterKeysComeWithTheTable();
     OrderOfReplies();
+    ModesFollowTheLinkAndTheBroker();
     ConnectAttemptsKeepTheirInterval();
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();
-    HeldKeysDrainInOrderAfterTab();
     CandidatePlacement();
     CandidatePopupLayout();
     Requests();

@@ -99,7 +99,7 @@ class ActivationTest(unittest.TestCase):
                 command = ("from yuragi.ime import admin_ui\n"
                            "admin_ui._run_window = lambda *args: 1\n"
                            "raise SystemExit(admin_ui.main())")
-                subprocess.run([sys.executable, "-c", command, "--config", str(path)],
+                subprocess.run([sys.executable, "-c", command, "--runtime-dir", directory],
                                check=True, timeout=10)
                 self.assertEqual(_winapi.WaitForSingleObject(event, 0), _winapi.WAIT_OBJECT_0)
             with admin_ui._windows_activation(path) as event:

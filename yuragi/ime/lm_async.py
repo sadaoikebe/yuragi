@@ -2,7 +2,7 @@
 
 LmWorker owns the converter on one daemon thread. ConnectionPipeline sits between a
 connection and its ImeSession: a ThumbTap with LM work leaves the session
-awaiting; the request waits at most GRACE_MS for the worker, otherwise replies
+awaiting; the request uses the worker's result if it is there, otherwise replies
 ``pending`` with the display unchanged. Keys that arrive while pending are
 queued in order and replayed once the LM picks resolve the conversion, so the
 result equals the synchronous one.
@@ -28,7 +28,6 @@ from .keymap import Keymap
 from .session import ConversionRequest, ImeSession
 from .zenz import KanaRun
 
-GRACE_MS = 0
 # The least deadline (a fast LM, e.g. on a GPU: median about 30 ms). Reviews
 # after a run's first stop at zenz.REVIEW_BUDGET_MS, which keeps a conversion
 # under the deadline.
@@ -246,7 +245,7 @@ class LmWorker:
 
 def deadline_ms(converter) -> float:
     """The fault deadline for this machine's LM (DEADLINE_MS at least)."""
-    calibration = getattr(converter, "calibration_ms", None)
+    calibration = converter.calibration_ms
     if calibration is None:
         return DEADLINE_MS
     return max(DEADLINE_MS, DEADLINE_CALIBRATIONS * calibration)
@@ -259,19 +258,16 @@ class ConnectionPipeline:
     """Per connection. Called with the server's dispatch lock held."""
 
     def __init__(self, sess: ImeSession, worker, *,
-                 grace_ms: float = GRACE_MS, deadline_ms: float | None = DEADLINE_MS,
-                 poll_ms: int = POLL_MS, prefetch: str = "thumb",  # thumb | off
-                 prefetch_delay_ms: float = PREFETCH_DELAY_MS, clock=time.monotonic,
+                 deadline_ms: float | None = DEADLINE_MS,
+                 prefetch: str = "thumb",  # thumb | off
+                 clock=time.monotonic,
                  require_lm: bool = False, timing: bool = False):
         self.sess = sess
         self.worker = worker
-        self.grace_ms = grace_ms
         self.deadline_ms = deadline_ms
-        self.poll_ms = poll_ms
         self.require_lm = require_lm
         self.timing = timing
         self.prefetch = prefetch
-        self.prefetch_delay_ms = prefetch_delay_ms
         self.clock = clock
         self.queue: deque[tuple[dict, Keymap]] = deque()
         self.deferred_down: dict | None = None
@@ -307,7 +303,7 @@ class ConnectionPipeline:
     def _drain(self, msg: dict) -> dict:
         current_keymap = self.sess.keymap
         op = msg.get("op")
-        commit, grace = "", False
+        commit = ""
         eat = key_global = None
         again = False
         resolved_keys = []
@@ -333,8 +329,7 @@ class ConnectionPipeline:
 
         while True:
             if self.sess._await is not None:
-                outcome = self._outcome(wait=grace)
-                grace = False
+                outcome = self._outcome()
                 if outcome is PENDING:
                     break
                 assert self.await_keymap is not None
@@ -355,7 +350,6 @@ class ConnectionPipeline:
             if self.sess._await is not None:
                 self.await_keymap = self.sess.keymap
                 self._submit_convert()
-                grace = True
         self.sess.keymap = current_keymap
         self._prefetch()
         deferred = op == "down" and eat is None
@@ -371,7 +365,7 @@ class ConnectionPipeline:
         set_reply_commit(self.sess, msg, reply, commit)
         reply["pending"] = self.sess._await is not None
         if reply["pending"]:
-            poll = self.last_t + self.poll_ms
+            poll = self.last_t + POLL_MS
             reply["timer"] = poll if reply["timer"] is None else min(reply["timer"], poll)
         return reply
 
@@ -409,10 +403,8 @@ class ConnectionPipeline:
             self.job = Job(self, request, wanted=True, deadline=deadline, wanted_at=wanted_at)
             self.worker.submit(self.job)
 
-    def _outcome(self, *, wait: bool):
+    def _outcome(self):
         job = self.job
-        if wait and self.grace_ms > 0:
-            job.done.wait(self.grace_ms / 1000)
         # Decide expiry atomically with the worker's publication. The lock
         # covers the timestamp, while the inference runs outside it.
         with job.completion_lock:
@@ -463,6 +455,6 @@ class ConnectionPipeline:
         if request is None or request.key == self.spec_key:
             return
         self.spec = Job(self, request,
-                        not_before=self.clock() + self.prefetch_delay_ms / 1000)
+                        not_before=self.clock() + PREFETCH_DELAY_MS / 1000)
         self.spec_key = request.key
         self.worker.submit(self.spec)

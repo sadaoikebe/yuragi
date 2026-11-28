@@ -135,16 +135,13 @@ class Channel:
             self._warnings.remove(code)
         self.send({"event": "warning", "warning": code, "active": False})
 
-    def ready(self, keymap: dict | None = None) -> None:
+    def ready(self, keymap: dict) -> None:
         with self._lock:
             self._ready = True
             warnings = list(self._warnings)
         for code in warnings:
             log(f"warning {code}")
-        reply = {"ready": True, "proto": PROTO, "warnings": warnings}
-        if keymap is not None:
-            reply["keymap"] = keymap
-        self.send(reply)
+        self.send({"ready": True, "proto": PROTO, "warnings": warnings, "keymap": keymap})
 
 
 def argument_parser() -> argparse.ArgumentParser:
@@ -163,8 +160,6 @@ def argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lm-cpu-model", action="append", default=None,
                         help="an installed LM model directory for the CPU, in the order "
                              "they are tried (repeat; engine.json)")
-    parser.add_argument("--lm-grace-ms", type=float, default=None,
-                        help="override the LM wait for latency comparisons")
     parser.add_argument("--lm-timing", action="store_true",
                         help="log LM job and resolution timestamps")
     parser.add_argument("--require-lm", action="store_true",
@@ -284,7 +279,6 @@ class Engine:
         settings.personal_file = args.data_dir / "personal_lexicon.jsonl"
         settings.lm_model = args.lm_model
         settings.lm_cpu_model = args.lm_cpu_model
-        settings.lm_grace_ms = args.lm_grace_ms
         settings.lm_timing = args.lm_timing
         for key, value in config.load(args.data_dir / config.CONFIG_NAME).items():
             setattr(settings, key, value)
@@ -373,12 +367,11 @@ class Engine:
     def new_pipeline(self, sess):
         if self.worker is None:
             return None
-        from yuragi.ime.lm_async import ConnectionPipeline, GRACE_MS, REQUIRED_LM_DEADLINE_MS
+        from yuragi.ime.lm_async import ConnectionPipeline, REQUIRED_LM_DEADLINE_MS
         s = self.settings
         deadline = REQUIRED_LM_DEADLINE_MS if s.require_lm else None
-        grace = GRACE_MS if s.lm_grace_ms is None else s.lm_grace_ms
-        return ConnectionPipeline(sess, self.worker, grace_ms=grace,
-                                  deadline_ms=deadline, require_lm=s.require_lm, timing=s.lm_timing)
+        return ConnectionPipeline(sess, self.worker, deadline_ms=deadline,
+                                  require_lm=s.require_lm, timing=s.lm_timing)
 
     def read_keymap(self, settings):
         for note in settings.notes:

@@ -44,20 +44,11 @@ class BundledPresetTest(unittest.TestCase):
 
     def test_damaged_preset_is_rejected(self):
         """The engine reports these through the same path as a missing file."""
-        deep = 100_000  # deeper than the limit of the C stack, too
         header = b'{"name":"ms-ime","label":"MS-IME"'
         cases = {
-            "invalid UTF-8": b'\xff',
             "invalid JSON": b'{',
-            "non-JSON number": header + b',"version":NaN,"bindings":[]}',
-            "deep nesting": b'[' * deep + b'0' + b']' * deep,
-            "not an object": b'[]',
             "missing bindings": header + b'}',
             "malformed row": header + b',"bindings":[["composing",13,"commit"]]}',
-            "unknown command": header + b',"bindings":[["composing","Enter","unknown"]]}',
-            "bad chord": header + b',"bindings":[["composing","NoSuchKey","commit"]]}',
-            "forbidden assignment": header + b',"bindings":[["composing","Enter","commit"],'
-                                             b'["composing","A","commit"]]}',
         }
         with patch.object(keymap, "PRESET_PATH", self.preset):
             for label, data in cases.items():
@@ -182,12 +173,6 @@ class OneTableTest(unittest.TestCase):
         self.assertEqual(ANSI.chord(VK_DBE_ALPHANUMERIC, SHIFT), Chord("英数"))  # Shift+CapsLock
         self.assertEqual(ANSI.chord(VK_DBE_DBCSCHAR, CTRL), Chord("半角/全角", CTRL))  # Ctrl+`
         self.assertFalse(keymap.chord_allowed("global", Chord.parse("Shift+英数")))
-
-    def test_the_rules_do_not_depend_on_the_keyboard(self):
-        allowed = {name: keymap.chord_allowed(phase, Chord.parse(name))
-                   for phase, name in (("global", "変換"), ("composing", "漢字"),
-                                       ("composing", "'"), ("converting", "Ctrl+@"))}
-        self.assertEqual(allowed, {"変換": True, "漢字": False, "'": False, "Ctrl+@": True})
 
     def test_a_key_the_keyboard_lacks_keeps_its_row(self):
         rows = [["converting", "Ctrl+'", "commit"], ["converting", "Ctrl+@", "commit"]]

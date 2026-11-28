@@ -309,12 +309,10 @@ def apply_numerals(lex: MozcLex) -> None:
             lex.prefixes.add(reading[:i])
 
 
-def load_cache(cache: Path, *, allow_legacy: bool = False) -> MozcLex:
+def load_cache(cache: Path) -> MozcLex:
     """Read a trusted dictionary cache, raising if it cannot be decoded."""
     with cache.open("rb") as f:
         data = pickle.load(f)
-    if allow_legacy and isinstance(data, MozcLex):
-        return data
     readings, counts, surfaces, lids, rids, costs, extra_prefixes, connect, pos_size = data
     if (not isinstance(connect, array) or connect.typecode != "h"
             or pos_size <= 0 or len(connect) != pos_size * pos_size):

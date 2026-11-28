@@ -444,8 +444,7 @@ class ContextLearningTest(unittest.TestCase):
                 self.plain(s, "こうせい")
                 delay = (lambda _: 100) if mode == "deadline" else (lambda _: 0)
                 worker = ManualWorker(self.lex, model, delay=delay, eager_prefetch=True)
-                pipe = ConnectionPipeline(s, worker, clock=worker.clock, grace_ms=0,
-                                          prefetch="on")
+                pipe = ConnectionPipeline(s, worker, clock=worker.clock, prefetch="on")
                 k = Keys(pipe.handle)
                 k.send("down", SPACE)
                 prefetch = pipe.spec
@@ -511,9 +510,9 @@ class ContextLearningTest(unittest.TestCase):
         self.assertEqual(len(before[0]), len(before[1]))
         self.assertEqual(len(before[1]), len(before[2]))
         self.assertEqual(store.snapshot().head("こうせい", contexts[1]).cost, 5000)
-        self.assertEqual(store.compact_if_needed(min_lines=0), (17, 8))
+        self.assertEqual(store.compact_if_needed(min_lines=0), (17, 7))
         self.assertEqual(view(), before)
-        self.assertIn("公正", self.path.read_text(encoding="utf-8"))  # kept, not used
+        self.assertNotIn("公正", self.path.read_text(encoding="utf-8"))  # never used: gone
         self.assertTrue(learning_admin.forget(self.path, "こうせい", "構成"))
         # 会議の has no choice left; the LM's 公正 stands.
         self.assertEqual(view()[-1], ["校正", "校正", None])

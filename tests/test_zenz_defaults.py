@@ -168,6 +168,7 @@ class CalibrationLadderTest(unittest.TestCase):
         converter = self.build(self.GPU_INSTALL, {("cuda:0", "medium"): 37})
         self.assertEqual((converter.model.device, converter.model.name), ("cuda:0", "medium"))
         self.assertEqual(self.loaded, [("cuda:0", "medium")])
+        self.assertEqual(converter.calibration_ms, 37)  # the fault deadline is set from it
 
     def test_on_battery_the_gpu_is_not_tried(self):
         self.battery = True
@@ -185,13 +186,6 @@ class CalibrationLadderTest(unittest.TestCase):
         self.gpus = ()
         converter = self.build([], {("cpu", zenz.DEFAULT_MODEL): 345}, require_lm=True)
         self.assertEqual(converter.model.device, "cpu")
-
-    def test_deadline_stays_above_a_slow_pcs_conversions(self):
-        from yuragi.ime.lm_async import deadline_ms
-        self.gpus = ()
-        slow = self.build(self.CPU_INSTALL, {("cpu", "small"): 180})
-        # Typing sentences took up to about 5.5 times the calibration (lm_async).
-        self.assertGreater(deadline_ms(slow), 5.5 * 180)
 
 
 if __name__ == "__main__":

@@ -752,7 +752,7 @@ private:
         if (op->kind == Op::Listen) {
             std::unique_ptr<Pipe> owned = std::move(listening_);
             RenewListener();
-            if (error != ERROR_SUCCESS && error != ERROR_PIPE_CONNECTED) {
+            if (error != ERROR_SUCCESS) {
                 CloseHandle(owned->handle);
                 return;
             }

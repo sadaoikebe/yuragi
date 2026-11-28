@@ -25,11 +25,8 @@ bool ParseObject(const std::string& line, Value& value, bool allow_unpaired_valu
 
 // {"sid":N, ...the rest of the TIP's object...}
 std::string WithSid(ClientId sid, const std::string& object) {
-    size_t open = object.find('{');
-    size_t body = object.find_first_not_of(" \t\r\n", open + 1);
-    std::string head = "{\"sid\":" + std::to_string(sid);
-    if (body == std::string::npos || object[body] == '}') return head + "}";
-    return head + "," + object.substr(open + 1);
+    // The object has a member: only a request with a seq is passed on.
+    return "{\"sid\":" + std::to_string(sid) + "," + object.substr(object.find('{') + 1);
 }
 
 std::string SeqState(long long seq, const char* state) {

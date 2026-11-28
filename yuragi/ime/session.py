@@ -24,7 +24,7 @@ from yuragi.chord.keys import (
     modifier_bits, thumb_chord,
 )
 from yuragi.lattice.alternation import SIDES, Plan, face_of, restrict
-from yuragi.lattice.expand import is_literal_face, literal_text
+from yuragi.lattice.expand import is_literal_face
 from yuragi.lattice.mozc_dict import MozcLex, left_id_after, load_lex
 from yuragi.lattice.table import load_table
 from yuragi.text import katakana, to_full_width, to_half_width
@@ -119,7 +119,7 @@ def to_lattice_token(tok: Token | Literal, table: dict,
         if not kana:
             return None
         if is_literal_face(kana):
-            return {"kind": "literal", "text": literal_text(kana)}
+            return {"kind": "literal", "text": kana}
         return {"kind": "plain", "key": tok.key, "kana": kana}
     if isinstance(tok, AmbShift):
         faces = {}
@@ -136,7 +136,7 @@ def to_lattice_token(tok: Token | Literal, table: dict,
         texts = set(faces.values())
         if len(texts) == 1 and is_literal_face(next(iter(texts))):
             # A symbol key's thumb face is the same for either thumb: the chord is that literal whichever side is read.
-            return {"kind": "literal", "text": literal_text(texts.pop())}
+            return {"kind": "literal", "text": texts.pop()}
         kind = "amb" if len(faces) > 1 else "shift"
         token = {"kind": kind, "key": tok.key, "faces": faces}
         if tok.press is not None:

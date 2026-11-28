@@ -8,9 +8,9 @@ or the whole interval when word boundaries cannot be aligned. A choice
 can override the LM in the same context or on an immediate standalone
 repeat. A suppression removes its (reading, surface) pair from every context.
 
-Rows written before choices were told apart (no "choice") are kept in the
-file but not used, except words learned from kana and symbols, which only a
-choice produced.
+Rows written before choices were told apart (no "choice") are not used and
+go at the next compaction, except words learned from kana and symbols, which
+only a choice produced.
 
 Interval choices are also arcs of the lattice (spans), including spellings
 absent from the dictionary (user_word, from a kana confirmation). Word choices
@@ -258,7 +258,6 @@ class LearningStore:
         # Pair -> left surface -> latest confirmation in that context.
         self._contexts: dict[tuple[str, str, bool], dict[str, tuple[int, Confirmation]]] = {}
         # Older rows not used (Confirmation.used), kept through compaction.
-        self._unused: dict[tuple[str, str], tuple[int, Confirmation]] = {}
         self._index: tuple | None = None  # built when a view needs it
         self.sync()
 
@@ -274,7 +273,6 @@ class LearningStore:
         key = (event.reading, event.surface)
         if isinstance(event, Confirmation):
             if not event.used():
-                self._unused[key] = (position, event)
                 return
             key = (*key, event.word)
             previous = self._rows.pop(key, None)
@@ -284,7 +282,6 @@ class LearningStore:
             if not event.symbol and event.prev:
                 self._contexts.setdefault(key, {})[event.prev] = (position, event)
         else:
-            self._unused.pop(key, None)
             for unit in (False, True):
                 self._rows.pop((*key, unit), None)
                 self._contexts.pop((*key, unit), None)
@@ -323,7 +320,6 @@ class LearningStore:
     def _clear(self, stamp) -> None:
         self._rows.clear()
         self._contexts.clear()
-        self._unused.clear()
         self.lines = self.skipped = 0
         self._seen = stamp
         self._changed()
@@ -527,7 +523,6 @@ class LearningStore:
             self._sync_locked()
             live = dict(self._rows.values())
             live.update(self._context_rows())
-            live.update(self._unused.values())  # the user's data: never dropped unasked
             if self.lines <= 2 * len(live) or self.lines <= min_lines:
                 return None
             before = self.lines

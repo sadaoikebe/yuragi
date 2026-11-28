@@ -149,9 +149,6 @@ class _Stroke:
 
 @dataclass
 class ChordFsm:
-    timeout_ms: int = TIMEOUT_MS
-    overlap_ms: int = OVERLAP_MS
-    join_ms: int = JOIN_MS
     sides: Mapping[str, str] = field(default_factory=thumb_sides)  # thumb key → its thumb
     state: State = "S1"
     held: dict[str, int] = field(default_factory=dict)  # thumb key → down time
@@ -215,7 +212,7 @@ class ChordFsm:
     def _fits(self, key: str, now: int) -> bool:
         """The key is the fresh stroke's own: pressed soon after its first, by the same thumb."""
         stroke = self.stroke
-        return now - stroke.start <= self.join_ms and _one_thumb((*stroke.keys, key), self.sides)
+        return now - stroke.start <= JOIN_MS and _one_thumb((*stroke.keys, key), self.sides)
 
     def _plain(self) -> list[Token]:
         assert self.m_key is not None
@@ -279,7 +276,7 @@ class ChordFsm:
         if self.m_under == "tap" or self._no_free_thumb():
             return self._plain()
         cover = self._cover(now)
-        last = self.last_length if self.last_length is not None else self.timeout_ms
+        last = self.last_length if self.last_length is not None else TIMEOUT_MS
         return self._unseen() if cover >= last - cover else self._plain()
 
     def _held_follower(self) -> list[Token]:
@@ -308,9 +305,9 @@ class ChordFsm:
         if self.state in ("S1", "S6"):
             self.timer_deadline = None
         elif self.state in ("S3", "S4"):
-            self.timer_deadline = self.stroke.start + self.timeout_ms
+            self.timer_deadline = self.stroke.start + TIMEOUT_MS
         else:
-            self.timer_deadline = self.m_time + self.timeout_ms
+            self.timer_deadline = self.m_time + TIMEOUT_MS
 
     # -- events (JIS-FSM.md §7) ------------------------------------------
 
@@ -437,7 +434,7 @@ class ChordFsm:
         elif st == "S4":
             t1 = self.stroke.start - self.m_time
             t2 = now - self.stroke.start
-            if t1 > t2 and t2 < self.overlap_ms:  # a tie is a chord (NICOLA 5.5.2, n = 1)
+            if t1 > t2 and t2 < OVERLAP_MS:  # a tie is a chord (NICOLA 5.5.2, n = 1)
                 out = self._unpaired(now, True)
                 self.state = "S3"
             else:
@@ -466,7 +463,7 @@ class ChordFsm:
                 else:
                     t1 = self.m_time - stroke.start
                     t2 = now - self.m_time
-                    out = self._tap() if t1 > t2 and t2 < self.overlap_ms else self._shift()
+                    out = self._tap() if t1 > t2 and t2 < OVERLAP_MS else self._shift()
                 self._rest()
                 return out
         if key == "space" and self.carrier is not None:
@@ -476,7 +473,7 @@ class ChordFsm:
             elif st == "S6":
                 self.state = "S1"
             elif st == "S7":
-                if self.m_under == "tap" or self._cover(now) < self.overlap_ms:
+                if self.m_under == "tap" or self._cover(now) < OVERLAP_MS:
                     self.m_under = None  # the character stays pending; its deadline stands
                     self.state = "S2"
                 else:

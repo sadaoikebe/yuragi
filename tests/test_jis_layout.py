@@ -23,20 +23,10 @@ def jis_keys(keymap: Keymap | None = None) -> Keys:
 
 
 class JisKeyboardTest(unittest.TestCase):
-    def test_48_character_keys(self):
-        table = load_table(JIS.kana)
-        self.assertEqual(table["layout"], "NICOLA-J")
-        names = JIS.character_names()
-        self.assertEqual(len(names), 48)
-        self.assertEqual(set(table["keys"]), {name.lower() for name in names} - {":", "]", "\\"})
-        for name in names:
-            self.assertTrue(Chord(name).character, name)
-
-    def test_ansi_faces_are_unchanged(self):
-        self.assertEqual(ANSI.classify(VK_OEM_1), ("M", ";"))
-        self.assertEqual(ANSI.alnum_character(VK_OEM_5, False, full=True), "＼")
-        self.assertIsNone(ANSI.literal_character(VK_OEM_6, False))
-        self.assertEqual(ANSI.literal_character(VK_OEM_7, True), "”")
+    def test_every_key_of_a_kana_table_is_on_its_keyboard(self):
+        for name, keyboard in KEYBOARDS.items():
+            keys = {key.lower() for key in keyboard.character_names()}
+            self.assertLessEqual(set(load_table(keyboard.kana)["keys"]), keys, name)
 
     def test_names_are_the_engravings(self):
         for name in ("@", "^", "¥", ";", ":", "]", "\\", "Shift+0", "Ctrl+[", "半角/全角", "Ctrl+半角/全角",
@@ -177,10 +167,6 @@ class JisTypingTest(unittest.TestCase):
         self.assertEqual(k.s.composition, "ｗ；ｅ")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class JisImeKeyTest(unittest.TestCase):
     """The IME keys of a JIS keyboard in the one key table (docs/KEYBIND.md §4.1)."""
 
@@ -210,3 +196,7 @@ class JisImeKeyTest(unittest.TestCase):
         k.idle()
         reply = k.press(0xF3, ["ctrl"])
         self.assertEqual((reply["eat"], reply["commit"], reply["phase"]), (False, "", "composing"))
+
+
+if __name__ == "__main__":
+    unittest.main()

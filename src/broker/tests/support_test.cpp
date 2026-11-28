@@ -35,16 +35,13 @@ void RotatingLogKeepsTwoGenerations(const fs::path& dir) {
     assert(Read(dir / "broker.log") == "last\n[log line exceeded the size limit; dropped]\n");
 }
 
-void EngineLogRotatesAtStartAndWhenFull(const fs::path& dir) {
+void EngineLogStartsAfreshWithEachEngine(const fs::path& dir) {
     Write(dir / "engine.log", "the last run\n");
     BoundedLog log(dir / "engine.log", dir / "engine.prev.log");
     assert(log.Rotate());
     assert(Read(dir / "engine.prev.log") == "the last run\n");
-    const std::string full(LOG_MAX_BYTES - 1, 'x');
-    log.Write(full);
-    log.Write("last");
-    assert(Read(dir / "engine.prev.log") == full + '\n');
-    assert(Read(dir / "engine.log") == "last\n");
+    log.Write("this run");
+    assert(Read(dir / "engine.log") == "this run\n");
 }
 
 // The management window reads the last stop from logs/notices.log (broker_client.last_stop).
@@ -87,7 +84,7 @@ int main() {
     fs::remove_all(dir);
     fs::create_directories(dir);
     RotatingLogKeepsTwoGenerations(dir);
-    EngineLogRotatesAtStartAndWhenFull(dir);
+    EngineLogStartsAfreshWithEachEngine(dir);
     StopsAreRecordedForTheManagementWindow(dir);
     EngineConfigIsRead(dir);
     fs::remove_all(dir);

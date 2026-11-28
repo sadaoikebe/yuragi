@@ -1,6 +1,6 @@
 """The management window: word registration, learning, settings, keys, status.
 
-  python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--config FILE] [--dict-dir DIR]
+  python -m yuragi.ime.admin_ui [--runtime-dir DIR] [--dict-dir DIR]
 
 --dict-dir is the dictionary the engine was given (the installer's shared copy).
 
@@ -98,9 +98,9 @@ class SettingRow:
 class AdminModel:
     """The window's behaviour, on the engine's files; every change re-reads them."""
 
-    def __init__(self, runtime_dir: Path | None = None, config_path: Path | None = None):
+    def __init__(self, runtime_dir: Path | None = None):
         self.runtime_dir = runtime_dir or config.DEFAULT_RUNTIME_DIR
-        self.config_file = config_path or self.runtime_dir / config.CONFIG_NAME
+        self.config_file = self.runtime_dir / config.CONFIG_NAME
         # The engine's files (yuragi.engine: --data-dir).
         self.personal_file = self.runtime_dir / "personal_lexicon.jsonl"
         self.learning_file = self.runtime_dir / "learning.jsonl"
@@ -680,11 +680,7 @@ def _run_window(model: AdminModel, dict_dir: Path | None, event=None) -> int:
     if dict_dir is not None:
         from yuragi.lattice import mozc_dict
         mozc_dict.DICT_DIR = dict_dir
-    try:
-        import tkinter as tk
-    except ImportError:
-        print("tkinter is not available in this Python", file=sys.stderr)
-        return 1
+    import tkinter as tk
     declare_dpi_aware()
     root = tk.Tk()
     AdminWindow(root, model)  # opens on 単語登録
@@ -699,10 +695,9 @@ def _run_window(model: AdminModel, dict_dir: Path | None, event=None) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runtime-dir", type=Path, default=None)
-    parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--dict-dir", type=Path, default=None)
     args = parser.parse_args(argv)
-    model = AdminModel(args.runtime_dir, args.config)
+    model = AdminModel(args.runtime_dir)
     if sys.platform != "win32":
         return _run_window(model, args.dict_dir)
     with _windows_activation(model.config_file) as event:

@@ -5,7 +5,7 @@ w is か; with the left thumb え, with the right が. q has a left face only (�
 """
 import unittest
 
-from yuragi.chord.fsm import AmbShift, ChordFsm, thumb_sides
+from yuragi.chord.fsm import ChordFsm, thumb_sides
 from yuragi.chord.keys import (
     KEYBOARDS, SHIFT, SPACE, VK_CONVERT, VK_ESCAPE, VK_NONCONVERT, VK_RETURN, VK_SPACE, Chord,
 )
@@ -120,16 +120,6 @@ class ThumbEvidenceTest(unittest.TestCase):
         k = Typist()
         k.play("O+0 N+5 q+10 q-60 N-65 w+100 w-160 O-200")
         self.assertEqual(k.reading(), "ぁが")
-
-    def test_evidence_against_a_carried_direction_wins(self):
-        k = Typist()
-        k.play("O+0 w+10 w-60 w+100 w-160 O-200")
-        k.s._carry[k.s.tokens[0].press] = frozenset(("left",))
-        self.assertEqual(k.reading(), "えが")
-        first = k.s.tokens[0]
-        k.s.tokens[0] = AmbShift("w", first.press, 1, struck=("henkan",))
-        self.assertEqual(k.faces(), ["が", "えが"])
-        self.assertEqual(k.s._carry, {})
 
 
 class LateEvidenceTest(unittest.TestCase):

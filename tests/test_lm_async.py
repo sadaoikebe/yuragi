@@ -326,7 +326,7 @@ class DeadlineTest(unittest.TestCase):
         sess = self.session()
         worker = ManualWorker(self.lex, PickyModel(), delay=lambda i: 10 ** 6)
         clock = worker.clock
-        return ConnectionPipeline(sess, worker, grace_ms=0, clock=clock, **kwargs), worker, clock
+        return ConnectionPipeline(sess, worker, clock=clock, **kwargs), worker, clock
 
     def test_candidate_number_waits_for_conversion(self):
         pipe, worker, _ = self.pipeline(prefetch="off")
@@ -539,7 +539,7 @@ class DeadlineTest(unittest.TestCase):
                 try:
                     worker.submit(job)
                     self.assertTrue(publishing.wait(5))
-                    result = polling.submit(pipeline._outcome, wait=False)
+                    result = polling.submit(pipeline._outcome)
                     self.assertTrue(poll_deciding.wait(5))
                 finally:
                     release_publication.set()

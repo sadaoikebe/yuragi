@@ -214,10 +214,10 @@ def lm_candidates(args) -> list[tuple[str, str]]:
     from yuragi.ime.zenz import DEFAULT_MODEL, cuda_devices
 
     model = args.lm_model or DEFAULT_MODEL
-    device = getattr(args, "lm_device", None)
+    device = args.lm_device
     if device is not None:
         return [(device, model)]
-    cpu_models = getattr(args, "lm_cpu_model", None) or [model]
+    cpu_models = args.lm_cpu_model or [model]
     # On battery the GPU is not even asked: a CUDA context keeps a laptop's GPU awake.
     gpus = [] if power.on_battery() else cuda_devices()
     return [(d, model) for d in gpus] + [("cpu", m) for m in cpu_models]
@@ -231,7 +231,7 @@ def build_converter(args, *, warm_conversion=None, calibration=None, log=None):
     from yuragi.ime.zenz import (CALIBRATION_LIMIT_MS, DEFAULT_ALPHA, DEFAULT_K, DEFAULT_STEPS,
                                 DEFAULT_THREADS, REVIEW_BUDGET_MS, ZenzConverter, ZenzModel)
 
-    budget = getattr(args, "lm_review_ms", None)
+    budget = args.lm_review_ms
     if log is None:
         def log(message):
             print(message, file=sys.stderr, flush=True)
@@ -303,7 +303,7 @@ def load_session(args, *, lex=None, keyboard=None) -> ImeSession:
     keyboard = keyboard or DEFAULT_KEYBOARD
     sides = space_sides(keyboard, getattr(args, "space_thumb", "auto"))
     sess = ImeSession(_learning=store, _lex=lex, personal=PersonalLexicon(args.personal_file),
-                      prediction=getattr(args, "prediction", DEFAULT_PREDICTION),
+                      prediction=args.prediction,
                       keyboard=keyboard, fsm=ChordFsm(sides=sides))
     sess.load()
     if sess.prediction != "off":
