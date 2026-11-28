@@ -3,7 +3,8 @@
 # Linux ではブローカーの中核を偽の土台で試し、Windows では MSVC で本物の
 # yuragi-broker.exe を作って、偽エンジン・偽 TIP と名前付きパイプで動かす。
 # C++ の単体試験は Linux と macOS で回し、Windows ではビルドだけする。
-# macOS (Apple シリコン) では Linux と同じ試験を回す。32 ビットの TIP はリリースのときだけビルドする。
+# macOS (Apple シリコン) では Linux と同じ試験を回し、入力プログラム (src/mac) をビルドして、
+# その打鍵の順序の試験を回す。32 ビットの TIP はリリースのときだけビルドする。
 name: ci
 
 on:
@@ -63,6 +64,12 @@ jobs:
       - name: Python の試験
         run: |
           python -m unittest discover -v
+
+      # 署名は簡易のもの。入力プログラムは OS が起動するものなので、ここでは動かさない。
+      - name: 入力プログラムのビルドと、打鍵の順序の試験
+        run: |
+          PYTHON="$(command -v python)" src/mac/build.sh
+          src/mac/test.sh
 
   windows:
     runs-on: windows-latest

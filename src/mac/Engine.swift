@@ -219,7 +219,7 @@ final class Engine: NSObject, YRWatcherPlatform {
         let errorsRead = DispatchSemaphore(value: 0)
         let errorLog = try? FileHandle(forWritingTo: log)
         Thread.detachNewThread { [self] in
-            Self.lines(of: errors.fileHandleForReading, raw: { errorLog?.write($0) }) { line in
+            Self.lines(of: errors.fileHandleForReading, raw: { try? errorLog?.write(contentsOf: $0) }) { line in
                 if line.hasPrefix("fatal ") { post([.fatal(line)]) }
             }
             errorsRead.signal()
@@ -238,11 +238,16 @@ final class Engine: NSObject, YRWatcherPlatform {
         return nil
     }
 
+    /// Until the end of the stream or an error. read(2), not FileHandle's reading: that one raises
+    /// an exception Swift cannot catch when the read fails.
     private static func lines(of handle: FileHandle, raw: (Data) -> Void, each: (String) -> Void) {
         var rest = Data()
+        var buffer = [UInt8](repeating: 0, count: 1 << 16)
         while true {
-            let chunk = handle.availableData
-            if chunk.isEmpty { return }
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count < 0 && errno == EINTR { continue }
+            if count <= 0 { return }
+            let chunk = Data(buffer[0..<count])
             raw(chunk)
             rest.append(chunk)
             while let end = rest.firstIndex(of: 0x0A) {
@@ -279,8 +284,9 @@ final class Engine: NSObject, YRWatcherPlatform {
         let file = logs.appendingPathComponent("notices.log")
         if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
         guard let handle = try? FileHandle(forWritingTo: file) else { return }
-        handle.seekToEndOfFile()
-        handle.write(Data("{\"time\":\"\(stamp)\",\"stopped\":\"\(reason)\"}\n".utf8))
+        // The throwing calls: the older ones raise an exception Swift cannot catch (a full disk).
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data("{\"time\":\"\(stamp)\",\"stopped\":\"\(reason)\"}\n".utf8))
         try? handle.close()
     }
 

@@ -11,11 +11,13 @@ InputMethodKit の入力プログラム（`Yuragi.app`）。方針は [docs/MACO
 | `Engine.swift` | エンジンの子プロセスとその見張り、設定ウィンドウの起動（`engine.json` の `admin_args`）。起動（`engine.json`）、行の読み書き、終了の検知、見張りのタイマー、返事を待つ。起動し直すか・止めるかの判断は `src/broker/broker_core`（DESIGN「見張り」） |
 | `Peers.swift` | 設定ウィンドウとの通信口。この利用者だけが開ける Unix ソケット（`~/Library/Application Support/yuragi-ime/broker.sock`）。相手は `yuragi/ime/broker_client.py` |
 | `KeyTap.swift` | イベントの監視。押下の実際の時刻と解放を採り、起きた順にエンジンへ渡す |
+| `KeyOrder.swift` | 監視が見たキーの順序の判断（解放をいつエンジンへ送れるか、押下の実際の時刻）。OS の部品を使わない。試験は `tests/KeyOrderTests.swift` |
 | `Keys.swift` | macOS のキーコードから、エンジンが使う Win32 の仮想キーへの表（US キーボード） |
 | `logic.h`・`logic.mm` | `src/tip/tip_logic.h` の判断（返事の解釈、食べる表）と `broker_core` の見張りを Swift から使うための層 |
 | `Log.swift` | `~/Library/Logs/yuragi-ime/input.log` |
 | `ctl.swift`・`icon.swift` | 入力ソースの登録・有効化・選択の道具、メニューバーのアイコンを作る道具 |
 | `build.sh`・`dev-install.sh`・`dev-uninstall.sh` | ビルド、開発用のインストールと削除 |
+| `test.sh` | `tests/` の試験をビルドして動かす。CI は `build.sh` とこれを回す |
 | `dev-identity.sh` | この Mac だけの署名「Yuragi Dev」を専用のキーチェーンに作る（1 回）。あれば `build.sh` が使い、無ければ簡易の署名になる |
 
 ## 開発用に入れる
@@ -45,7 +47,8 @@ src/mac/dev-uninstall.sh      # 消す。利用者のデータ（~/.yuragi-ime�
 | 見張りが入力欄へ送る行は、見張りの呼び出しが戻ってから配る（`Engine.call`） | 配った先が次の要求を出すと、見張りの処理の途中に入り直す |
 | エンジンの終了は、標準出力を読み切り、プロセスが終わってから見張りに伝える | 終了コード（75 は起動し直しの依頼）が要る。古いエンジンの行が新しいエンジンの行に混ざらない |
 | 食べたキーで何も表示しないときは、文書の長さが 0 のアプリに限り、ゼロ幅の空白を変換中の文字として置く | Chromium 系は、変換中の文字も挿入も無いと、キーの文字を自分で入れる（MACOS.md §6.4） |
-| 解放は、それより前の押下が `handle` に届くまでエンジンに送らない（`KeyTap.swift`） | イベントの監視は押下を InputMethodKit より先に見る。解放を先に送ると、エンジンに届く順序が実際と変わる |
+| 記録とエンジンの出力の読み書きは、失敗を返す呼び出し（`write(contentsOf:)`、`read(2)`）で行う | `FileHandle` の古い呼び出し（`write(_:)`、`availableData`、`seekToEndOfFile`）は、失敗すると Swift で捕まえられない例外を投げ、入力プログラムが落ちる（ディスクが一杯のとき） |
+| 解放は、それより前の押下が `handle` に届くまでエンジンに送らない（`KeyOrder.swift`） | イベントの監視は押下を InputMethodKit より先に見る。解放を先に送ると、エンジンに届く順序が実際と変わる |
 | 入力メニュー（`menu()`）は、項目の無いメニューを返さない | 空のメニューを返すと、変換中の文字が変わるたびに OS が入力を打ち切る（`commitComposition` が呼ばれ、文字は入らない） |
 | キーの返事は `KEY_BUDGET_MS`（200 ミリ秒）まで待ち、間に合わなければ食べる | アプリは `handle` の返事を待って止まる |
 
