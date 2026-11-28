@@ -200,6 +200,27 @@ class LearningTest(unittest.TestCase):
         aside.rename(self.path)
         self.assertEqual(self.convert(s, "こうせい").selected.surface, chosen)
 
+    def test_rows_of_the_wrong_shape_are_skipped_and_the_rest_is_used(self):
+        good = ('{"reading":"こうせい","surface":"公正","timestamp":1,"cost":2000,'
+                '"lid":1851,"rid":1851,"choice":true}')
+        bad = [good.replace('"こうせい"', '5'), good.replace('"こうせい"', '["a"]'),
+               good.replace('"公正"', 'null'), good.replace('"公正"', '""'),
+               good.replace('"cost":2000', '"cost":"2000"'), good.replace('"lid":1851', '"lid":null'),
+               good.replace('"timestamp":1', '"timestamp":"x"'), '[1]',
+               '{"type":"suppress","reading":"きかん","surface":7,"timestamp":1}']
+        # A BOM, as an editor or Windows PowerShell writes it, does not hide the first row.
+        self.path.write_text("\ufeff" + "\n".join([good, *bad]) + "\n", encoding="utf-8")
+        s = self.session()
+        self.assertEqual(s._learning.skipped, len(bad))
+        self.assertEqual(self.convert(s, "こうせい").selected.surface, "公正")
+        self.assertEqual(learning_admin.pairs(s._learning)[0].surface, "公正")
+
+    def test_a_word_row_with_an_id_the_dictionary_lacks_is_not_used(self):
+        self.path.write_text('{"reading":"きしゃ","surface":"汽車","timestamp":1,"cost":2000,'
+                             '"lid":99999,"rid":99999,"choice":true,"word":true}\n', encoding="utf-8")
+        s = self.session()
+        self.assertEqual(self.convert(s, "きしゃは").selected.surface, "記者は")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ an unreadable file is tried again once its stat changes, or at the next write.
 """
 from __future__ import annotations
 
+import codecs
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields, replace
 import json
@@ -84,20 +85,31 @@ def _event(data: dict, cls):
     return cls(**{k: v for k, v in data.items() if k in names})
 
 
+def _number(value, kind=(int, float)) -> bool:
+    return isinstance(value, kind) and not isinstance(value, bool) and value >= 0
+
+
 def parse_line(raw: bytes):
     """One history line as an event, or None when it is not JSON with the
-    needed fields."""
+    needed fields in their types (a hand edit must not stop conversion)."""
     try:
         data = json.loads(raw.decode("utf-8"))
         kind = data.get("type", "confirm")
         if kind == "confirm":
             row = _event(data, Confirmation)
-            return row if isinstance(row.prev, str) and row.prev else replace(row, prev=None)
-        if kind == "suppress":
-            return _event(data, Suppression)
-    except (ValueError, TypeError, KeyError, AttributeError):  # UnicodeError is a ValueError
-        pass
-    return None
+            ids = _number(row.cost, int) and _number(row.lid, int) and _number(row.rid, int)
+        elif kind == "suppress":
+            row, ids = _event(data, Suppression), True
+        else:
+            return None
+    except (ValueError, TypeError, AttributeError):  # UnicodeError is a ValueError
+        return None
+    if not (ids and isinstance(row.reading, str) and row.reading
+            and isinstance(row.surface, str) and row.surface and _number(row.timestamp)):
+        return None
+    if kind == "confirm" and not (isinstance(row.prev, str) and row.prev):
+        return replace(row, prev=None)
+    return row
 
 
 class LearningView:
@@ -156,7 +168,7 @@ class LearningView:
             pick = self._head(piece.reading, left,
                               repeat and i == 0 and prev is not None and prev.reading == base.reading,
                               piece.surface if supported else None, True)
-            if pick is not None:
+            if pick is not None and pick[2].lid < lex.pos_size and pick[2].rid < lex.pos_size:
                 priority, position, row = pick
                 best_word = max(best_word, (priority, position))
                 if row.surface != piece.surface:
@@ -323,7 +335,7 @@ class LearningStore:
         if stamp is None:
             self._clear(None)
             return
-        data = self.path.read_bytes()
+        data = self.path.read_bytes().removeprefix(codecs.BOM_UTF8)  # an editor's BOM
         self._clear(stamp)
         for raw in data.split(b"\n"):
             if not raw.strip():

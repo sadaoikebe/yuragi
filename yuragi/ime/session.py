@@ -1296,9 +1296,14 @@ class ImeSession:
         self._show_edited_segment(index, text)
 
     def _show_edited_segment(self, index: int, reading: str) -> None:
+        if len(self.segments) == 1:
+            # Nothing else is converted: this is plain input again, with segments
+            # built from the tokens (a clause may hold kana and literals together).
+            self._cancel_conversion(show_reading=True)
+            return
         self._make_raw(index, reading)
         self.focus = index
-        self.converted = self.editing = len(self.segments) > 1
+        self.converted = self.editing = True
         self._display_key = None
         self._clear_cands()
         self._update_composition()

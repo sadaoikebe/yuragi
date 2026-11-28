@@ -8,7 +8,7 @@ import unittest
 
 from tests.test_document_context import ENTER, SPACE
 from tests.support import Keys
-from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word
+from yuragi.ime.personal import DEFAULT_COST, PersonalLexicon, add_word, read_words, remove_word, scan_words
 from yuragi.ime.server import argument_parser, dispatch, load_session
 from yuragi.ime.session import ImeSession
 from yuragi.lattice.mozc_dict import Entry, MozcLex, pos_ids
@@ -24,6 +24,13 @@ class TempFile(unittest.TestCase):
 
 
 class PersonalFileTest(TempFile):
+    def test_lines_that_are_not_words_are_skipped_and_a_bom_hides_nothing(self):
+        rows = ['{"reading":"かか","surface":"花歌"}', '{"reading":"かか","surface":"佳歌","pos":"名刺"}',
+                '{"reading":"かか","surface":"課歌","cost":1e999}', '{"reading":"かか"', '# メモ']
+        self.path.write_text("\ufeff" + "\n".join(rows) + "\n", encoding="utf-8")
+        words, skipped = scan_words(self.path)
+        self.assertEqual(([w.surface for w in words], skipped), (["花歌"], 3))
+
     def test_a_word_that_cannot_be_typed_is_not_registered(self):
         for reading, surface, pos in (("oyayubi", "親指", "名詞"), ("オヤユビ", "親指", "名詞"),
                                       ("おやゆび", "", "名詞"), ("おやゆび", "親指", "動詞")):

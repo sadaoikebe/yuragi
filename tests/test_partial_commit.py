@@ -449,6 +449,24 @@ class PartialCommitTest(unittest.TestCase):
         self.assertEqual((reply["eat"], reply["phase"], reply["commit"]),
                          (False, "empty", "私は学校にいく"))
 
+    def test_an_edited_clause_left_alone_is_plain_input_again(self):
+        # 9 き → 変換 → き を読みに戻して 。 を足す → ９ だけ確定 → 残りは普通の入力
+        k = Keys(ImeSession(_table=load_table(), _lex=self.lex))
+        k.tap("9")
+        k.tap("K")
+        k.idle()
+        k.convert()
+        k.tap(VK_ESC)
+        k.tap("Q")
+        k.idle()
+        self.assertEqual(k.ctrl_down()["commit"], "９")
+        reply = k.tap(VK_ESC)
+        self.assertEqual((reply["phase"], reply["composition"]), ("composing", "き。"))
+        self.assertEqual([(g["start"], g["end"], g["literal"]) for g in reply["segments"]],
+                         [(0, 1, False), (1, 2, True)])
+        self.assertEqual([k.tap(VK_LEFT)["caret"], k.tap(VK_LEFT)["caret"]], [1, 0])
+        self.assertNotIn("error", reply)
+
     def test_reverted_middle_clause_accepts_input_without_changing_its_neighbors(self):
         k = self.typed("わたしはがっこうにいく")
         k.s._table["keys"]["w"] = {"plain": "は"}

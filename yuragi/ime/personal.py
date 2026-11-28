@@ -11,6 +11,7 @@ the old list or the new one.
 """
 from __future__ import annotations
 
+import codecs
 from dataclasses import dataclass
 import json
 import os
@@ -62,7 +63,7 @@ def read_words(path: Path) -> list[Word]:
 def scan_words(path: Path) -> tuple[list[Word], int]:
     """(valid rows as read_words, number of lines skipped as not a valid word)."""
     try:
-        lines = Path(path).read_bytes().splitlines()
+        lines = Path(path).read_bytes().removeprefix(codecs.BOM_UTF8).splitlines()  # an editor's BOM
     except FileNotFoundError:
         return [], 0
     words: dict[tuple[str, str], Word] = {}
@@ -80,7 +81,7 @@ def scan_words(path: Path) -> tuple[list[Word], int]:
             word = Word(row["reading"], row["surface"], row.get("pos", "名詞"),
                         int(row.get("cost", DEFAULT_COST)))
             validate(word.reading, word.surface, word.pos)
-        except (ValueError, TypeError, KeyError, AttributeError):
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
             skipped += 1  # A hand edit gone wrong must not stop conversion (DESIGN「起動時の読み込み」).
             continue
         words.pop((word.reading, word.surface), None)
