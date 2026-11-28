@@ -29,6 +29,21 @@ Python 3.12 以上、CMake、C++17 のコンパイラ。Windows が無くても�
 
 `tests/test_installer_scripts.py` の PowerShell の部分は、`YURAGI_PWSH` で指定したもの、無ければ `pwsh`、それも無ければ Windows PowerShell 5.1（`powershell`）を使う（どれも無ければ飛ばす）。
 
+### macOS（変換エンジン。入力プログラムの方針は [MACOS.md](MACOS.md)）
+
+Apple シリコンの Mac、Xcode、Homebrew の `python@3.13`・`python-tk@3.13`・`cmake`。Linux と同じ試験が回る。CI の macOS ジョブと同じ。
+
+```sh
+/opt/homebrew/bin/python3.13 -m venv .venv
+.venv/bin/pip install torch==2.9.1 transformers==4.57.1          # LM を使うときだけ。版は packaging/requirements.in
+.venv/bin/python packaging/fetch_model.py medium data/cache/model/medium
+.venv/bin/python packaging/fetch_model.py small data/cache/model/small
+.venv/bin/python -m yuragi.engine --data-dir <空のフォルダ> --require-lm \
+    --lm-model data/cache/model/medium --lm-cpu-model data/cache/model/small
+```
+
+エンジンは標準入出力で 1 行 1 JSON を話す（`yuragi/engine.py` の冒頭）。選ばれた装置とモデルは標準エラーの `LM calibration` の行に出る。
+
 ### Windows（TIP の DLL とブローカーの exe）
 
 管理者で入れるもの: Visual Studio Build Tools（C++。MSVC、Windows SDK、CMake を含む）。管理者のコマンドプロンプトで:

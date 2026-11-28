@@ -189,8 +189,8 @@ def argument_parser() -> argparse.ArgumentParser:
                     help="reviews after a kana run's first stop this long after the "
                          "conversion started (default zenz.REVIEW_BUDGET_MS)")
     lm.add_argument("--lm-threads", type=int, default=None, help="torch CPU threads (default 4)")
-    lm.add_argument("--lm-device", choices=("cuda", "cpu"), default=None,
-                    help="force a device (default: try CUDA devices, then the CPU)")
+    lm.add_argument("--lm-device", choices=("cuda", "mps", "cpu"), default=None,
+                    help="force a device (default: try CUDA devices, the Mac's GPU, then the CPU)")
     lm.add_argument("--lm-timing", action="store_true",
                     help="log the LM's time per conversion to stderr (no text)")
     return parser
@@ -209,9 +209,10 @@ class LmTooSlow(RuntimeError):
 def lm_candidates(args) -> list[tuple[str, str]]:
     """(device, model) in the order they are tried (CONVERSION「装置とモデル」).
 
-    Each CUDA device with --lm-model (none on battery), then the CPU with each --lm-cpu-model
-    (with --lm-model if none is given). --lm-device: that device and --lm-model only."""
-    from yuragi.ime.zenz import DEFAULT_MODEL, cuda_devices
+    Each CUDA device (none on battery) and the Mac's GPU with --lm-model, then the CPU with
+    each --lm-cpu-model (with --lm-model if none is given). --lm-device: that device and
+    --lm-model only."""
+    from yuragi.ime.zenz import DEFAULT_MODEL, cuda_devices, mps_devices
 
     model = args.lm_model or DEFAULT_MODEL
     device = args.lm_device
@@ -219,7 +220,8 @@ def lm_candidates(args) -> list[tuple[str, str]]:
         return [(device, model)]
     cpu_models = args.lm_cpu_model or [model]
     # On battery the GPU is not even asked: a CUDA context keeps a laptop's GPU awake.
-    gpus = [] if power.on_battery() else cuda_devices()
+    # A Mac's GPU is part of its processor and has no such cost.
+    gpus = [*([] if power.on_battery() else cuda_devices()), *mps_devices()]
     return [(d, model) for d in gpus] + [("cpu", m) for m in cpu_models]
 
 

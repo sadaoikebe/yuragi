@@ -412,7 +412,8 @@ zenz の選んだ文節にも効く）。学習では、確認が語の末尾ま
 
 1. torch から見える各 CUDA デバイスで GPU 用のモデル（`--lm-model`。インストール時に GPU 版 torch なら
    `Miwa-Keita/zenz-v2.5-medium` を固定リビジョンで取得）。
-2. CPU で CPU 用のモデル（`--lm-cpu-model`。繰り返し指定でき、指定順に試す。インストールでは常に
+2. Mac の GPU（MPS）で GPU 用のモデル。
+3. CPU で CPU 用のモデル（`--lm-cpu-model`。繰り返し指定でき、指定順に試す。インストールでは常に
    `Miwa-Keita/zenz-v2.5-small`）。指定が無ければ `--lm-model`。
 
 どれも間に合わなければ LM なしで動き、注意 `lm` を出す（`--require-lm` のときは最後の候補を遅くても使う）。
@@ -424,7 +425,7 @@ zenz の選んだ文節にも効く）。学習では、確認が語の末尾ま
   xsmall は使わない。Mozc 評価の正解数が LM なしと同じ（PERFORMANCE §2）。
 - **電池**: 電池で動いているとき（Windows が AC 電源なしと言うとき。電池の無い PC は常に AC）は、
   CUDA に触れずに CPU だけを試す。ノート PC の GPU は、CUDA を握ったプロセスがあると待機中も眠れない
-  （RTX 4060 Laptop で約 2 W。PERFORMANCE §8）。
+  （RTX 4060 Laptop で約 2 W。PERFORMANCE §8）。Mac の GPU はプロセッサの一部なので、電池でも試す。
 - **選び直し**（`engine.Engine.watch_device`。15 秒ごと）: 次のとき、打鍵が無くなるのを待って
   （DESIGN「見張り」の計画した再起動）エンジンを起動し直し、装置とモデルを選び直す。
   GPU を使っていて電池になった。電池で始めて GPU を試さなかった（GPU 用のモデルがある）のに AC になった。

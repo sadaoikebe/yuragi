@@ -153,6 +153,8 @@ class CalibrationLadderTest(unittest.TestCase):
 
         self.enterContext(mock.patch.object(zenz, "ZenzModel", FakeModel))
         self.enterContext(mock.patch.object(zenz, "cuda_devices", lambda: self.gpus))
+        self.mac = ()
+        self.enterContext(mock.patch.object(zenz, "mps_devices", lambda: self.mac))
         self.battery = False
         self.enterContext(mock.patch.object(power, "on_battery", lambda: self.battery))
         self.enterContext(mock.patch("sys.stderr", new_callable=io.StringIO))
@@ -175,6 +177,16 @@ class CalibrationLadderTest(unittest.TestCase):
         converter = self.build(self.GPU_INSTALL, {("cpu", "small"): 106})
         self.assertEqual((converter.model.device, converter.model.name), ("cpu", "small"))
         self.assertEqual(self.loaded, [("cpu", "small")])
+
+    def test_a_macs_gpu_is_tried_with_the_gpu_model_even_on_battery(self):
+        self.gpus, self.mac, self.battery = (), ("mps",), True
+        converter = self.build(self.GPU_INSTALL, {("mps", "medium"): 90})
+        self.assertEqual((converter.model.device, converter.model.name), ("mps", "medium"))
+        self.loaded.clear()
+        # An M1 (2026-11-28): medium on its GPU is over the limit, small on the CPU within it.
+        converter = self.build(self.GPU_INSTALL, {("mps", "medium"): 310, ("cpu", "small"): 165})
+        self.assertEqual((converter.model.device, converter.model.name), ("cpu", "small"))
+        self.assertEqual(self.loaded, [("mps", "medium"), ("cpu", "small")])
 
     def test_too_slow_a_pc_converts_without_the_lm(self):
         self.gpus = ()  # the CPU build of torch

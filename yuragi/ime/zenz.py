@@ -121,6 +121,16 @@ def cuda_devices() -> tuple[str, ...]:
         return ()
 
 
+def mps_devices() -> tuple[str, ...]:
+    """("mps",) where PyTorch can use the Mac's GPU (Apple silicon), else ()."""
+    import torch
+
+    try:
+        return ("mps",) if torch.backends.mps.is_available() else ()
+    except (AttributeError, RuntimeError, OSError):
+        return ()
+
+
 def usable_cpus() -> int | None:
     """The CPUs this process may use (os.process_cpu_count is Python 3.13+)."""
     count = getattr(os, "process_cpu_count", os.cpu_count)

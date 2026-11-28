@@ -13,6 +13,8 @@
 | Python・torch | 同梱ランタイム（Python 3.13.7、torch 2.9.1 の CPU 版と cu128 版） |
 | モデル | zenz-v2.5 の medium（約 3.1 億パラメータ）・small（約 9100 万）・xsmall（約 2600 万） |
 
+Apple シリコンの数字（§5）は、MacBook の Apple M1（高性能 4 コア・高効率 4 コア、メモリ 16GB）、macOS 27.2、Python 3.13.18、torch 2.9.1 で測った。
+
 「遅い PC」は、プロセスの使える CPU を絞って近づけた（§7）。古い CPU の実機では測っていない。
 
 ## 1. エンジンの経路での medium・CPU の仕事
@@ -104,6 +106,10 @@ CPU で速くする手として、GPT-2 の Conv1D を Linear に置き換え、
 | medium・CPU | 345（2 CPU で 509） |
 | small・CPU | 82（2 CPU で 156〜166、電池駆動中 106） |
 | small・CPU（GitHub Actions の Windows 試験機、4 vCPU） | 113 |
+| medium・MPS（Apple M1） | 310〜390 |
+| small・MPS（Apple M1） | 132〜137 |
+| medium・CPU（Apple M1） | 628〜639（8 スレッドで 672〜694） |
+| small・CPU（Apple M1） | 164〜171（8 スレッドで 181〜184、2 スレッドで 168〜171） |
 | （参考: 文脈なしでの較正）xsmall / small / medium・CPU | 23 / 90 / 290 |
 
 実際のエンジンの経路で 12 文を打ったとき:
@@ -116,6 +122,11 @@ CPU で速くする手として、GPT-2 の Conv1D を Linear に置き換え、
 - 実際の変換は較正の 2〜2.5 倍、最大で約 5.5 倍。
 - 採用の上限（較正 200 ms、普段の変換が 0.5 秒前後）と、期限（較正の 10 倍、最低 600 ms）は、この比による。
 - この PC では、GPU なら medium、CPU なら small が選ばれる。
+- Apple M1 では CPU の small が選ばれる。MPS の medium は上限を超える。
+- **MPS では small を試さない。** M1 で Mozc の評価の読み 200 件を左文脈付きで変換すると、small は MPS で中央値 149 ms・p90 351 ms、
+  CPU で中央値 159 ms・p90 193 ms。較正の差（135 と 165）ほどは速くならず、遅いときは CPU より遅い。
+  小さい計算を何度も呼ぶ確認の段では、MPS は呼び出しごとの手間が勝つ。
+- MPS と CPU で、変換の結果は同じ（small、読み 300 件、第 1 候補と候補の並び）。
 
 ## 6. 起動・待機まわりで見つかったこと
 

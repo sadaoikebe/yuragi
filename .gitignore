@@ -6,6 +6,7 @@ data/recordings/
 # by tools/eval/fetch_mozc_dict and verified against the manifest hashes.
 third_party/mozc_oss_dict/
 __pycache__/
+/.venv/
 *.pyc
 src/tip/build/
 dist/

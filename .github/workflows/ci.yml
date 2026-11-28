@@ -2,7 +2,8 @@
 # TIP の判断の試験。
 # Linux ではブローカーの中核を偽の土台で試し、Windows では MSVC で本物の
 # yuragi-broker.exe を作って、偽エンジン・偽 TIP と名前付きパイプで動かす。
-# C++ の単体試験は Linux で回し、Windows ではビルドだけする。32 ビットの TIP はリリースのときだけビルドする。
+# C++ の単体試験は Linux と macOS で回し、Windows ではビルドだけする。
+# macOS (Apple シリコン) では Linux と同じ試験を回す。32 ビットの TIP はリリースのときだけビルドする。
 name: ci
 
 on:
@@ -38,6 +39,28 @@ jobs:
       # 起動・応答・終了、パイプ、インストーラの脚本の実動作、設定と学習データの読み書き。
       # pwsh はランナーに入っている (tests/test_installer_scripts.py)。
       - name: Python の試験 (インストーラの脚本の実動作を含む。ブローカーのプロセスの試験は Windows で)
+        run: |
+          python -m unittest discover -v
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: ブローカーの中核と TIP の判断の試験 (CTest)
+        run: |
+          cmake -S src/broker -B build/broker -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/broker -j 4
+          ctest --test-dir build/broker --output-on-failure
+          cmake -S src/tip -B build/tip -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/tip -j 4
+          ctest --test-dir build/tip --output-on-failure
+
+      - name: Python の試験
         run: |
           python -m unittest discover -v
 
