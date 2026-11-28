@@ -595,8 +595,8 @@ private:
     long long last_ = 0;
 };
 
-// DESIGN「接続」: limit connect signals from activation and kana keystrokes.
-// Explicit retry and settings shortcuts bypass this gate.
+// DESIGN「接続」: limit connect signals from kana keystrokes. Each activation
+// starts a new gate; explicit retry and settings shortcuts bypass it.
 class ConnectGate {
 public:
     bool Allow(uint64_t now) {

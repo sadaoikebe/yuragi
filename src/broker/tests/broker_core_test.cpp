@@ -215,7 +215,7 @@ void ExitIsLoggedWithItsOwnFatalLine() {
     assert(Contains(f.log, "engine exited with code 9") && !Contains(f.log, "code 9 ("));
 }
 
-// Three exits within ten minutes: down, told once; "もう一度試す" starts it again.
+// Three exits in a row: down, told once; "もう一度試す" starts it again.
 void ThreeExitsStopThenRetry() {
     Fake f;
     Broker b(f);
@@ -238,17 +238,24 @@ void ThreeExitsStopThenRetry() {
     assert(f.starts == 5 && f.stops.size() == 1 && b.State() == EngineState::Starting);
 }
 
-void ExitAtWindowBoundaryDoesNotCount() {
+// An engine that stayed ready for ENGINE_EXIT_WINDOW_MS starts the count again;
+// time spent starting, or ready for less, does not.
+void OnlyAnEngineThatStayedReadyStartsTheCountAgain() {
     Fake f;
     Broker b(f);
     b.Start();
     b.OnEngineExit(21);
+    b.OnEngineExit(21);
+    Ready(b);
     Advance(b, f, ENGINE_EXIT_WINDOW_MS);
+    b.OnEngineExit(21);  // the first of a new count
+    Advance(b, f, ENGINE_EXIT_WINDOW_MS - 1);  // slow to fail, never ready
     b.OnEngineExit(21);
+    Ready(b);
+    Advance(b, f, ENGINE_EXIT_WINDOW_MS - 1);
+    assert(f.starts == 5 && f.stops.empty() && b.State() == EngineState::Ready);
     b.OnEngineExit(21);
-    assert(f.starts == 4 && f.stops.empty() && b.State() == EngineState::Starting);
-    b.OnEngineExit(21);
-    assert(f.starts == 4 && f.stops.size() == 1 && b.State() == EngineState::Failed);
+    assert(f.starts == 5 && f.stops == std::vector{Stop::Exited} && b.State() == EngineState::Failed);
 }
 
 void StartFailuresStopAndAllowRetry() {
@@ -312,17 +319,21 @@ void RepeatedHangsStopTheEngine() {
     }
 }
 
-// An engine that never gets ready is ended like a hung one (and counted).
-void AnEngineNotReadyInTimeIsEnded() {
+// An engine that never gets ready is ended like a hung one, and counted:
+// one that hangs at every start stops after ENGINE_MAX_EXITS, with the notice.
+void AnEngineNeverReadyIsEndedAndFinallyStopped() {
     Fake f;
     Broker b(f);
     b.Start();
-    Advance(b, f, ENGINE_START_MS - 1);
-    assert(f.kills == 0);
-    Advance(b, f, 1);
-    assert(f.kills == 1);
-    b.OnEngineExit(9);
-    assert(f.starts == 2 && b.State() == EngineState::Starting);
+    for (int attempt = 1; attempt <= ENGINE_MAX_EXITS; ++attempt) {
+        Advance(b, f, ENGINE_START_MS - 1);
+        assert(f.kills == attempt - 1);
+        Advance(b, f, 1);
+        assert(f.kills == attempt);
+        b.OnEngineExit(9);
+    }
+    assert(f.starts == ENGINE_MAX_EXITS && f.stops == std::vector{Stop::Hang});
+    assert(b.State() == EngineState::Failed);
 }
 
 // Retry while running (new settings): a fresh engine, not counted as an exit.
@@ -371,12 +382,12 @@ int main() {
     ExitWhileReadyResetsAndRestarts();
     ExitIsLoggedWithItsOwnFatalLine();
     ThreeExitsStopThenRetry();
-    ExitAtWindowBoundaryDoesNotCount();
+    OnlyAnEngineThatStayedReadyStartsTheCountAgain();
     StartFailuresStopAndAllowRetry();
     PlannedRestartsAreNotCounted();
     RepeatedHangsStopTheEngine();
     RetryWhileRunningRestartsWithoutCounting();
-    AnEngineNotReadyInTimeIsEnded();
+    AnEngineNeverReadyIsEndedAndFinallyStopped();
     std::puts("broker_core_test: all passed");
     return 0;
 }

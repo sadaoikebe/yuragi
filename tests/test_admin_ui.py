@@ -1,6 +1,8 @@
 """The management window's logic, without tkinter or a display."""
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -9,7 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from yuragi.ime import admin_ui, broker_client
+from yuragi.ime import admin_ui, broker_client, config, personal
 from yuragi.ime.admin_ui import SETTINGS, AdminModel
 from yuragi.chord.keys import Chord
 from yuragi.ime.bunsetsu import Candidate
@@ -52,10 +54,20 @@ class Base(unittest.TestCase):
 
 
 class SettingsTest(Base):
-    def test_absent_config_file_is_created_on_first_edit(self):
+    def test_saving_one_setting_keeps_what_another_version_wrote(self):
+        self.config.write_text('{"learning": "off", "a_later_setting": "x"}', encoding="utf-8")
         self.assertTrue(self.model.set_setting("lm_rescore", "使わない").ok)
+        self.assertTrue(self.model.reset_setting("learning").ok)
         self.assertEqual(json.loads(self.config.read_text(encoding="utf-8")),
-                         {"lm_rescore": False})
+                         {"a_later_setting": "x", "lm_rescore": False})
+
+    def test_a_broken_config_file_is_not_used_and_not_overwritten(self):
+        self.config.write_text('{"learning":', encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(config.load(self.config), config.DEFAULTS)
+        self.assertFalse(self.model.set_setting("lm_rescore", "使わない").ok)
+        self.assertFalse(self.model.reset_setting("learning").ok)
+        self.assertEqual(self.config.read_text(encoding="utf-8"), '{"learning":')
 
 
 
@@ -159,6 +171,15 @@ class WidgetLayerTest(Base):
         self.assertNotIn("prediction", json.loads(self.config.read_text(encoding="utf-8")))
         w._tab_changed()
         self.assertEqual(w.message.get(), "")  # a message stays with its tab
+        # A handler that raises (the file cannot be written) says so in the window.
+        with mock.patch.object(personal, "add_word", side_effect=PermissionError("読み取り専用")):
+            w.w_reading.set("おやゆび")
+            w.w_surface.set("親指")
+            try:
+                w._add_word()
+            except PermissionError as exc:
+                w.root.report_callback_exception(PermissionError, exc, None)
+        self.assertIn("読み取り専用", w.message.get())
         w._refresh_status()
 
 

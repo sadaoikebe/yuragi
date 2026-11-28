@@ -60,28 +60,34 @@ def read_words(path: Path) -> list[Word]:
     return scan_words(path)[0]
 
 
+def _lines(path: Path) -> list[bytes]:
+    try:
+        return Path(path).read_bytes().removeprefix(codecs.BOM_UTF8).splitlines()  # an editor's BOM
+    except FileNotFoundError:
+        return []
+
+
+def _word(raw: bytes) -> Word | None:
+    """The word on one line, or None for a blank line, a comment, or a line that is not a valid word."""
+    try:
+        row = json.loads(raw.decode("utf-8"))
+        word = Word(row["reading"], row["surface"], row.get("pos", "名詞"),
+                    int(row.get("cost", DEFAULT_COST)))
+        validate(word.reading, word.surface, word.pos)
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError):  # UnicodeError is a ValueError
+        return None
+    return word
+
+
 def scan_words(path: Path) -> tuple[list[Word], int]:
     """(valid rows as read_words, number of lines skipped as not a valid word)."""
-    try:
-        lines = Path(path).read_bytes().removeprefix(codecs.BOM_UTF8).splitlines()  # an editor's BOM
-    except FileNotFoundError:
-        return [], 0
     words: dict[tuple[str, str], Word] = {}
     skipped = 0
-    for raw in lines:
-        try:
-            line = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            skipped += 1
+    for raw in _lines(path):
+        if not raw.strip() or raw.lstrip().startswith(b"#"):
             continue
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        try:
-            row = json.loads(line)
-            word = Word(row["reading"], row["surface"], row.get("pos", "名詞"),
-                        int(row.get("cost", DEFAULT_COST)))
-            validate(word.reading, word.surface, word.pos)
-        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+        word = _word(raw)
+        if word is None:
             skipped += 1  # A hand edit gone wrong must not stop conversion (DESIGN「起動時の読み込み」).
             continue
         words.pop((word.reading, word.surface), None)
@@ -89,33 +95,38 @@ def scan_words(path: Path) -> tuple[list[Word], int]:
     return list(words.values()), skipped
 
 
-def write_words(path: Path, words: list[Word]) -> None:
-    """Replace the file atomically (a reader never sees half a file)."""
+def _replace(path: Path, reading: str, surface: str, word: Word | None) -> bool:
+    """Take the pair's rows out and put word, if any, at the end; True when a row was there.
+
+    Every other line stays as it is, comments and lines that are not valid
+    words included: they are the user's, who may yet correct them. The file
+    is replaced atomically (a reader never sees half a file)."""
     path = Path(path)
+    lines = _lines(path)
+    kept = [raw for raw in lines
+            if (w := _word(raw)) is None or (w.reading, w.surface) != (reading, surface)]
+    if word is not None:
+        kept.append(json.dumps({"reading": word.reading, "surface": word.surface, "pos": word.pos,
+                                "cost": word.cost}, ensure_ascii=False).encode("utf-8"))
+    elif len(kept) == len(lines):
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("".join(json.dumps(
-        {"reading": w.reading, "surface": w.surface, "pos": w.pos, "cost": w.cost},
-        ensure_ascii=False) + "\n" for w in words), encoding="utf-8")
+    tmp.write_bytes(b"".join(raw + b"\n" for raw in kept))
     os.replace(tmp, path)
+    return len(kept) - (word is not None) < len(lines)
 
 
 def add_word(path: Path, reading: str, surface: str, pos: str = "名詞",
              cost: int = DEFAULT_COST) -> Word:
     validate(reading, surface, pos)
     word = Word(reading, surface, pos, cost)
-    words = [w for w in read_words(path) if (w.reading, w.surface) != (reading, surface)]
-    write_words(path, words + [word])
+    _replace(path, reading, surface, word)
     return word
 
 
 def remove_word(path: Path, reading: str, surface: str) -> bool:
-    words = read_words(path)
-    kept = [w for w in words if (w.reading, w.surface) != (reading, surface)]
-    if len(kept) == len(words):
-        return False
-    write_words(path, kept)
-    return True
+    return _replace(path, reading, surface, None)
 
 
 class PersonalLexicon:

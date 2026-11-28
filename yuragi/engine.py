@@ -82,6 +82,12 @@ def where(exc: BaseException) -> str:
     return f"{type(exc).__name__} at {path}"
 
 
+def encode_line(message: dict) -> bytes:
+    """One message as a line. Half a surrogate pair (a hand-edited word, a cut
+    emoji) becomes "?": text that cannot be sent must not end the engine."""
+    return (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8", "replace")
+
+
 class Channel:
     """The engine's half of the pipe: the real stdin and stdout, reserved for messages.
 
@@ -107,7 +113,7 @@ class Channel:
         self._warnings: list[str] = []
 
     def send(self, message: dict) -> None:
-        data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
+        data = encode_line(message)
         with self._lock:
             self._out.write(data)
 

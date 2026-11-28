@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest import mock
 
-from yuragi.engine import Engine, argument_parser
+from yuragi.engine import Engine, argument_parser, encode_line
 from yuragi.chord.keys import DEFAULT_KEYBOARD, KEYBOARDS, VK_OEM_102, Chord
 from yuragi.ime import config, server
 from yuragi.ime.keymap import load_keymap
@@ -211,6 +211,10 @@ class KeyDispatchTest(EngineCase):
 
 class RequestBarrierTest(EngineCase):
     """DESIGN「要求 1 件ごとの防壁」: what goes wrong stays inside one request."""
+
+    def test_text_that_cannot_be_sent_does_not_end_the_engine(self):
+        # Half a surrogate pair, as a hand-edited word list or a cut emoji leaves it.
+        self.assertEqual(json.loads(encode_line({"candidates": ["\ud83d"]})), {"candidates": ["?"]})
 
     @mock.patch("yuragi.engine.log")
     def test_a_failing_request_restarts_only_that_session(self, _log):

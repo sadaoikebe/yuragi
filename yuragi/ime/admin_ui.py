@@ -344,6 +344,7 @@ class AdminWindow:
         self._comboboxes = []
         # Pixel sizes below are at 96 dpi; the window is dpi aware (declare_dpi_aware).
         self.scale = root.winfo_fpixels("1i") / 96
+        root.report_callback_exception = self._failed
         root.title("ゆらぎ 設定")
         if sys.platform == "win32":  # .ico is a Windows icon; Tk elsewhere keeps its own
             root.iconbitmap(default=str(ICON))  # default: the dialogs get it too
@@ -452,6 +453,12 @@ class AdminWindow:
         self.message.set(outcome.message)
         self.message_label.configure(foreground="" if outcome.ok else "red")
         self.refresh()
+
+    def _failed(self, _kind, error, _traceback):
+        """A button's handler raised, e.g. a file could not be written (disk
+        full, read-only). The window has no console to print to: say it here."""
+        self.message.set(f"できませんでした（{error}）")
+        self.message_label.configure(foreground="red")
 
     def _tab_changed(self):
         # A message belongs to the tab it came from.

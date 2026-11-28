@@ -388,6 +388,17 @@ static int CompareEngineKeys() {
     return std::cin.eof() && checked > 0 ? 0 : 1;
 }
 
+// DESIGN「接続」: keystrokes try the connection at most once per CONNECT_MIN_INTERVAL_MS;
+// a new gate (a new activation) tries at once.
+void ConnectAttemptsKeepTheirInterval() {
+    ConnectGate gate;
+    assert(gate.Allow(5000));
+    assert(!gate.Allow(5000 + CONNECT_MIN_INTERVAL_MS - 1));
+    assert(gate.Allow(5000 + CONNECT_MIN_INTERVAL_MS));
+    gate = {};
+    assert(gate.Allow(5000 + CONNECT_MIN_INTERVAL_MS + 1));
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--key-cases") return CompareEngineKeys();
     ReadingReplies();
@@ -397,6 +408,7 @@ int main(int argc, char** argv) {
     KeysSentInPlace();
     CharacterKeysComeWithTheTable();
     OrderOfReplies();
+    ConnectAttemptsKeepTheirInterval();
     CarryFollowsOnlyTheReplayAndItsRoot();
     HeldKeysRespectScopeAndSystemKeys();
     HeldKeysDrainInOrderAfterTab();

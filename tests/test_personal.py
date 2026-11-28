@@ -31,6 +31,17 @@ class PersonalFileTest(TempFile):
         words, skipped = scan_words(self.path)
         self.assertEqual(([w.surface for w in words], skipped), (["花歌"], 3))
 
+    def test_registering_and_removing_keep_the_lines_that_are_not_theirs(self):
+        mine = ["# メモ", '{"reading":"かか","surface":"佳歌","pos":"名刺"}', '{"reading":"かか"']
+        self.path.write_text("\n".join([*mine, '{"reading":"かか","surface":"花歌"}']) + "\n", encoding="utf-8")
+        add_word(self.path, "きき", "機器")
+        add_word(self.path, "かか", "花歌", cost=100)  # the row is replaced, not doubled
+        self.assertEqual([(w.surface, w.cost) for w in read_words(self.path)], [("機器", DEFAULT_COST), ("花歌", 100)])
+        self.assertTrue(remove_word(self.path, "かか", "花歌"))
+        self.assertFalse(remove_word(self.path, "かか", "花歌"))
+        self.assertEqual(self.path.read_text(encoding="utf-8").splitlines()[:3], mine)
+        self.assertEqual([w.surface for w in read_words(self.path)], ["機器"])
+
     def test_a_word_that_cannot_be_typed_is_not_registered(self):
         for reading, surface, pos in (("oyayubi", "親指", "名詞"), ("オヤユビ", "親指", "名詞"),
                                       ("おやゆび", "", "名詞"), ("おやゆび", "親指", "動詞")):

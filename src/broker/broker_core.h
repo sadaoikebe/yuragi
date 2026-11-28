@@ -16,8 +16,8 @@
 namespace broker {
 
 // DESIGN「定数」.
-constexpr int ENGINE_MAX_EXITS = 3;  // this many exits within the window: stop
-constexpr int64_t ENGINE_EXIT_WINDOW_MS = 600000;
+constexpr int ENGINE_MAX_EXITS = 3;  // this many exits in a row: stop
+constexpr int64_t ENGINE_EXIT_WINDOW_MS = 600000;  // ready this long: the count starts again
 constexpr int64_t ENGINE_HANG_MS = 5000;
 constexpr int64_t ENGINE_START_MS = 600000;  // until ready; a first start builds the dictionary cache
 // An engine that was ready and exits with this code asks to be started again
@@ -96,8 +96,9 @@ private:
     EngineState state_ = EngineState::Starting;
     std::map<ClientId, Client> clients_;
     std::deque<InFlight> in_flight_;
-    std::deque<int64_t> exits_;  // within ENGINE_EXIT_WINDOW_MS
+    int exits_ = 0;  // in a row (DESIGN「見張り」)
     int64_t started_ = 0;  // when the current engine was started
+    int64_t ready_at_ = 0;  // when it became ready
     bool restarting_ = false;  // killed on purpose to start again (Retry while running)
     bool killing_ = false;
     Stop kill_reason_ = Stop::None;

@@ -356,6 +356,17 @@ function Send-Quit {
         $conn.Pipe.Dispose()
     }
 }
+# インストール先から動いているもの (設定ウィンドウなど) を終わらせる。動いたままだと、その版のフォルダを
+# 動かせず、共有物を消し切れない。
+function Stop-Installed {
+    $session = (Get-Process -Id $PID).SessionId
+    $prefix = "$Local\"
+    foreach ($p in @(Get-Process | Where-Object { $_.SessionId -eq $session -and $_.Path -and
+            $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        [void]$p.WaitForExit(5000)
+    }
+}
 function Stop-Broker {
     Send-Quit
     $session = (Get-Process -Id $PID).SessionId
@@ -367,6 +378,7 @@ function Stop-Broker {
             if (-not $b.WaitForExit(5000)) { Fail "ブローカー (PID $($b.Id)) を終了できませんでした。" }
         }
     }
+    Stop-Installed
 }
 
 # 試運転を終えたファイルをインストール先に移す。
@@ -493,7 +505,16 @@ foreach ($kind in @("runtime", "dict", "model")) {
 if ($cacheName) { $cleanup += @(Get-ChildItem -LiteralPath $script:Cache -File | Where-Object { $_.Name -ne $cacheName }) }
 if (Test-Path -LiteralPath $StagingRoot) { $cleanup += @(Get-Item -LiteralPath $StagingRoot) }
 $cleanup += @(Get-Item -LiteralPath (Join-Path $Version "download"), (Join-Path $Version "selftest.txt") -ErrorAction SilentlyContinue)
-foreach ($item in $cleanup) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+# 名前を変えてから消す: 消しかけで止まっても、完成品の名前では残らない (New-Shared は名前で再利用を決める)。
+foreach ($item in $cleanup) {
+    $path = $item.FullName
+    if ($item.Name -notlike "*.partial") {
+        $path = "$path.partial"
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+        try { Rename-Item -LiteralPath $item.FullName -NewName "$($item.Name).partial" } catch { continue }
+    }
+    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Say ""
 Say "ゆらぎ $Tag のインストールが完了しました。"

@@ -66,10 +66,12 @@ jobs:
           cmake --build build/tip --config Release --target yuragi_tip
           if ($LASTEXITCODE -ne 0) { throw "TIP build failed" }
 
-      - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験)
+      # インストーラの脚本は、利用者が使う Windows PowerShell 5.1 で動かす。設定ウィンドウの二重起動の試験は Windows だけ。
+      - name: ブローカーのプロセスの試験 (名前付きパイプ・1 利用者に 1 つ・自己試験)、インストーラの脚本、設定ウィンドウ
         shell: pwsh
         env:
           YURAGI_BROKER: ${{ github.workspace }}\dist\yuragi-broker.exe
+          YURAGI_PWSH: powershell
         run: |
-          python -m unittest -v tests.test_broker
-          if ($LASTEXITCODE -ne 0) { throw "broker tests failed" }
+          python -m unittest -v tests.test_broker tests.test_installer_scripts tests.test_admin_ui
+          if ($LASTEXITCODE -ne 0) { throw "tests failed" }

@@ -76,8 +76,7 @@ void Broker::StartEngine() {
     last_fatal_.clear();  // so is its fatal line
     SetState(EngineState::Starting);
     started_ = platform_.Now();
-    Log("starting the engine (" + std::to_string(exits_.size()) + " exit(s) in the last " +
-        std::to_string(ENGINE_EXIT_WINDOW_MS / 60000) + " minutes)");
+    Log("starting the engine (" + std::to_string(exits_) + " exit(s) in a row)");
     std::string error;
     if (!platform_.StartEngine(error)) {
         Log("the engine could not be started: " + error);
@@ -179,6 +178,7 @@ void Broker::OnEngineLine(const std::string& line) {
         if (msg.Get("keymap").kind == Value::Object)
             UpdateKeymap(tip_json::Stringify(msg.Get("keymap")));
         state_ = EngineState::Ready;
+        ready_at_ = platform_.Now();
         for (const auto& [id, client] : clients_)
             if (client.hello)
                 platform_.WriteEngine("{\"op\":\"open\",\"sid\":" + std::to_string(id) + "}");
@@ -251,8 +251,9 @@ void Broker::Kill(Stop reason) {
 void Broker::OnEngineExit(int code) { EngineGone(code); }
 
 // DESIGN「見張り」: an engine that ends is started again at once, unless it is the
-// ENGINE_MAX_EXITS-th exit within ENGINE_EXIT_WINDOW_MS: then it stays down
-// and the user is told once. "もう一度試す" (Retry) starts it again.
+// ENGINE_MAX_EXITS-th exit in a row: then it stays down and the user is told
+// once. An engine that stayed ready for ENGINE_EXIT_WINDOW_MS starts the count
+// again. "もう一度試す" (Retry) starts the engine again.
 void Broker::EngineGone(int code) {
     bool was_ready = state_ == EngineState::Ready;
     Log("engine exited with code " + std::to_string(code) + (was_ready ? "" : " before ready") +
@@ -260,12 +261,8 @@ void Broker::EngineGone(int code) {
     bool restart = restarting_ || (was_ready && code == ENGINE_RESTART_CODE);
     restarting_ = false;
     Stop reason = killing_ && kill_reason_ != Stop::None ? kill_reason_ : Stop::Exited;
-    if (!restart) {
-        int64_t now = platform_.Now();
-        exits_.push_back(now);
-        while (now - exits_.front() >= ENGINE_EXIT_WINDOW_MS) exits_.pop_front();
-        restart = (int)exits_.size() < ENGINE_MAX_EXITS;
-    }
+    if (was_ready && platform_.Now() - ready_at_ >= ENGINE_EXIT_WINDOW_MS) exits_ = 0;
+    if (!restart) restart = ++exits_ < ENGINE_MAX_EXITS;
     // The key being processed is lost with the engine; so is every composition.
     const char* next = restart ? "starting" : "down";
     for (const InFlight& f : in_flight_)
@@ -283,7 +280,7 @@ void Broker::EngineGone(int code) {
 
 void Broker::Retry() {
     Log("retry requested");
-    exits_.clear();
+    exits_ = 0;
     if (state_ == EngineState::Failed) {
         platform_.ClearStopped();
         StartEngine();

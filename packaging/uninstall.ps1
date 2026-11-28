@@ -98,6 +98,13 @@ foreach ($b in @(Get-Process -Name "yuragi-broker" -ErrorAction SilentlyContinue
         if (-not $b.WaitForExit(5000)) { Fail "ブローカー (PID $($b.Id)) を終了できませんでした。" }
     }
 }
+# インストール先から動いているもの (設定ウィンドウなど) も終わらせる。動いたままだと消し切れない。
+$prefix = "$Local\"
+foreach ($p in @(Get-Process | Where-Object { $_.SessionId -eq $session -and $_.Path -and
+        $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })) {
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    [void]$p.WaitForExit(5000)
+}
 Say "  OK"
 
 # 管理者権限で DLL の登録を解除し、プログラムのファイルを削除する。
@@ -124,6 +131,7 @@ if (Test-Path -LiteralPath $ProductKey) { Remove-Item -LiteralPath $ProductKey -
 $userTip = "HKCU:\SOFTWARE\Microsoft\CTF\TIP\$Clsid"
 if (Test-Path -LiteralPath $userTip) { Remove-Item -LiteralPath $userTip -Recurse -Force }
 Remove-Item -LiteralPath $Local -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $Local) { Fail "プログラムのフォルダを消し切れませんでした: $Local  使っているアプリを閉じて、もう一度実行してください。" }
 if ($RemoveData -and (Test-Path -LiteralPath $UserData)) {
     Remove-Item -LiteralPath $UserData -Recurse -Force
     Say "  削除: $UserData"

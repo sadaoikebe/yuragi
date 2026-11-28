@@ -1276,6 +1276,7 @@ public:
         link_state_ = Link::Connecting;  // activated again: the last activation's link is gone
         broker_state_.clear();
         link_.Start(hwnd_, kLinkMessage);
+        connect_gate_ = {};  // the interval is between the keystrokes of one activation
         TryConnect();  // DESIGN「接続」: one of the four moments a connection is tried
         CheckScope();
         Log(L"ActivateEx client=%u", (unsigned)tid);
